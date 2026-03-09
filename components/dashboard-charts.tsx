@@ -52,7 +52,7 @@ export function StockByCategoryChart() {
   return (
     <Card className="h-full min-h-[300px] sm:min-h-[340px] flex flex-col">
       <CardHeader className="pb-2">
-        <CardTitle className="text-base font-semibold text-foreground">Stock by Category</CardTitle>
+        <CardTitle className="text-base font-semibold text-foreground">Inventory by Category</CardTitle>
       </CardHeader>
       <CardContent className="flex-1 flex flex-col min-h-0">
         <ChartContainer

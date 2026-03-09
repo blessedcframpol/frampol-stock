@@ -106,6 +106,7 @@ export function InventoryContent() {
   const [addName, setAddName] = useState("")
   const [addType, setAddType] = useState<ItemType>("Starlink Kit")
   const [addCategory, setAddCategory] = useState<string>("")
+  const [addNewCategoryName, setAddNewCategoryName] = useState("")
   const [addLocation, setAddLocation] = useState("Warehouse A")
   const [addPurchaseDate, setAddPurchaseDate] = useState("")
   const [addWarrantyEnd, setAddWarrantyEnd] = useState("")
@@ -119,6 +120,11 @@ export function InventoryContent() {
   const groupsInCategory = useMemo(
     () => (selectedCategory ? groupInventoryItems(inventory.filter((i) => i.category === selectedCategory)) : []),
     [inventory, selectedCategory]
+  )
+
+  const addCategoryOptions = useMemo(
+    () => [...new Set([...Object.keys(CATEGORY_LABELS), ...categories])].sort(),
+    [categories]
   )
 
   const filteredGroups = useMemo(() => {
@@ -167,25 +173,145 @@ export function InventoryContent() {
             <h1 className="text-xl md:text-2xl font-bold text-foreground tracking-tight text-balance">Inventory</h1>
             <p className="text-sm text-muted-foreground mt-1">Select a category to view product types and items.</p>
           </div>
-          <div className="flex rounded-md border border-border overflow-hidden shrink-0">
-            <Button
-              variant="secondary"
-              size="sm"
-              className="rounded-none h-9 px-3 text-foreground gap-1.5"
-              onClick={() => {}}
-            >
-              <Layers className="w-4 h-4" />
-              <span className="text-xs font-medium hidden sm:inline">By category</span>
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="rounded-none h-9 px-3 text-foreground gap-1.5"
-              onClick={() => setSelectedCategory("__flat__")}
-            >
-              <List className="w-4 h-4" />
-              <span className="text-xs font-medium hidden sm:inline">All types</span>
-            </Button>
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="flex rounded-md border border-border overflow-hidden">
+              <Button
+                variant="secondary"
+                size="sm"
+                className="rounded-none h-9 px-3 text-foreground gap-1.5"
+                onClick={() => {}}
+              >
+                <Layers className="w-4 h-4" />
+                <span className="text-xs font-medium hidden sm:inline">By category</span>
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="rounded-none h-9 px-3 text-foreground gap-1.5"
+                onClick={() => setSelectedCategory("__flat__")}
+              >
+                <List className="w-4 h-4" />
+                <span className="text-xs font-medium hidden sm:inline">All types</span>
+              </Button>
+            </div>
+            <Dialog open={addDialogOpen} onOpenChange={(open) => { setAddDialogOpen(open); if (!open) { setAddNewCategoryName(""); setAddCategory(""); } }}>
+              <DialogTrigger asChild>
+                <Button size="sm" className="bg-primary text-primary-foreground hover:bg-primary/90">
+                  <Plus className="w-4 h-4 mr-1.5" />
+                  <span className="hidden sm:inline">Add Inventory</span>
+                  <span className="sm:hidden">Add</span>
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="bg-card text-card-foreground max-w-[calc(100vw-2rem)] sm:max-w-lg">
+                <DialogHeader>
+                  <DialogTitle className="text-foreground">Add New Item</DialogTitle>
+                </DialogHeader>
+                <form
+                  className="flex flex-col gap-4 py-4"
+                  onSubmit={(e) => {
+                    e.preventDefault()
+                    const effectiveCategory = addCategory === "__new__" ? addNewCategoryName.trim() : addCategory
+                    if (!addSerial.trim() || !addName.trim()) return
+                    if (!effectiveCategory) {
+                      toast.error("Please select or enter a category")
+                      return
+                    }
+                    const dateAdded = new Date().toISOString().slice(0, 10)
+                    addItem({
+                      serialNumber: addSerial.trim(),
+                      name: addName.trim(),
+                      itemType: addType,
+                      category: effectiveCategory,
+                      status: "In Stock",
+                      dateAdded,
+                      location: addLocation,
+                      purchaseDate: addPurchaseDate.trim() || undefined,
+                      warrantyEndDate: addWarrantyEnd.trim() || undefined,
+                    })
+                    setAddSerial("")
+                    setAddName("")
+                    setAddType("Starlink Kit")
+                    setAddCategory("")
+                    setAddNewCategoryName("")
+                    setAddLocation("Warehouse A")
+                    setAddPurchaseDate("")
+                    setAddWarrantyEnd("")
+                    setAddDialogOpen(false)
+                    toast.success("Item added to inventory")
+                  }}
+                >
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="flex flex-col gap-2 sm:col-span-2">
+                      <Label className="text-foreground">Serial Number</Label>
+                      <Input placeholder="e.g., SL-2024-00146" className="font-mono bg-card text-foreground border-border" value={addSerial} onChange={(e) => setAddSerial(e.target.value)} required />
+                    </div>
+                    <div className="flex flex-col gap-2 sm:col-span-2">
+                      <Label className="text-foreground">Item Name</Label>
+                      <Input placeholder="e.g., Starlink Standard Kit v3" className="bg-card text-foreground border-border" value={addName} onChange={(e) => setAddName(e.target.value)} required />
+                    </div>
+                    <div className="flex flex-col gap-2 sm:col-span-2">
+                      <Label className="text-foreground">Category</Label>
+                      <Select value={addCategory || ""} onValueChange={(v) => setAddCategory(v)}>
+                        <SelectTrigger className="bg-card text-foreground border-border">
+                          <SelectValue placeholder="Select category" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {addCategoryOptions.map((cat) => (
+                            <SelectItem key={cat} value={cat}>{CATEGORY_LABELS[cat] ?? cat}</SelectItem>
+                          ))}
+                          <SelectItem value="__new__">Add new category...</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      {addCategory === "__new__" && (
+                        <Input
+                          placeholder="Enter new category name"
+                          className="bg-card text-foreground border-border"
+                          value={addNewCategoryName}
+                          onChange={(e) => setAddNewCategoryName(e.target.value)}
+                        />
+                      )}
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      <Label className="text-foreground">Item Type</Label>
+                      <Select value={addType} onValueChange={(v) => setAddType(v as ItemType)}>
+                        <SelectTrigger className="bg-card text-foreground border-border">
+                          <SelectValue placeholder="Select type" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {itemTypes.map((type) => (
+                            <SelectItem key={type} value={type}>{type}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      <Label className="text-foreground">Location</Label>
+                      <Select value={addLocation} onValueChange={setAddLocation}>
+                        <SelectTrigger className="bg-card text-foreground border-border">
+                          <SelectValue placeholder="Select location" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {LOCATIONS.map((loc) => (
+                            <SelectItem key={loc} value={loc}>{loc}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      <Label className="text-foreground">Purchase Date (optional)</Label>
+                      <Input type="date" className="bg-card text-foreground border-border" value={addPurchaseDate} onChange={(e) => setAddPurchaseDate(e.target.value)} />
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      <Label className="text-foreground">Warranty / support end (optional)</Label>
+                      <Input type="date" className="bg-card text-foreground border-border" value={addWarrantyEnd} onChange={(e) => setAddWarrantyEnd(e.target.value)} />
+                    </div>
+                  </div>
+                  <div className="flex justify-end pt-2">
+                    <Button type="submit" className="bg-primary text-primary-foreground hover:bg-primary/90">Add Item</Button>
+                  </div>
+                </form>
+              </DialogContent>
+            </Dialog>
           </div>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
@@ -271,7 +397,7 @@ export function InventoryContent() {
               <Download className="w-4 h-4 mr-1.5" />
               <span className="hidden sm:inline">Export</span>
             </Button>
-            <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
+            <Dialog open={addDialogOpen} onOpenChange={(open) => { setAddDialogOpen(open); if (!open) { setAddNewCategoryName(""); setAddCategory(""); } }}>
               <DialogTrigger asChild>
                 <Button size="sm" className="bg-primary text-primary-foreground hover:bg-primary/90">
                   <Plus className="w-4 h-4 mr-1.5" />
@@ -287,13 +413,18 @@ export function InventoryContent() {
                   className="flex flex-col gap-4 py-4"
                   onSubmit={(e) => {
                     e.preventDefault()
+                    const effectiveCategory = addCategory === "__new__" ? addNewCategoryName.trim() : addCategory
                     if (!addSerial.trim() || !addName.trim()) return
+                    if (!effectiveCategory) {
+                      toast.error("Please select or enter a category")
+                      return
+                    }
                     const dateAdded = new Date().toISOString().slice(0, 10)
                     addItem({
                       serialNumber: addSerial.trim(),
                       name: addName.trim(),
                       itemType: addType,
-                      category: addCategory || undefined,
+                      category: effectiveCategory,
                       status: "In Stock",
                       dateAdded,
                       location: addLocation,
@@ -304,6 +435,7 @@ export function InventoryContent() {
                     setAddName("")
                     setAddType("Starlink Kit")
                     setAddCategory("")
+                    setAddNewCategoryName("")
                     setAddLocation("Warehouse A")
                     setAddPurchaseDate("")
                     setAddWarrantyEnd("")
@@ -311,28 +443,37 @@ export function InventoryContent() {
                     toast.success("Item added to inventory")
                   }}
                 >
-                  <div className="flex flex-col gap-2">
-                    <Label className="text-foreground">Serial Number</Label>
-                    <Input placeholder="e.g., SL-2024-00146" className="font-mono bg-card text-foreground border-border" value={addSerial} onChange={(e) => setAddSerial(e.target.value)} required />
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    <Label className="text-foreground">Item Name</Label>
-                    <Input placeholder="e.g., Starlink Standard Kit v3" className="bg-card text-foreground border-border" value={addName} onChange={(e) => setAddName(e.target.value)} required />
-                  </div>
-                    <div className="flex flex-col gap-2">
-                      <Label className="text-foreground">Category (optional)</Label>
-                      <Select value={addCategory || "none"} onValueChange={(v) => setAddCategory(v === "none" ? "" : v)}>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="flex flex-col gap-2 sm:col-span-2">
+                      <Label className="text-foreground">Serial Number</Label>
+                      <Input placeholder="e.g., SL-2024-00146" className="font-mono bg-card text-foreground border-border" value={addSerial} onChange={(e) => setAddSerial(e.target.value)} required />
+                    </div>
+                    <div className="flex flex-col gap-2 sm:col-span-2">
+                      <Label className="text-foreground">Item Name</Label>
+                      <Input placeholder="e.g., Starlink Standard Kit v3" className="bg-card text-foreground border-border" value={addName} onChange={(e) => setAddName(e.target.value)} required />
+                    </div>
+                    <div className="flex flex-col gap-2 sm:col-span-2">
+                      <Label className="text-foreground">Category</Label>
+                      <Select value={addCategory || ""} onValueChange={(v) => setAddCategory(v)}>
                         <SelectTrigger className="bg-card text-foreground border-border">
-                          <SelectValue placeholder="None" />
+                          <SelectValue placeholder="Select category" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="none">None</SelectItem>
-                          <SelectItem value="Starlink">Starlink</SelectItem>
-                          <SelectItem value="Fortinet">Fortinet</SelectItem>
+                          {addCategoryOptions.map((cat) => (
+                            <SelectItem key={cat} value={cat}>{CATEGORY_LABELS[cat] ?? cat}</SelectItem>
+                          ))}
+                          <SelectItem value="__new__">Add new category...</SelectItem>
                         </SelectContent>
                       </Select>
+                      {addCategory === "__new__" && (
+                        <Input
+                          placeholder="Enter new category name"
+                          className="bg-card text-foreground border-border"
+                          value={addNewCategoryName}
+                          onChange={(e) => setAddNewCategoryName(e.target.value)}
+                        />
+                      )}
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="flex flex-col gap-2">
                       <Label className="text-foreground">Item Type</Label>
                       <Select value={addType} onValueChange={(v) => setAddType(v as ItemType)}>
@@ -359,8 +500,6 @@ export function InventoryContent() {
                         </SelectContent>
                       </Select>
                     </div>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="flex flex-col gap-2">
                       <Label className="text-foreground">Purchase Date (optional)</Label>
                       <Input type="date" className="bg-card text-foreground border-border" value={addPurchaseDate} onChange={(e) => setAddPurchaseDate(e.target.value)} />
@@ -370,7 +509,9 @@ export function InventoryContent() {
                       <Input type="date" className="bg-card text-foreground border-border" value={addWarrantyEnd} onChange={(e) => setAddWarrantyEnd(e.target.value)} />
                     </div>
                   </div>
-                  <Button type="submit" className="mt-2 bg-primary text-primary-foreground hover:bg-primary/90">Add Item</Button>
+                  <div className="flex justify-end pt-2">
+                    <Button type="submit" className="bg-primary text-primary-foreground hover:bg-primary/90">Add Item</Button>
+                  </div>
                 </form>
               </DialogContent>
             </Dialog>

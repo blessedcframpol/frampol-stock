@@ -48,7 +48,16 @@ export async function POST(request: NextRequest) {
     const productName = typeof scanType === "string" ? scanType.trim() : ""
     if (!productName) {
       return NextResponse.json(
-        { error: "Product or item type is required" },
+        { error: "Product or item type (what's being scanned in) is required" },
+        { status: 400 }
+      )
+    }
+
+    const validMovementTypes = ["Inbound", "Sale", "POC Out", "POC Return", "Rentals", "Transfer", "Dispose"] as const
+    const movement = typeof movementType === "string" ? movementType.trim() : ""
+    if (!movement || !validMovementTypes.includes(movement as (typeof validMovementTypes)[number])) {
+      return NextResponse.json(
+        { error: "Stock movement type is required" },
         { status: 400 }
       )
     }
@@ -92,8 +101,8 @@ export async function POST(request: NextRequest) {
       const duplicates = unique.filter((s) => existingSet.has(s))
       let records: { id: string; serialNumber: string; scanType: string; scannedAt: string; movementType?: string }[] = []
       if (toInsert.length > 0) {
-        const fromDb = await addBulkQuickScansToSupabase(toInsert, productName, movementType, outbound)
-        records = fromDb.length > 0 ? fromDb : addBulkQuickScans(toInsert, productName, movementType, outbound)
+        const fromDb = await addBulkQuickScansToSupabase(toInsert, productName, movement, outbound)
+        records = fromDb.length > 0 ? fromDb : addBulkQuickScans(toInsert, productName, movement, outbound)
       }
       return NextResponse.json(
         { recorded: records.length, records, duplicates, duplicateCount: duplicates.length },
@@ -117,8 +126,8 @@ export async function POST(request: NextRequest) {
         { status: 200 }
       )
     }
-    const fromDb = await addQuickScanToSupabase(trimmed, productName, movementType, outbound)
-    const record = fromDb ?? addQuickScan(trimmed, productName, movementType, outbound)
+    const fromDb = await addQuickScanToSupabase(trimmed, productName, movement, outbound)
+    const record = fromDb ?? addQuickScan(trimmed, productName, movement, outbound)
     return NextResponse.json(record, { status: 201 })
   } catch (error) {
     console.error("Quick scan POST error:", error)

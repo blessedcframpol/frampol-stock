@@ -1,10 +1,5 @@
-import { DashboardShell } from "@/components/dashboard-shell"
-import { StockMovementContent } from "@/components/stock-movement-content"
+import { redirect } from "next/navigation"
 
 export default function StockMovementPage() {
-  return (
-    <DashboardShell>
-      <StockMovementContent />
-    </DashboardShell>
-  )
+  redirect("/inventory/movement")
 }

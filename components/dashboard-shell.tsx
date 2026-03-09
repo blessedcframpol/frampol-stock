@@ -7,13 +7,14 @@ import { useTheme } from "next-themes"
 import {
   LayoutDashboard,
   Package,
-  ArrowRightLeft,
   Users,
   BarChart3,
   MessageSquare,
   Settings,
   Satellite,
   ChevronLeft,
+  ChevronRight,
+  ChevronDown,
   Search,
   Bell,
   Menu,
@@ -49,13 +50,17 @@ import { clients, appUsers } from "@/lib/data"
 import { runSearch } from "@/lib/search"
 import { SearchSuggestions } from "@/components/search-suggestions"
 
+const inventoryChildren = [
+  { href: "/inventory/dispatched", label: "Dispatched" },
+  { href: "/inventory/movement", label: "Record movement" },
+]
+
 const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/search", label: "Search", icon: Search },
+  { href: "/inventory", label: "Inventory", icon: Package, children: inventoryChildren },
   { href: "/scan-history", label: "Scan history", icon: History },
   { href: "/alerts", label: "Alerts", icon: Bell },
-  { href: "/inventory", label: "Inventory", icon: Package },
-  { href: "/stock-movement", label: "Stock Movement", icon: ArrowRightLeft },
   { href: "/clients", label: "Clients", icon: Users },
   { href: "/reports", label: "Reports", icon: BarChart3 },
   { href: "/requests", label: "Requests", icon: MessageSquare, badge: 3 },
@@ -67,6 +72,7 @@ const bottomNavItems = [
 
 function SidebarNav({ onNavigate, alertCount = 0 }: { onNavigate?: () => void; alertCount?: number }) {
   const pathname = usePathname()
+  const [inventoryExpanded, setInventoryExpanded] = useState(true)
 
   return (
     <>
@@ -75,8 +81,74 @@ function SidebarNav({ onNavigate, alertCount = 0 }: { onNavigate?: () => void; a
           Main Menu
         </span>
         {navItems.map((item) => {
-          const isActive = pathname === item.href
+          const hasChildren = "children" in item && item.children && item.children.length > 0
+          const isParentActive = item.href === "/inventory" ? pathname.startsWith("/inventory") : pathname === item.href
           const badge = item.href === "/alerts" ? alertCount : item.badge
+
+          if (hasChildren && item.children) {
+            const isExpanded = item.href === "/inventory" ? inventoryExpanded : false
+            return (
+              <div key={item.href} className="flex flex-col gap-0.5">
+                <div
+                  className={cn(
+                    "flex items-center gap-1 rounded-lg text-sm font-medium transition-colors",
+                    isParentActive
+                      ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                      : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                  )}
+                >
+                  <Link
+                    href={item.href}
+                    onClick={onNavigate}
+                    className="flex flex-1 min-w-0 items-center gap-3 px-3 py-2.5 rounded-lg"
+                  >
+                    <item.icon className="w-[18px] h-[18px] shrink-0" />
+                    <span className="flex-1 truncate">{item.label}</span>
+                  </Link>
+                  {item.href === "/inventory" && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault()
+                        setInventoryExpanded((v) => !v)
+                      }}
+                      className="p-2 rounded-md hover:bg-sidebar-primary/20 shrink-0"
+                      aria-label={isExpanded ? "Collapse" : "Expand"}
+                    >
+                      {isExpanded ? (
+                        <ChevronDown className="w-4 h-4 opacity-70" />
+                      ) : (
+                        <ChevronRight className="w-4 h-4 opacity-70" />
+                      )}
+                    </button>
+                  )}
+                </div>
+                {item.href === "/inventory" && isExpanded && (
+                  <div className="flex flex-col gap-0.5 pl-2 ml-3 border-l border-sidebar-border/60">
+                    {item.children.map((child) => {
+                      const isChildActive = pathname === child.href
+                      return (
+                        <Link
+                          key={child.href}
+                          href={child.href}
+                          onClick={onNavigate}
+                          className={cn(
+                            "flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors",
+                            isChildActive
+                              ? "bg-sidebar-accent text-sidebar-foreground font-medium"
+                              : "text-sidebar-foreground/70 hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground"
+                          )}
+                        >
+                          <span className="flex-1">{child.label}</span>
+                        </Link>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )
+          }
+
           return (
             <Link
               key={item.href}
@@ -84,7 +156,7 @@ function SidebarNav({ onNavigate, alertCount = 0 }: { onNavigate?: () => void; a
               onClick={onNavigate}
               className={cn(
                 "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
-                isActive
+                isParentActive
                   ? "bg-sidebar-primary text-sidebar-primary-foreground"
                   : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
               )}
@@ -211,7 +283,10 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
             <>
               <nav className="flex-1 flex flex-col py-4 px-3 gap-1 overflow-y-auto">
                 {navItems.map((item) => {
-                  const isActive = pathname === item.href
+                  const isActive =
+                    item.href === "/inventory"
+                      ? pathname.startsWith("/inventory")
+                      : pathname === item.href
                   const badge = item.href === "/alerts" ? alertCount : item.badge
                   return (
                     <Link

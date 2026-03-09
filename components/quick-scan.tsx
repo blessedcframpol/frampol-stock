@@ -153,7 +153,11 @@ export function QuickScan() {
   async function handleRecord() {
     const product = productName.trim()
     if (!product) {
-      toast.error("Select or enter a product / item type")
+      toast.error("Select or enter what's being scanned in (product / item type)")
+      return
+    }
+    if (!movementType) {
+      toast.error("Select a stock movement type")
       return
     }
     if (uniqueSerials.length === 0) {
@@ -495,7 +499,7 @@ export function QuickScan() {
             className="flex-1"
             size="sm"
             onClick={handleRecord}
-            disabled={isSubmitting || uniqueSerials.length === 0 || !productName.trim()}
+            disabled={isSubmitting || uniqueSerials.length === 0 || !productName.trim() || !movementType}
           >
           {isSubmitting ? (
             <Loader2 className="w-4 h-4 animate-spin" />

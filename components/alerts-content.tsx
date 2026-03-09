@@ -222,7 +222,7 @@ export function AlertsContent() {
                                 <TableCell className="text-sm">{days} days</TableCell>
                                 <TableCell>
                                   <Button variant="ghost" size="sm" className="h-8 text-xs" asChild>
-                                    <Link href="/stock-movement">Record return <ChevronRight className="w-3.5 h-3.5 ml-0.5" /></Link>
+                                    <Link href="/inventory/movement">Record return <ChevronRight className="w-3.5 h-3.5 ml-0.5" /></Link>
                                   </Button>
                                 </TableCell>
                               </TableRow>
@@ -343,7 +343,7 @@ export function AlertsContent() {
                               <TableCell className="text-sm">{days} days</TableCell>
                               <TableCell>
                                 <Button variant="ghost" size="sm" className="h-8 text-xs" asChild>
-                                  <Link href="/stock-movement">Record return <ChevronRight className="w-3.5 h-3.5 ml-0.5" /></Link>
+                                  <Link href="/inventory/movement">Record return <ChevronRight className="w-3.5 h-3.5 ml-0.5" /></Link>
                                 </Button>
                               </TableCell>
                             </TableRow>
