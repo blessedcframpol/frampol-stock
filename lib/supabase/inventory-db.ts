@@ -1,0 +1,88 @@
+import type { InventoryItem, Transaction } from "@/lib/data"
+import type { Database } from "./database.types"
+
+type InventoryRow = Database["public"]["Tables"]["inventory_items"]["Row"]
+type TransactionRow = Database["public"]["Tables"]["transactions"]["Row"]
+
+export function rowToInventoryItem(row: InventoryRow): InventoryItem {
+  const raw = row.assignment_history as { date: string; assignedTo?: string; assigned_to?: string; notes?: string }[] | null
+  const assignmentHistory = raw?.map((h) => ({
+    date: h.date,
+    assignedTo: h.assignedTo ?? h.assigned_to ?? "",
+    notes: h.notes,
+  }))
+  return {
+    id: row.id,
+    serialNumber: row.serial_number,
+    itemType: row.item_type as InventoryItem["itemType"],
+    name: row.name,
+    category: row.category ?? undefined,
+    status: row.status as InventoryItem["status"],
+    dateAdded: row.date_added,
+    location: row.location,
+    client: row.client ?? undefined,
+    notes: row.notes ?? undefined,
+    assignedTo: row.assigned_to ?? undefined,
+    purchaseDate: row.purchase_date ?? undefined,
+    warrantyEndDate: row.warranty_end_date ?? undefined,
+    pocOutDate: row.poc_out_date ?? undefined,
+    assignmentHistory: assignmentHistory ?? undefined,
+  }
+}
+
+export function inventoryItemToRow(item: InventoryItem): Database["public"]["Tables"]["inventory_items"]["Insert"] {
+  const history = item.assignmentHistory?.map((h) => ({
+    date: h.date,
+    assignedTo: h.assignedTo,
+    notes: h.notes,
+  }))
+  return {
+    id: item.id,
+    serial_number: item.serialNumber,
+    item_type: item.itemType,
+    name: item.name,
+    category: item.category ?? null,
+    status: item.status,
+    date_added: item.dateAdded,
+    location: item.location,
+    client: item.client ?? null,
+    notes: item.notes ?? null,
+    assigned_to: item.assignedTo ?? null,
+    purchase_date: item.purchaseDate ?? null,
+    warranty_end_date: item.warrantyEndDate ?? null,
+    poc_out_date: item.pocOutDate ?? null,
+    assignment_history: history ?? null,
+  }
+}
+
+export function rowToTransaction(row: TransactionRow): Transaction {
+  return {
+    id: row.id,
+    type: row.type as Transaction["type"],
+    serialNumber: row.serial_number,
+    itemName: row.item_name,
+    client: row.client,
+    date: row.date,
+    invoiceNumber: row.invoice_number ?? undefined,
+    notes: row.notes ?? undefined,
+    fromLocation: row.from_location ?? undefined,
+    toLocation: row.to_location ?? undefined,
+    assignedTo: row.assigned_to ?? undefined,
+  }
+}
+
+export function transactionToRow(txn: Transaction): Database["public"]["Tables"]["transactions"]["Insert"] {
+  return {
+    id: txn.id,
+    type: txn.type,
+    serial_number: txn.serialNumber,
+    item_name: txn.itemName,
+    client: txn.client,
+    date: txn.date,
+    invoice_number: txn.invoiceNumber ?? null,
+    notes: txn.notes ?? null,
+    from_location: txn.fromLocation ?? null,
+    to_location: txn.toLocation ?? null,
+    assigned_to: txn.assignedTo ?? null,
+  }
+}

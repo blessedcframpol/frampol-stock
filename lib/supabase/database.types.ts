@@ -1,0 +1,125 @@
+export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[]
+
+export interface Database {
+  public: {
+    Tables: {
+      inventory_items: {
+        Row: {
+          id: string
+          serial_number: string
+          item_type: string
+          name: string
+          category: string | null
+          status: string
+          date_added: string
+          location: string
+          client: string | null
+          notes: string | null
+          assigned_to: string | null
+          purchase_date: string | null
+          warranty_end_date: string | null
+          poc_out_date: string | null
+          assignment_history: Json | null
+        }
+        Insert: {
+          id: string
+          serial_number: string
+          item_type: string
+          name: string
+          category?: string | null
+          status: string
+          date_added: string
+          location: string
+          client?: string | null
+          notes?: string | null
+          assigned_to?: string | null
+          purchase_date?: string | null
+          warranty_end_date?: string | null
+          poc_out_date?: string | null
+          assignment_history?: Json | null
+        }
+        Update: {
+          id?: string
+          serial_number?: string
+          item_type?: string
+          name?: string
+          category?: string | null
+          status?: string
+          date_added?: string
+          location?: string
+          client?: string | null
+          notes?: string | null
+          assigned_to?: string | null
+          purchase_date?: string | null
+          warranty_end_date?: string | null
+          poc_out_date?: string | null
+          assignment_history?: Json | null
+        }
+      }
+      transactions: {
+        Row: {
+          id: string
+          type: string
+          serial_number: string
+          item_name: string
+          client: string
+          date: string
+          invoice_number: string | null
+          notes: string | null
+          from_location: string | null
+          to_location: string | null
+          assigned_to: string | null
+        }
+        Insert: {
+          id: string
+          type: string
+          serial_number: string
+          item_name: string
+          client: string
+          date: string
+          invoice_number?: string | null
+          notes?: string | null
+          from_location?: string | null
+          to_location?: string | null
+          assigned_to?: string | null
+        }
+        Update: {
+          id?: string
+          type?: string
+          serial_number?: string
+          item_name?: string
+          client?: string
+          date?: string
+          invoice_number?: string | null
+          notes?: string | null
+          from_location?: string | null
+          to_location?: string | null
+          assigned_to?: string | null
+        }
+      }
+      quick_scans: {
+        Row: {
+          id: string
+          serial_number: string
+          scan_type: string
+          scanned_at: string
+          movement_type: string | null
+        }
+        Insert: {
+          id: string
+          serial_number: string
+          scan_type: string
+          scanned_at: string
+          movement_type?: string | null
+        }
+        Update: {
+          id?: string
+          serial_number?: string
+          scan_type?: string
+          scanned_at?: string
+          movement_type?: string | null
+        }
+      }
+    }
+  }
+}
