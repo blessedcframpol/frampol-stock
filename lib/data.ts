@@ -1,9 +1,15 @@
 export type ItemType = "Starlink Kit" | "Laptop" | "Desktop" | "Router" | "Switch" | "Access Point" | "UPS" | "Monitor"
 export type ItemStatus = "In Stock" | "Sold" | "POC" | "Maintenance" | "Disposed"
-export type TransactionType = "Inbound" | "Outbound" | "POC Out" | "POC Return" | "Transfer" | "Dispose"
+export type TransactionType = "Inbound" | "Sale" | "POC Out" | "POC Return" | "Transfer" | "Dispose" | "Rentals"
 
 export const LOCATIONS = ["Warehouse A", "Warehouse B", "Service Center", "Client Site", "Delivered"] as const
 export type Location = (typeof LOCATIONS)[number]
+
+/** One site/address for a client (e.g. delivery or POC location). */
+export interface ClientSite {
+  name?: string
+  address: string
+}
 
 export interface QuickScanRecord {
   id: string
@@ -13,6 +19,15 @@ export interface QuickScanRecord {
   scannedAt: string
   /** Stock movement type (e.g. Inbound, Transfer) when the scan was recorded */
   movementType?: TransactionType
+  /** Batch ID: same for all records in one bulk/single submission; used to group history */
+  batchId?: string
+  /** For Sale, POC Out, Rentals, Transfer, Dispose: client and delivery/site details */
+  clientId?: string
+  clientName?: string
+  clientCompany?: string
+  clientEmail?: string
+  clientPhone?: string
+  sites?: ClientSite[]
 }
 
 export interface AssignmentEntry {
@@ -60,7 +75,7 @@ export interface Transaction {
   fromLocation?: string
   /** For Transfer: destination location */
   toLocation?: string
-  /** Who the item is assigned to (for POC Out, Outbound, etc.) */
+  /** Who the item is assigned to (for POC Out, Sale, etc.) */
   assignedTo?: string
 }
 
@@ -103,12 +118,12 @@ export const inventoryItems: InventoryItem[] = [
 
 export const recentTransactions: Transaction[] = [
   { id: "TXN001", type: "Inbound", serialNumber: "SL-2024-00145", itemName: "Starlink High Performance", client: "Supplier - SpaceX", date: "2024-11-25", invoiceNumber: "INV-2024-0891" },
-  { id: "TXN002", type: "Outbound", serialNumber: "DL-OPT-33214", itemName: "Dell OptiPlex 7010 SFF", client: "MTN Rwanda", date: "2024-11-24", invoiceNumber: "INV-2024-0890", assignedTo: "MTN Rwanda" },
+  { id: "TXN002", type: "Sale", serialNumber: "DL-OPT-33214", itemName: "Dell OptiPlex 7010 SFF", client: "MTN Rwanda", date: "2024-11-24", invoiceNumber: "INV-2024-0890", assignedTo: "MTN Rwanda" },
   { id: "TXN003", type: "POC Out", serialNumber: "CSC-MRK-10235", itemName: "Cisco Meraki MX68", client: "I&M Bank", date: "2024-11-23", notes: "30-day trial", assignedTo: "I&M Bank" },
   { id: "TXN004", type: "Inbound", serialNumber: "HP-PRO-22134", itemName: "HP ProDesk 400 G9", client: "Supplier - HP Inc.", date: "2024-11-21", invoiceNumber: "INV-2024-0887" },
-  { id: "TXN005", type: "Outbound", serialNumber: "CSC-SW-29183", itemName: "Cisco Catalyst 9200L-24P", client: "RDB", date: "2024-11-20", invoiceNumber: "INV-2024-0885", assignedTo: "RDB" },
+  { id: "TXN005", type: "Sale", serialNumber: "CSC-SW-29183", itemName: "Cisco Catalyst 9200L-24P", client: "RDB", date: "2024-11-20", invoiceNumber: "INV-2024-0885", assignedTo: "RDB" },
   { id: "TXN006", type: "POC Return", serialNumber: "UBQ-AP-55123", itemName: "Ubiquiti UniFi U6 Pro", client: "Bank of Kigali", date: "2024-11-19" },
-  { id: "TXN007", type: "Outbound", serialNumber: "DL-XPS-99821", itemName: "Dell XPS 15 9530", client: "BK TechHub", date: "2024-11-18", invoiceNumber: "INV-2024-0882", assignedTo: "BK TechHub" },
+  { id: "TXN007", type: "Sale", serialNumber: "DL-XPS-99821", itemName: "Dell XPS 15 9530", client: "BK TechHub", date: "2024-11-18", invoiceNumber: "INV-2024-0882", assignedTo: "BK TechHub" },
   { id: "TXN008", type: "Transfer", serialNumber: "LG-MON-77432", itemName: 'LG UltraWide 34"', client: "Internal", date: "2024-11-17", fromLocation: "Warehouse B", toLocation: "Warehouse A" },
 ]
 

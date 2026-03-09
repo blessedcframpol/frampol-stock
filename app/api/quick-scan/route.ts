@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
-import { addQuickScan, addBulkQuickScans, getAllQuickScans } from "@/lib/quick-scans-db"
-import { getAllQuickScansFromSupabase, addQuickScanToSupabase, addBulkQuickScansToSupabase } from "@/lib/supabase/quick-scans-db"
+import { addQuickScan, addBulkQuickScans, getAllQuickScans, deleteQuickScansByBatchId } from "@/lib/quick-scans-db"
+import {
+  getAllQuickScansFromSupabase,
+  addQuickScanToSupabase,
+  addBulkQuickScansToSupabase,
+  deleteQuickScansByBatchIdFromSupabase,
+} from "@/lib/supabase/quick-scans-db"
 
 export async function GET() {
   try {
@@ -16,11 +21,28 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { serialNumber, serialNumbers, scanType, movementType } = body as {
+    const {
+      serialNumber,
+      serialNumbers,
+      scanType,
+      movementType,
+      clientId,
+      clientName,
+      clientCompany,
+      clientEmail,
+      clientPhone,
+      sites,
+    } = body as {
       serialNumber?: string
       serialNumbers?: string[]
       scanType?: string
       movementType?: string
+      clientId?: string
+      clientName?: string
+      clientCompany?: string
+      clientEmail?: string
+      clientPhone?: string
+      sites?: { name?: string; address: string }[]
     }
 
     const productName = typeof scanType === "string" ? scanType.trim() : ""
@@ -30,6 +52,27 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       )
     }
+
+    const outbound =
+      clientId != null ||
+      clientName != null ||
+      clientCompany != null ||
+      clientEmail != null ||
+      clientPhone != null ||
+      (Array.isArray(sites) && sites.length > 0)
+        ? {
+            clientId: typeof clientId === "string" ? clientId : undefined,
+            clientName: typeof clientName === "string" ? clientName.trim() || undefined : undefined,
+            clientCompany: typeof clientCompany === "string" ? clientCompany.trim() || undefined : undefined,
+            clientEmail: typeof clientEmail === "string" ? clientEmail.trim() || undefined : undefined,
+            clientPhone: typeof clientPhone === "string" ? clientPhone.trim() || undefined : undefined,
+            sites: Array.isArray(sites)
+              ? sites
+                  .filter((s): s is { name?: string; address: string } => s && typeof s.address === "string" && s.address.trim() !== "")
+                  .map((s) => ({ name: typeof s.name === "string" ? s.name.trim() || undefined : undefined, address: s.address.trim() }))
+              : undefined,
+          }
+        : undefined
 
     const bulk = Array.isArray(serialNumbers) && serialNumbers.length > 0
     if (bulk) {
@@ -49,8 +92,8 @@ export async function POST(request: NextRequest) {
       const duplicates = unique.filter((s) => existingSet.has(s))
       let records: { id: string; serialNumber: string; scanType: string; scannedAt: string; movementType?: string }[] = []
       if (toInsert.length > 0) {
-        const fromDb = await addBulkQuickScansToSupabase(toInsert, productName, movementType)
-        records = fromDb.length > 0 ? fromDb : addBulkQuickScans(toInsert, productName, movementType)
+        const fromDb = await addBulkQuickScansToSupabase(toInsert, productName, movementType, outbound)
+        records = fromDb.length > 0 ? fromDb : addBulkQuickScans(toInsert, productName, movementType, outbound)
       }
       return NextResponse.json(
         { recorded: records.length, records, duplicates, duplicateCount: duplicates.length },
@@ -74,11 +117,38 @@ export async function POST(request: NextRequest) {
         { status: 200 }
       )
     }
-    const fromDb = await addQuickScanToSupabase(trimmed, productName, movementType)
-    const record = fromDb ?? addQuickScan(trimmed, productName, movementType)
+    const fromDb = await addQuickScanToSupabase(trimmed, productName, movementType, outbound)
+    const record = fromDb ?? addQuickScan(trimmed, productName, movementType, outbound)
     return NextResponse.json(record, { status: 201 })
   } catch (error) {
     console.error("Quick scan POST error:", error)
     return NextResponse.json({ error: "Failed to record scan" }, { status: 500 })
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  try {
+    const batchId = request.nextUrl.searchParams.get("batchId")
+    if (!batchId?.trim()) {
+      return NextResponse.json(
+        { error: "batchId query parameter is required" },
+        { status: 400 }
+      )
+    }
+    const fromDb = await deleteQuickScansByBatchIdFromSupabase(batchId)
+    const deleted = fromDb > 0 ? fromDb : deleteQuickScansByBatchId(batchId)
+    if (deleted === 0) {
+      return NextResponse.json(
+        { error: "No scan(s) found for this batch" },
+        { status: 404 }
+      )
+    }
+    return NextResponse.json({ ok: true, deleted })
+  } catch (error) {
+    console.error("Quick scan DELETE by batch error:", error)
+    return NextResponse.json(
+      { error: "Failed to delete scan batch" },
+      { status: 500 }
+    )
   }
 }

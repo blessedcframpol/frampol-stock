@@ -26,11 +26,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { ScanBarcode, Camera, Loader2, ChevronsUpDown, Plus } from "lucide-react"
-import type { ItemType, TransactionType } from "@/lib/data"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { ScanBarcode, Camera, Loader2, ChevronsUpDown, Plus, MapPin, Trash2 } from "lucide-react"
+import type { ItemType, TransactionType, ClientSite } from "@/lib/data"
+import { clients } from "@/lib/data"
 import { useInventoryStore } from "@/lib/inventory-store"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
+
+const OUTBOUND_LIKE_MOVEMENTS: TransactionType[] = ["Sale", "POC Out", "Transfer", "Dispose", "Rentals"]
 
 const ITEM_TYPE_OPTIONS: { value: ItemType; label: string }[] = [
   { value: "Starlink Kit", label: "Starlink Kit" },
@@ -45,15 +54,30 @@ const ITEM_TYPE_OPTIONS: { value: ItemType; label: string }[] = [
 
 const MOVEMENT_TYPE_OPTIONS: { value: TransactionType; label: string }[] = [
   { value: "Inbound", label: "Inbound" },
-  { value: "Outbound", label: "Outbound" },
+  { value: "Sale", label: "Sale" },
   { value: "POC Out", label: "POC Out" },
   { value: "POC Return", label: "POC Return" },
+  { value: "Rentals", label: "Rentals" },
   { value: "Transfer", label: "Transfer" },
   { value: "Dispose", label: "Dispose" },
 ]
 
+type PendingOutboundScan = {
+  productName: string
+  movementType: TransactionType
+  serials: string[]
+}
+
+/** When outbound scan has serials not in inventory, show this and let user add them first. */
+type MissingSerialsState = {
+  missing: string[]
+  productName: string
+  movementType: TransactionType
+  allSerials: string[]
+}
+
 export function QuickScan() {
-  const { inventory } = useInventoryStore()
+  const { inventory, addItem } = useInventoryStore()
   const [serialInput, setSerialInput] = useState("")
   const [productName, setProductName] = useState("")
   const [movementType, setMovementType] = useState<TransactionType>("Inbound")
@@ -61,6 +85,21 @@ export function QuickScan() {
   const [comboboxSearch, setComboboxSearch] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  // Client/site details modal (for Sale, POC Out, Rentals, Transfer, Dispose)
+  const [pendingOutbound, setPendingOutbound] = useState<PendingOutboundScan | null>(null)
+  const [outboundClientId, setOutboundClientId] = useState<string | "new" | "">("")
+  const [outboundClientSearch, setOutboundClientSearch] = useState("")
+  const [outboundClientOpen, setOutboundClientOpen] = useState(false)
+  const [newClientName, setNewClientName] = useState("")
+  const [newClientCompany, setNewClientCompany] = useState("")
+  const [newClientEmail, setNewClientEmail] = useState("")
+  const [newClientPhone, setNewClientPhone] = useState("")
+  const [sites, setSites] = useState<ClientSite[]>([{ address: "" }])
+
+  // When some serials are not in inventory for outbound: offer to add them first
+  const [missingSerialsState, setMissingSerialsState] = useState<MissingSerialsState | null>(null)
+  const [addingToInventory, setAddingToInventory] = useState(false)
 
   const serialList = useMemo(() => {
     return serialInput
@@ -108,6 +147,9 @@ export function QuickScan() {
     return combined.sort()
   }, [productNames])
 
+  const inventorySerialSet = useMemo(() => new Set(inventory.map((i) => i.serialNumber)), [inventory])
+  const requiresOutboundDetails = OUTBOUND_LIKE_MOVEMENTS.includes(movementType)
+
   async function handleRecord() {
     const product = productName.trim()
     if (!product) {
@@ -119,13 +161,59 @@ export function QuickScan() {
       return
     }
 
+    if (requiresOutboundDetails) {
+      const missing = uniqueSerials.filter((s) => !inventorySerialSet.has(s))
+      if (missing.length > 0) {
+        setMissingSerialsState({
+          missing,
+          productName: product,
+          movementType,
+          allSerials: uniqueSerials,
+        })
+        return
+      }
+      setPendingOutbound({ productName: product, movementType, serials: uniqueSerials })
+      setOutboundClientId("")
+      setOutboundClientSearch("")
+      setNewClientName("")
+      setNewClientCompany("")
+      setNewClientEmail("")
+      setNewClientPhone("")
+      setSites([{ address: "" }])
+      return
+    }
+
+    await submitScan(product, movementType, uniqueSerials, undefined)
+  }
+
+  async function submitScan(
+    product: string,
+    movType: TransactionType,
+    serials: string[],
+    outboundDetails?: {
+      clientId?: string
+      clientName?: string
+      clientCompany?: string
+      clientEmail?: string
+      clientPhone?: string
+      sites?: ClientSite[]
+    }
+  ) {
     setLastDuplicateMessage(null)
     setIsSubmitting(true)
     try {
-      const body =
-        uniqueSerials.length === 1
-          ? { serialNumber: uniqueSerials[0], scanType: product, movementType }
-          : { serialNumbers: uniqueSerials, scanType: product, movementType }
+      const body: Record<string, unknown> =
+        serials.length === 1
+          ? { serialNumber: serials[0], scanType: product, movementType: movType }
+          : { serialNumbers: serials, scanType: product, movementType: movType }
+      if (outboundDetails) {
+        if (outboundDetails.clientId) body.clientId = outboundDetails.clientId
+        if (outboundDetails.clientName) body.clientName = outboundDetails.clientName
+        if (outboundDetails.clientCompany) body.clientCompany = outboundDetails.clientCompany
+        if (outboundDetails.clientEmail) body.clientEmail = outboundDetails.clientEmail
+        if (outboundDetails.clientPhone) body.clientPhone = outboundDetails.clientPhone
+        if (outboundDetails.sites?.length) body.sites = outboundDetails.sites.filter((s) => s.address.trim())
+      }
       const res = await fetch("/api/quick-scan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -151,10 +239,11 @@ export function QuickScan() {
       if (recorded > 0) {
         toast.success(
           recorded === 1
-            ? `Recorded: ${uniqueSerials[0]} (${product})`
+            ? `Recorded: ${serials[0]} (${product})`
             : `Recorded ${recorded} scan${recorded !== 1 ? "s" : ""} (${product})`
         )
         setSerialInput("")
+        setPendingOutbound(null)
         textareaRef.current?.focus()
       } else if (duplicates.length > 0) {
         toast.info(`All ${duplicates.length} serial(s) were already scanned`)
@@ -163,6 +252,96 @@ export function QuickScan() {
       toast.error("Failed to record scan")
     } finally {
       setIsSubmitting(false)
+    }
+  }
+
+  async function handleOutboundModalSubmit() {
+    if (!pendingOutbound) return
+    const selectedClient = outboundClientId && outboundClientId !== "new" ? clients.find((c) => c.id === outboundClientId) : null
+    const outboundDetails: {
+      clientId?: string
+      clientName?: string
+      clientCompany?: string
+      clientEmail?: string
+      clientPhone?: string
+      sites?: ClientSite[]
+    } = {}
+    if (selectedClient) {
+      outboundDetails.clientId = selectedClient.id
+      outboundDetails.clientName = selectedClient.name
+      outboundDetails.clientCompany = selectedClient.company
+      outboundDetails.clientEmail = selectedClient.email
+      outboundDetails.clientPhone = selectedClient.phone
+    } else {
+      const name = newClientName.trim()
+      const company = newClientCompany.trim()
+      if (!name && !company) {
+        toast.error("Select a client or enter client name and company")
+        return
+      }
+      outboundDetails.clientName = name || company
+      outboundDetails.clientCompany = company || name
+      outboundDetails.clientEmail = newClientEmail.trim() || undefined
+      outboundDetails.clientPhone = newClientPhone.trim() || undefined
+    }
+    const validSites = sites.filter((s) => s.address.trim())
+    if (validSites.length > 0) outboundDetails.sites = validSites.map((s) => ({ name: s.name?.trim(), address: s.address.trim() }))
+    await submitScan(
+      pendingOutbound.productName,
+      pendingOutbound.movementType,
+      pendingOutbound.serials,
+      outboundDetails
+    )
+  }
+
+  function addSite() {
+    setSites((prev) => [...prev, { address: "" }])
+  }
+
+  function removeSite(index: number) {
+    setSites((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  function updateSite(index: number, field: "name" | "address", value: string) {
+    setSites((prev) => prev.map((s, i) => (i === index ? { ...s, [field]: value } : s)))
+  }
+
+  function inferItemType(productName: string): ItemType {
+    const match = inventory.find((i) => i.name === productName)
+    return (match?.itemType ?? "Starlink Kit") as ItemType
+  }
+
+  async function handleAddMissingAndContinue() {
+    if (!missingSerialsState) return
+    setAddingToInventory(true)
+    try {
+      const { missing, productName, movementType, allSerials } = missingSerialsState
+      const itemType = inferItemType(productName)
+      const today = new Date().toISOString().slice(0, 10)
+      for (const serial of missing) {
+        addItem({
+          serialNumber: serial,
+          itemType,
+          name: productName,
+          status: "In Stock",
+          dateAdded: today,
+          location: "Warehouse A",
+        })
+      }
+      toast.success(`${missing.length} item(s) added to inventory. Continue with client details.`)
+      setMissingSerialsState(null)
+      setPendingOutbound({ productName, movementType, serials: allSerials })
+      setOutboundClientId("")
+      setOutboundClientSearch("")
+      setNewClientName("")
+      setNewClientCompany("")
+      setNewClientEmail("")
+      setNewClientPhone("")
+      setSites([{ address: "" }])
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to add items to inventory")
+    } finally {
+      setAddingToInventory(false)
     }
   }
 
@@ -191,7 +370,9 @@ export function QuickScan() {
           </Select>
         </div>
         <div className="flex flex-col gap-2">
-          <Label className="text-xs text-muted-foreground">What&apos;s being scanned in</Label>
+          <Label className="text-xs text-muted-foreground">
+            {requiresOutboundDetails ? "Product / item type" : "What's being scanned in"}
+          </Label>
           <Popover open={open} onOpenChange={setOpen}>
             <PopoverTrigger asChild>
               <Button
@@ -324,9 +505,217 @@ export function QuickScan() {
         </Button>
         </div>
         <p className="text-[11px] text-muted-foreground">
-          Choose a product, then paste or type serial numbers (e.g. 400 Starlink kits). Use commas or new lines; pasted lines are auto-separated.
+          {requiresOutboundDetails
+            ? "For Sale, POC Out, Rentals, Transfer and Dispose, serials must exist in inventory. You’ll enter client and site details next."
+            : "Choose a product, then paste or type serial numbers (e.g. 400 Starlink kits). Use commas or new lines; pasted lines are auto-separated."}
         </p>
       </CardContent>
+
+      <Dialog open={!!missingSerialsState} onOpenChange={(open) => !open && setMissingSerialsState(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Serials not in inventory</DialogTitle>
+          </DialogHeader>
+          {missingSerialsState && (
+            <div className="flex flex-col gap-4">
+              <p className="text-sm text-muted-foreground">
+                The following serial number(s) are not in the system. Add them to inventory first, then continue with the scan (client & site details).
+              </p>
+              <ul className="font-mono text-sm bg-muted/50 rounded-md p-3 max-h-40 overflow-y-auto space-y-1">
+                {missingSerialsState.missing.map((s) => (
+                  <li key={s}>{s}</li>
+                ))}
+              </ul>
+              <p className="text-xs text-muted-foreground">
+                They will be added as <strong>{missingSerialsState.productName}</strong>, status In Stock, then you can complete the {missingSerialsState.movementType} scan.
+              </p>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setMissingSerialsState(null)} disabled={addingToInventory}>
+                  Cancel
+                </Button>
+                <Button onClick={handleAddMissingAndContinue} disabled={addingToInventory}>
+                  {addingToInventory ? <Loader2 className="w-4 h-4 animate-spin" /> : "Add to inventory & continue"}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!pendingOutbound} onOpenChange={(open) => !open && setPendingOutbound(null)}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Client & site details</DialogTitle>
+          </DialogHeader>
+          {pendingOutbound && (
+            <div className="flex flex-col gap-4">
+              <p className="text-sm text-muted-foreground">
+                {pendingOutbound.serials.length} item(s) · {pendingOutbound.productName} · {pendingOutbound.movementType}
+              </p>
+
+              <div className="flex flex-col gap-2">
+                <Label className="text-xs font-medium">Client</Label>
+                <Popover open={outboundClientOpen} onOpenChange={setOutboundClientOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      role="combobox"
+                      className="w-full justify-between h-10 font-normal"
+                    >
+                      <span className={cn("truncate", !outboundClientId && "text-muted-foreground")}>
+                        {outboundClientId === "new"
+                          ? "New client (enter details below)"
+                          : outboundClientId
+                            ? clients.find((c) => c.id === outboundClientId)?.name + " – " + clients.find((c) => c.id === outboundClientId)?.company
+                            : "Select or add client..."}
+                      </span>
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="min-w-[300px] p-0" align="start">
+                    <Command>
+                      <CommandInput
+                        placeholder="Search clients..."
+                        value={outboundClientSearch}
+                        onValueChange={setOutboundClientSearch}
+                      />
+                      <CommandList>
+                        <CommandEmpty>No client found.</CommandEmpty>
+                        <CommandGroup>
+                          <CommandItem
+                            value="__new"
+                            onSelect={() => {
+                              setOutboundClientId("new")
+                              setOutboundClientOpen(false)
+                            }}
+                          >
+                            <Plus className="h-4 w-4 mr-2" />
+                            Add new client
+                          </CommandItem>
+                          {clients
+                            .filter(
+                              (c) =>
+                                !outboundClientSearch.trim() ||
+                                [c.name, c.company, c.email].some((x) =>
+                                  x.toLowerCase().includes(outboundClientSearch.trim().toLowerCase())
+                                )
+                            )
+                            .map((c) => (
+                              <CommandItem
+                                key={c.id}
+                                value={c.id}
+                                onSelect={() => {
+                                  setOutboundClientId(c.id)
+                                  setOutboundClientOpen(false)
+                                }}
+                              >
+                                {c.name} – {c.company}
+                              </CommandItem>
+                            ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+              </div>
+
+              {outboundClientId === "new" && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-md border border-border bg-muted/30">
+                  <div className="sm:col-span-2">
+                    <Label className="text-xs">Name</Label>
+                    <Input
+                      placeholder="Contact name"
+                      value={newClientName}
+                      onChange={(e) => setNewClientName(e.target.value)}
+                      className="mt-1 h-9"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs">Company</Label>
+                    <Input
+                      placeholder="Company"
+                      value={newClientCompany}
+                      onChange={(e) => setNewClientCompany(e.target.value)}
+                      className="mt-1 h-9"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs">Email</Label>
+                    <Input
+                      type="email"
+                      placeholder="email@example.com"
+                      value={newClientEmail}
+                      onChange={(e) => setNewClientEmail(e.target.value)}
+                      className="mt-1 h-9"
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <Label className="text-xs">Phone</Label>
+                    <Input
+                      placeholder="+250 ..."
+                      value={newClientPhone}
+                      onChange={(e) => setNewClientPhone(e.target.value)}
+                      className="mt-1 h-9"
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-medium flex items-center gap-1.5">
+                    <MapPin className="w-3.5 h-3.5" />
+                    Site addresses (optional, add multiple)
+                  </Label>
+                  <Button type="button" variant="ghost" size="sm" className="h-8 text-xs" onClick={addSite}>
+                    <Plus className="w-3.5 h-3.5 mr-1" />
+                    Add site
+                  </Button>
+                </div>
+                <div className="space-y-2">
+                  {sites.map((site, i) => (
+                    <div key={i} className="flex gap-2 items-start">
+                      <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <Input
+                          placeholder="Site name (e.g. HQ, Branch A)"
+                          value={site.name ?? ""}
+                          onChange={(e) => updateSite(i, "name", e.target.value)}
+                          className="h-9"
+                        />
+                        <Input
+                          placeholder="Full address"
+                          value={site.address}
+                          onChange={(e) => updateSite(i, "address", e.target.value)}
+                          className="h-9 sm:col-span-1"
+                        />
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-9 w-9 shrink-0 text-muted-foreground hover:text-destructive"
+                        onClick={() => removeSite(i)}
+                        disabled={sites.length <= 1}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <Button variant="outline" onClick={() => setPendingOutbound(null)}>
+                  Cancel
+                </Button>
+                <Button onClick={handleOutboundModalSubmit} disabled={isSubmitting}>
+                  {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Record scan"}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </Card>
   )
 }

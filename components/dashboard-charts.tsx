@@ -145,7 +145,7 @@ export function MonthlySalesChart() {
   const monthlyData = useMemo(() => {
     const byMonth: Record<string, number> = {}
     transactions.forEach((txn) => {
-      if (txn.type !== "Outbound") return
+      if (txn.type !== "Sale") return
       const monthKey = txn.date.slice(0, 7)
       byMonth[monthKey] = (byMonth[monthKey] ?? 0) + 1
     })
@@ -165,7 +165,7 @@ export function MonthlySalesChart() {
   return (
     <Card className="h-full min-h-[300px] sm:min-h-[340px] flex flex-col">
       <CardHeader className="pb-2">
-        <CardTitle className="text-base font-semibold text-foreground">Monthly Sales (Outbound)</CardTitle>
+        <CardTitle className="text-base font-semibold text-foreground">Monthly Sales</CardTitle>
       </CardHeader>
       <CardContent className="flex-1 flex flex-col min-h-0">
         <ChartContainer

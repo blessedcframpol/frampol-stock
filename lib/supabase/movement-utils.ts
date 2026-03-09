@@ -45,7 +45,7 @@ export function computeMovementResult(
         it.client = undefined
         it.assignedTo = undefined
         break
-      case "Outbound":
+      case "Sale":
         it.status = "Sold"
         it.location = "Delivered"
         it.client = clientDisplay
@@ -66,6 +66,14 @@ export function computeMovementResult(
         it.client = undefined
         it.assignedTo = undefined
         it.pocOutDate = undefined
+        break
+      case "Rentals":
+        it.status = "POC"
+        it.location = "Client Site"
+        it.client = clientDisplay
+        it.assignedTo = assignedTo ?? clientDisplay
+        it.pocOutDate = date
+        if (assignedTo) history.push({ date, assignedTo, notes: "Rental" })
         break
       case "Transfer":
         it.location = toLocation ?? it.location
@@ -88,7 +96,7 @@ export function computeMovementResult(
       date,
       invoiceNumber,
       notes,
-      assignedTo: assignedTo ?? (type === "Outbound" || type === "POC Out" ? clientDisplay : undefined),
+      assignedTo: assignedTo ?? (type === "Sale" || type === "POC Out" || type === "Rentals" ? clientDisplay : undefined),
       fromLocation: type === "Transfer" ? fromLocation : undefined,
       toLocation: type === "Transfer" || type === "POC Return" ? toLocation : undefined,
     })

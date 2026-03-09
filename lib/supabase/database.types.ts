@@ -104,6 +104,13 @@ export interface Database {
           scan_type: string
           scanned_at: string
           movement_type: string | null
+          batch_id: string | null
+          client_id: string | null
+          client_name: string | null
+          client_company: string | null
+          client_email: string | null
+          client_phone: string | null
+          sites: { name?: string; address: string }[] | null
         }
         Insert: {
           id: string
@@ -111,6 +118,13 @@ export interface Database {
           scan_type: string
           scanned_at: string
           movement_type?: string | null
+          batch_id?: string | null
+          client_id?: string | null
+          client_name?: string | null
+          client_company?: string | null
+          client_email?: string | null
+          client_phone?: string | null
+          sites?: { name?: string; address: string }[] | null
         }
         Update: {
           id?: string
@@ -118,6 +132,13 @@ export interface Database {
           scan_type?: string
           scanned_at?: string
           movement_type?: string | null
+          batch_id?: string | null
+          client_id?: string | null
+          client_name?: string | null
+          client_company?: string | null
+          client_email?: string | null
+          client_phone?: string | null
+          sites?: { name?: string; address: string }[] | null
         }
       }
     }

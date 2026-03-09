@@ -101,7 +101,7 @@ function getRevertUpdatesForTransaction(txn: Transaction): Partial<InventoryItem
   switch (txn.type) {
     case "Inbound":
       return {}
-    case "Outbound":
+    case "Sale":
       return {
         status: "In Stock",
         location: "Warehouse A",
@@ -122,6 +122,14 @@ function getRevertUpdatesForTransaction(txn: Transaction): Partial<InventoryItem
         location: "Client Site",
         client: undefined,
         assignedTo: undefined,
+      }
+    case "Rentals":
+      return {
+        status: "In Stock",
+        location: "Warehouse A",
+        client: undefined,
+        assignedTo: undefined,
+        pocOutDate: undefined,
       }
     case "Transfer":
       return txn.fromLocation ? { location: txn.fromLocation } : {}

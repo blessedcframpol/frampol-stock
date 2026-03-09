@@ -27,15 +27,17 @@ import {
   Package,
   ArrowLeftRight,
   Trash2,
+  Calendar,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 
 const transactionTypes = [
   { value: "Inbound", label: "Inbound", icon: ArrowDownLeft, color: "text-emerald-600 dark:text-emerald-400", bg: "bg-emerald-500/10", desc: "Receive stock from supplier" },
-  { value: "Outbound", label: "Outbound", icon: ArrowUpRight, color: "text-red-500 dark:text-red-400", bg: "bg-red-500/10", desc: "Ship stock to client" },
+  { value: "Sale", label: "Sale", icon: ArrowUpRight, color: "text-red-500 dark:text-red-400", bg: "bg-red-500/10", desc: "Sell stock to client" },
   { value: "POC Out", label: "POC Out", icon: Send, color: "text-cyan-600 dark:text-cyan-400", bg: "bg-cyan-500/10", desc: "Send for proof of concept" },
   { value: "POC Return", label: "POC Return", icon: RotateCcw, color: "text-amber-600 dark:text-amber-400", bg: "bg-amber-500/10", desc: "Receive POC return" },
+  { value: "Rentals", label: "Rentals", icon: Calendar, color: "text-blue-600 dark:text-blue-400", bg: "bg-blue-500/10", desc: "Rent out to client" },
   { value: "Transfer", label: "Transfer", icon: ArrowLeftRight, color: "text-violet-600 dark:text-violet-400", bg: "bg-violet-500/10", desc: "Move between locations" },
   { value: "Dispose", label: "Dispose", icon: Trash2, color: "text-slate-600 dark:text-slate-400", bg: "bg-slate-500/10", desc: "Dispose of asset" },
 ]
@@ -63,7 +65,7 @@ export function StockMovementContent() {
       toast.error("Scan or enter at least one serial number")
       return
     }
-    if ((selectedType === "Outbound" || selectedType === "POC Out") && !clientId) {
+    if ((selectedType === "Sale" || selectedType === "POC Out" || selectedType === "Rentals") && !clientId) {
       toast.error("Select a client for this transaction type")
       return
     }
@@ -77,7 +79,7 @@ export function StockMovementContent() {
     }
     setIsSubmitting(true)
     const result = applyMovement({
-      type: selectedType as "Inbound" | "Outbound" | "POC Out" | "POC Return" | "Transfer" | "Dispose",
+      type: selectedType as "Inbound" | "Sale" | "POC Out" | "POC Return" | "Rentals" | "Transfer" | "Dispose",
       serialNumbers: serialsList,
       clientId: clientId || undefined,
       fromLocation: selectedType === "Transfer" ? fromLocation : undefined,
@@ -103,7 +105,7 @@ export function StockMovementContent() {
       {/* Header */}
       <div>
         <h1 className="text-xl md:text-2xl font-bold text-foreground tracking-tight text-balance">Stock Movement</h1>
-        <p className="text-sm text-muted-foreground mt-1">Record inbound and outbound stock transactions.</p>
+        <p className="text-sm text-muted-foreground mt-1">Record inbound and outbound (sale, POC, rental, transfer) stock transactions.</p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
@@ -219,7 +221,7 @@ export function StockMovementContent() {
               </CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
-              {(selectedType === "Outbound" || selectedType === "POC Out") && (
+              {(selectedType === "Sale" || selectedType === "POC Out" || selectedType === "Rentals") && (
                 <div className="flex flex-col gap-2">
                   <Label className="text-foreground">Client / Customer (assigned to)</Label>
                   <Select value={clientId} onValueChange={setClientId}>
@@ -327,7 +329,8 @@ export function StockMovementContent() {
                   className={cn(
                     "text-xs border-0",
                     selectedType === "Inbound" && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-                    selectedType === "Outbound" && "bg-red-500/10 text-red-500 dark:text-red-400",
+                    selectedType === "Sale" && "bg-red-500/10 text-red-500 dark:text-red-400",
+                    selectedType === "Rentals" && "bg-blue-500/10 text-blue-500 dark:text-blue-400",
                     selectedType === "POC Out" && "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400",
                     selectedType === "POC Return" && "bg-amber-500/10 text-amber-600 dark:text-amber-400",
                     selectedType === "Transfer" && "bg-violet-500/10 text-violet-600 dark:text-violet-400",
@@ -341,7 +344,7 @@ export function StockMovementContent() {
                 <span className="text-sm text-muted-foreground">Items Scanned</span>
                 <span className="text-sm font-semibold text-foreground">{scannedCount}</span>
               </div>
-              {(selectedType === "Outbound" || selectedType === "POC Out") && (
+              {(selectedType === "Sale" || selectedType === "POC Out" || selectedType === "Rentals") && (
                 <div className="flex items-center justify-between py-2 border-b border-border">
                   <span className="text-sm text-muted-foreground">Client</span>
                   <span className="text-sm text-foreground">{clientDisplay}</span>

@@ -1,6 +1,15 @@
 import path from "node:path"
 import fs from "node:fs"
-import type { QuickScanRecord } from "./data"
+import type { QuickScanRecord, ClientSite } from "./data"
+
+export type QuickScanOutboundDetails = {
+  clientId?: string
+  clientName?: string
+  clientCompany?: string
+  clientEmail?: string
+  clientPhone?: string
+  sites?: ClientSite[]
+}
 
 const DATA_DIR = path.join(process.cwd(), "data")
 const SCANS_FILE = path.join(DATA_DIR, "quick-scans.json")
@@ -36,7 +45,8 @@ export function getAllQuickScans(): QuickScanRecord[] {
 export function addQuickScan(
   serialNumber: string,
   scanType: QuickScanRecord["scanType"],
-  movementType?: QuickScanRecord["movementType"]
+  movementType?: QuickScanRecord["movementType"],
+  outbound?: QuickScanOutboundDetails
 ): QuickScanRecord {
   const scans = readScans()
   const id = `QSCAN-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
@@ -46,6 +56,13 @@ export function addQuickScan(
     scanType,
     scannedAt: new Date().toISOString(),
     movementType,
+    batchId: id,
+    clientId: outbound?.clientId,
+    clientName: outbound?.clientName,
+    clientCompany: outbound?.clientCompany,
+    clientEmail: outbound?.clientEmail,
+    clientPhone: outbound?.clientPhone,
+    sites: outbound?.sites,
   }
   scans.push(record)
   writeScans(scans)
@@ -55,17 +72,26 @@ export function addQuickScan(
 export function addBulkQuickScans(
   serialNumbers: string[],
   scanType: QuickScanRecord["scanType"],
-  movementType?: QuickScanRecord["movementType"]
+  movementType?: QuickScanRecord["movementType"],
+  outbound?: QuickScanOutboundDetails
 ): QuickScanRecord[] {
   const scans = readScans()
   const now = new Date().toISOString()
   const base = Date.now()
+  const batchId = `BATCH-${base}-${Math.random().toString(36).slice(2, 7)}`
   const records: QuickScanRecord[] = serialNumbers.map((serial, i) => ({
     id: `QSCAN-${base}-${i}-${Math.random().toString(36).slice(2, 7)}`,
     serialNumber: serial.trim(),
     scanType,
     scannedAt: now,
     movementType,
+    batchId,
+    clientId: outbound?.clientId,
+    clientName: outbound?.clientName,
+    clientCompany: outbound?.clientCompany,
+    clientEmail: outbound?.clientEmail,
+    clientPhone: outbound?.clientPhone,
+    sites: outbound?.sites,
   }))
   scans.push(...records)
   writeScans(scans)
@@ -79,4 +105,13 @@ export function deleteQuickScan(id: string): boolean {
   scans.splice(idx, 1)
   writeScans(scans)
   return true
+}
+
+export function deleteQuickScansByBatchId(batchId: string): number {
+  const scans = readScans()
+  const before = scans.length
+  const next = scans.filter((s) => (s.batchId ?? s.id) !== batchId)
+  const removed = before - next.length
+  if (removed > 0) writeScans(next)
+  return removed
 }

@@ -16,9 +16,10 @@ import { cn, formatDateDDMMYYYY } from "@/lib/utils"
 
 const statusStyles: Record<string, string> = {
   Inbound: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-  Outbound: "bg-red-500/10 text-red-500 dark:text-red-400",
+  Sale: "bg-red-500/10 text-red-500 dark:text-red-400",
   "POC Out": "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400",
   "POC Return": "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+  Rentals: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
   Transfer: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
   Dispose: "bg-slate-500/10 text-slate-600 dark:text-slate-400",
 }

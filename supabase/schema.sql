@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS public.transactions (
   to_location TEXT,
   assigned_to TEXT,
   CONSTRAINT transactions_type_check
-    CHECK (type IN ('Inbound', 'Outbound', 'POC Out', 'POC Return', 'Transfer', 'Dispose'))
+    CHECK (type IN ('Inbound', 'Sale', 'POC Out', 'POC Return', 'Transfer', 'Dispose', 'Rentals'))
 );
 
 COMMENT ON TABLE public.transactions IS 'History of stock movements (in/out, POC, transfer, dispose).';
@@ -66,7 +66,14 @@ CREATE TABLE IF NOT EXISTS public.quick_scans (
   serial_number TEXT NOT NULL,
   scan_type TEXT NOT NULL,
   scanned_at TEXT NOT NULL,
-  movement_type TEXT
+  movement_type TEXT,
+  batch_id TEXT,
+  client_id TEXT,
+  client_name TEXT,
+  client_company TEXT,
+  client_email TEXT,
+  client_phone TEXT,
+  sites JSONB
 );
 
 COMMENT ON TABLE public.quick_scans IS 'Log of quick-scan (receive) events.';
@@ -78,6 +85,38 @@ DO $$ BEGIN
     WHERE table_schema = 'public' AND table_name = 'quick_scans' AND column_name = 'movement_type'
   ) THEN
     ALTER TABLE public.quick_scans ADD COLUMN movement_type TEXT;
+  END IF;
+END $$;
+
+-- Add batch_id if table already existed without it (groups bulk/single scan into one history entry)
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'quick_scans' AND column_name = 'batch_id'
+  ) THEN
+    ALTER TABLE public.quick_scans ADD COLUMN batch_id TEXT;
+  END IF;
+END $$;
+
+-- Add client/sites columns for sale/outbound-type quick scans
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'quick_scans' AND column_name = 'client_id') THEN
+    ALTER TABLE public.quick_scans ADD COLUMN client_id TEXT;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'quick_scans' AND column_name = 'client_name') THEN
+    ALTER TABLE public.quick_scans ADD COLUMN client_name TEXT;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'quick_scans' AND column_name = 'client_company') THEN
+    ALTER TABLE public.quick_scans ADD COLUMN client_company TEXT;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'quick_scans' AND column_name = 'client_email') THEN
+    ALTER TABLE public.quick_scans ADD COLUMN client_email TEXT;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'quick_scans' AND column_name = 'client_phone') THEN
+    ALTER TABLE public.quick_scans ADD COLUMN client_phone TEXT;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'quick_scans' AND column_name = 'sites') THEN
+    ALTER TABLE public.quick_scans ADD COLUMN sites JSONB;
   END IF;
 END $$;
 
@@ -93,7 +132,7 @@ CREATE TABLE IF NOT EXISTS public.clients (
   last_order TEXT
 );
 
-COMMENT ON TABLE public.clients IS 'Customers / companies for outbound and POC.';
+COMMENT ON TABLE public.clients IS 'Customers / companies for sales and POC.';
 
 -- =============================================================================
 -- INDEXES

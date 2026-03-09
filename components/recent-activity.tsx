@@ -3,14 +3,15 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { useInventoryStore } from "@/lib/inventory-store"
-import { ArrowDownLeft, ArrowUpRight, RotateCcw, Send, ArrowLeftRight, Trash2 } from "lucide-react"
+import { ArrowDownLeft, ArrowUpRight, RotateCcw, Send, ArrowLeftRight, Trash2, Calendar } from "lucide-react"
 import { cn, formatDateDDMMYYYY } from "@/lib/utils"
 
 const typeConfig: Record<string, { icon: React.ComponentType<{ className?: string }>; color: string; bg: string; label: string }> = {
   Inbound: { icon: ArrowDownLeft, color: "text-emerald-600 dark:text-emerald-400", bg: "bg-emerald-500/10", label: "Inbound" },
-  Outbound: { icon: ArrowUpRight, color: "text-red-500 dark:text-red-400", bg: "bg-red-500/10", label: "Outbound" },
+  Sale: { icon: ArrowUpRight, color: "text-red-500 dark:text-red-400", bg: "bg-red-500/10", label: "Sale" },
   "POC Out": { icon: Send, color: "text-cyan-600 dark:text-cyan-400", bg: "bg-cyan-500/10", label: "POC Out" },
   "POC Return": { icon: RotateCcw, color: "text-amber-600 dark:text-amber-400", bg: "bg-amber-500/10", label: "POC Return" },
+  Rentals: { icon: Calendar, color: "text-blue-600 dark:text-blue-400", bg: "bg-blue-500/10", label: "Rentals" },
   Transfer: { icon: ArrowLeftRight, color: "text-violet-600 dark:text-violet-400", bg: "bg-violet-500/10", label: "Transfer" },
   Dispose: { icon: Trash2, color: "text-slate-600 dark:text-slate-400", bg: "bg-slate-500/10", label: "Dispose" },
 }
@@ -52,9 +53,10 @@ export function RecentActivity() {
                   className={cn(
                     "text-[10px] font-medium border-0",
                     txn.type === "Inbound" && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-                    txn.type === "Outbound" && "bg-red-500/10 text-red-500 dark:text-red-400",
+                    txn.type === "Sale" && "bg-red-500/10 text-red-500 dark:text-red-400",
                     txn.type === "POC Out" && "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400",
                     txn.type === "POC Return" && "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+                    txn.type === "Rentals" && "bg-blue-500/10 text-blue-600 dark:text-blue-400",
                     txn.type === "Transfer" && "bg-violet-500/10 text-violet-600 dark:text-violet-400",
                     txn.type === "Dispose" && "bg-slate-500/10 text-slate-600 dark:text-slate-400",
                   )}
