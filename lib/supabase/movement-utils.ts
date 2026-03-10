@@ -4,6 +4,9 @@ import type { InventoryItem, Transaction, TransactionType } from "@/lib/data"
  * Given current inventory and movement params, compute the updated items and new transactions.
  * Pure function for use with Supabase persist + state update.
  */
+/** Default rental period (days from out date) when returnDate not provided */
+const DEFAULT_RENTAL_DAYS = 30
+
 export function computeMovementResult(
   inventory: InventoryItem[],
   params: {
@@ -15,6 +18,8 @@ export function computeMovementResult(
     assignedTo?: string
     invoiceNumber?: string
     notes?: string
+    /** For Rentals: due date (ISO date). Defaults to DEFAULT_RENTAL_DAYS from today. */
+    returnDate?: string
   }
 ): {
   success: string[]
@@ -22,8 +27,13 @@ export function computeMovementResult(
   updatedItems: InventoryItem[]
   newTransactions: Transaction[]
 } {
-  const { type, serialNumbers, clientDisplay, fromLocation, toLocation, assignedTo, invoiceNumber, notes } = params
+  const { type, serialNumbers, clientDisplay, fromLocation, toLocation, assignedTo, invoiceNumber, notes, returnDate } = params
   const date = new Date().toISOString().slice(0, 10)
+  const defaultReturnDate = (() => {
+    const d = new Date()
+    d.setDate(d.getDate() + DEFAULT_RENTAL_DAYS)
+    return d.toISOString().slice(0, 10)
+  })()
   const success: string[] = []
   const updatedItems: InventoryItem[] = []
   const newTransactions: Transaction[] = []
@@ -66,6 +76,7 @@ export function computeMovementResult(
         it.client = undefined
         it.assignedTo = undefined
         it.pocOutDate = undefined
+        it.returnDate = undefined
         break
       case "Rentals":
         it.status = "POC"
@@ -73,6 +84,7 @@ export function computeMovementResult(
         it.client = clientDisplay
         it.assignedTo = assignedTo ?? clientDisplay
         it.pocOutDate = date
+        it.returnDate = returnDate ?? defaultReturnDate
         if (assignedTo) history.push({ date, assignedTo, notes: "Rental" })
         break
       case "Transfer":

@@ -59,6 +59,8 @@ export interface InventoryItem {
   warrantyEndDate?: string
   /** When this item went out for POC (for overdue alerts) */
   pocOutDate?: string
+  /** When this item is due to be returned (for rental alerts; past = overdue) */
+  returnDate?: string
   assignmentHistory?: AssignmentEntry[]
 }
 

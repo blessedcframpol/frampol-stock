@@ -94,9 +94,13 @@ export function InventoryContent() {
   const [search, setSearch] = useState("")
 
   const serialFromUrl = searchParams.get("serial")
+  const groupFromUrl = searchParams.get("group")
   useEffect(() => {
     if (serialFromUrl) setSearch(serialFromUrl)
   }, [serialFromUrl])
+  useEffect(() => {
+    if (groupFromUrl?.trim()) setSelectedGroupName(groupFromUrl.trim())
+  }, [groupFromUrl])
   const [typeFilter, setTypeFilter] = useState<string>("all")
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const [selectedGroupName, setSelectedGroupName] = useState<string | null>(null)
@@ -112,9 +116,13 @@ export function InventoryContent() {
   const [addWarrantyEnd, setAddWarrantyEnd] = useState("")
   const [addDialogOpen, setAddDialogOpen] = useState(false)
 
-  const categories = useMemo(
+  const categoriesFromInventory = useMemo(
     () => [...new Set(inventory.map((i) => i.category).filter(Boolean))].sort() as string[],
     [inventory]
+  )
+  const categories = useMemo(
+    () => [...new Set([...Object.keys(CATEGORY_LABELS), ...categoriesFromInventory])].sort(),
+    [categoriesFromInventory]
   )
   const groups = useMemo(() => groupInventoryItems(inventory), [inventory])
   const groupsInCategory = useMemo(
@@ -123,8 +131,8 @@ export function InventoryContent() {
   )
 
   const addCategoryOptions = useMemo(
-    () => [...new Set([...Object.keys(CATEGORY_LABELS), ...categories])].sort(),
-    [categories]
+    () => [...new Set([...Object.keys(CATEGORY_LABELS), ...categoriesFromInventory])].sort(),
+    [categoriesFromInventory]
   )
 
   const filteredGroups = useMemo(() => {
@@ -138,6 +146,11 @@ export function InventoryContent() {
     })
   }, [selectedCategory, groupsInCategory, groups, groupSearch, typeFilter])
 
+  const itemsInViewCount = useMemo(
+    () => filteredGroups.reduce((sum, g) => sum + g.count, 0),
+    [filteredGroups]
+  )
+
   const selectedGroup = selectedGroupName
     ? (selectedCategory && selectedCategory !== "__flat__"
         ? groupsInCategory.find((g) => g.name === selectedGroupName)
@@ -148,6 +161,11 @@ export function InventoryContent() {
     if (!selectedGroup) return []
     return selectedGroup.items.filter((i) => !selectedCategory || i.category === selectedCategory)
   }, [selectedGroup, selectedCategory])
+
+  const inStockCount = useMemo(
+    () => itemsInGroup.filter((i) => i.status === "In Stock").length,
+    [itemsInGroup]
+  )
 
   const filteredItems = useMemo(() => {
     return itemsInGroup.filter((item) => {
@@ -357,8 +375,8 @@ export function InventoryContent() {
                 className="w-fit -ml-2 text-muted-foreground hover:text-foreground"
                 onClick={() => setSelectedCategory(null)}
               >
-                <ArrowLeft className="w-4 h-4 mr-1.5" />
-                Back to categories
+                <ArrowLeft className="w-4 h-4 mr-1" />
+                Back
               </Button>
             )}
             <div>
@@ -368,7 +386,7 @@ export function InventoryContent() {
                   : "Inventory"}
               </h1>
               <p className="text-sm text-muted-foreground mt-1">
-                {filteredGroups.length} product type{filteredGroups.length !== 1 ? "s" : ""} · {inventory.length} items total
+                {filteredGroups.length} product type{filteredGroups.length !== 1 ? "s" : ""} · {itemsInViewCount} items in view
               </p>
             </div>
           </div>
@@ -602,7 +620,7 @@ export function InventoryContent() {
               {selectedGroup?.name}
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
-              {selectedGroup?.itemType} · {itemsInGroup.length} items
+              {selectedGroup?.itemType} · {inStockCount} in stock, {itemsInGroup.length} total
             </p>
           </div>
           <div className="flex items-center gap-2">

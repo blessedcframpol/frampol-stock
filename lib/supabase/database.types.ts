@@ -19,6 +19,7 @@ export interface Database {
           purchase_date: string | null
           warranty_end_date: string | null
           poc_out_date: string | null
+          return_date: string | null
           assignment_history: Json | null
         }
         Insert: {
@@ -36,6 +37,7 @@ export interface Database {
           purchase_date?: string | null
           warranty_end_date?: string | null
           poc_out_date?: string | null
+          return_date?: string | null
           assignment_history?: Json | null
         }
         Update: {
@@ -53,6 +55,7 @@ export interface Database {
           purchase_date?: string | null
           warranty_end_date?: string | null
           poc_out_date?: string | null
+          return_date?: string | null
           assignment_history?: Json | null
         }
       }

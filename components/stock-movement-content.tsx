@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useMemo } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -13,8 +13,28 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
 import { clients, LOCATIONS } from "@/lib/data"
+import type { ItemType, TransactionType, ClientSite } from "@/lib/data"
 import { useInventoryStore } from "@/lib/inventory-store"
 import {
   ScanBarcode,
@@ -28,9 +48,28 @@ import {
   ArrowLeftRight,
   Trash2,
   Calendar,
+  ChevronsUpDown,
+  Plus,
+  MapPin,
+  Loader2,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
+
+const OUTBOUND_LIKE_MOVEMENTS: TransactionType[] = ["Sale", "POC Out", "Transfer", "Dispose", "Rentals"]
+const ITEM_TYPE_OPTIONS: { value: ItemType; label: string }[] = [
+  { value: "Starlink Kit", label: "Starlink Kit" },
+  { value: "Laptop", label: "Laptop" },
+  { value: "Desktop", label: "Desktop" },
+  { value: "Router", label: "Router" },
+  { value: "Switch", label: "Switch" },
+  { value: "Access Point", label: "Access Point" },
+  { value: "UPS", label: "UPS" },
+  { value: "Monitor", label: "Monitor" },
+]
+
+type PendingOutbound = { productName: string; movementType: string; serials: string[] }
+type MissingSerialsState = { missing: string[]; productName: string; movementType: string; allSerials: string[] }
 
 const transactionTypes = [
   { value: "Inbound", label: "Inbound", icon: ArrowDownLeft, color: "text-emerald-600 dark:text-emerald-400", bg: "bg-emerald-500/10", desc: "Receive stock from supplier" },
@@ -43,30 +82,237 @@ const transactionTypes = [
 ]
 
 export function StockMovementContent() {
-  const { applyMovement } = useInventoryStore()
+  const { inventory, applyMovement, addItem } = useInventoryStore()
   const [selectedType, setSelectedType] = useState<string>("Inbound")
   const [serialNumbers, setSerialNumbers] = useState("")
+  const [productName, setProductName] = useState("")
+  const [productOpen, setProductOpen] = useState(false)
+  const [comboboxSearch, setComboboxSearch] = useState("")
   const [clientId, setClientId] = useState<string>("")
   const [invoiceNumber, setInvoiceNumber] = useState("")
   const [notes, setNotes] = useState("")
   const [fromLocation, setFromLocation] = useState<string>("")
   const [toLocation, setToLocation] = useState<string>("")
+  const [rentalReturnDate, setRentalReturnDate] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [lastDuplicateMessage, setLastDuplicateMessage] = useState<string[] | null>(null)
+  const [missingSerialsState, setMissingSerialsState] = useState<MissingSerialsState | null>(null)
+  const [pendingOutbound, setPendingOutbound] = useState<PendingOutbound | null>(null)
+  const [outboundClientId, setOutboundClientId] = useState<string | "new" | "">("")
+  const [outboundClientSearch, setOutboundClientSearch] = useState("")
+  const [outboundClientOpen, setOutboundClientOpen] = useState(false)
+  const [newClientName, setNewClientName] = useState("")
+  const [newClientCompany, setNewClientCompany] = useState("")
+  const [newClientEmail, setNewClientEmail] = useState("")
+  const [newClientPhone, setNewClientPhone] = useState("")
+  const [sites, setSites] = useState<ClientSite[]>([{ address: "" }])
+  const [addingToInventory, setAddingToInventory] = useState(false)
 
-  const serialsList = serialNumbers
-    .split(/[\n,]+/)
-    .map((s) => s.trim())
-    .filter(Boolean)
-  const scannedCount = serialsList.length
+  const serialsList = useMemo(
+    () =>
+      serialNumbers
+        .split(/[\n,]+/)
+        .map((s) => s.trim())
+        .filter(Boolean),
+    [serialNumbers]
+  )
+  const uniqueSerials = useMemo(() => [...new Set(serialsList)], [serialsList])
+  const inListDuplicateCount = serialsList.length - uniqueSerials.length
+  const scannedCount = uniqueSerials.length
   const clientDisplay = clientId ? clients.find((c) => c.id === clientId)?.company ?? clientId : "Not selected"
 
+  const productNames = useMemo(() => {
+    const names = new Set<string>()
+    inventory.forEach((item) => names.add(item.name))
+    return Array.from(names).sort()
+  }, [inventory])
+  const allOptions = useMemo(() => {
+    const types = ITEM_TYPE_OPTIONS.map((o) => o.label)
+    const combined = [...productNames]
+    types.forEach((t) => {
+      if (!combined.includes(t)) combined.push(t)
+    })
+    return combined.sort()
+  }, [productNames])
+  const inventorySerialSet = useMemo(() => new Set(inventory.map((i) => i.serialNumber)), [inventory])
+  const requiresOutboundDetails = OUTBOUND_LIKE_MOVEMENTS.includes(selectedType as TransactionType)
+
+  function handleSerialChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
+    const v = e.target.value
+    setSerialNumbers(v.includes("\n") ? v.replace(/\n+/g, ", ").replace(/,+\s*,/g, ", ") : v)
+    if (!v.trim()) setLastDuplicateMessage(null)
+  }
+  function handleSerialPaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const pasted = e.clipboardData.getData("text")
+    if (pasted.includes("\n") || pasted.includes(",")) {
+      e.preventDefault()
+      const normalized = pasted
+        .split(/[\n,]+/)
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .join(", ")
+      setSerialNumbers((prev) => (prev ? `${prev}, ${normalized}` : normalized))
+    }
+  }
+
+  function inferItemType(name: string): ItemType {
+    const match = inventory.find((i) => i.name === name)
+    return (match?.itemType ?? "Starlink Kit") as ItemType
+  }
+
+  async function handleAddMissingAndContinue() {
+    if (!missingSerialsState) return
+    setAddingToInventory(true)
+    try {
+      const { missing, productName: pn, movementType, allSerials } = missingSerialsState
+      const itemType = inferItemType(pn)
+      const today = new Date().toISOString().slice(0, 10)
+      for (const serial of missing) {
+        addItem({
+          serialNumber: serial,
+          itemType,
+          name: pn,
+          status: "In Stock",
+          dateAdded: today,
+          location: "Warehouse A",
+        })
+      }
+      toast.success(`${missing.length} item(s) added to inventory. Continue with client details.`)
+      setMissingSerialsState(null)
+      setPendingOutbound({ productName: pn, movementType, serials: allSerials })
+      setOutboundClientId("")
+      setOutboundClientSearch("")
+      setNewClientName("")
+      setNewClientCompany("")
+      setNewClientEmail("")
+      setNewClientPhone("")
+      setSites([{ address: "" }])
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to add items to inventory")
+    } finally {
+      setAddingToInventory(false)
+    }
+  }
+
+  function addSite() {
+    setSites((prev) => [...prev, { address: "" }])
+  }
+  function removeSite(index: number) {
+    setSites((prev) => prev.filter((_, i) => i !== index))
+  }
+  function updateSite(index: number, field: "name" | "address", value: string) {
+    setSites((prev) => prev.map((s, i) => (i === index ? { ...s, [field]: value } : s)))
+  }
+
+  async function recordQuickScan(
+    serials: string[],
+    outboundDetails?: {
+      clientId?: string
+      clientName?: string
+      clientCompany?: string
+      clientEmail?: string
+      clientPhone?: string
+      sites?: ClientSite[]
+    }
+  ) {
+    const body: Record<string, unknown> =
+      serials.length === 1
+        ? { serialNumber: serials[0], scanType: productName.trim(), movementType: selectedType }
+        : { serialNumbers: serials, scanType: productName.trim(), movementType: selectedType }
+    if (outboundDetails) {
+      if (outboundDetails.clientId) body.clientId = outboundDetails.clientId
+      if (outboundDetails.clientName) body.clientName = outboundDetails.clientName
+      if (outboundDetails.clientCompany) body.clientCompany = outboundDetails.clientCompany
+      if (outboundDetails.clientEmail) body.clientEmail = outboundDetails.clientEmail
+      if (outboundDetails.clientPhone) body.clientPhone = outboundDetails.clientPhone
+      if (outboundDetails.sites?.length) body.sites = outboundDetails.sites.filter((s) => s.address.trim())
+    }
+    await fetch("/api/quick-scan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+  }
+
+  function doSubmit(outboundDetails?: {
+    clientId?: string
+    clientName?: string
+    clientCompany?: string
+    clientEmail?: string
+    clientPhone?: string
+    sites?: ClientSite[]
+  }) {
+    setLastDuplicateMessage(null)
+    setIsSubmitting(true)
+    const list = pendingOutbound ? pendingOutbound.serials : uniqueSerials
+    const result = applyMovement({
+      type: selectedType as "Inbound" | "Sale" | "POC Out" | "POC Return" | "Rentals" | "Transfer" | "Dispose",
+      serialNumbers: list,
+      clientId: (outboundDetails?.clientId ?? clientId) || undefined,
+      fromLocation: selectedType === "Transfer" ? fromLocation : undefined,
+      toLocation: selectedType === "Transfer" || selectedType === "POC Return" ? toLocation || undefined : undefined,
+      assignedTo: (outboundDetails?.clientName ?? outboundDetails?.clientCompany) ?? (clientId ? clients.find((c) => c.id === clientId)?.company : undefined),
+      invoiceNumber: invoiceNumber.trim() || undefined,
+      notes: notes.trim() || undefined,
+      returnDate: selectedType === "Rentals" && rentalReturnDate.trim() ? rentalReturnDate.trim() : undefined,
+    })
+    if (result.success.length > 0) {
+      toast.success(`Recorded ${result.success.length} item(s)`)
+      setSerialNumbers("")
+      setProductName("")
+      setInvoiceNumber("")
+      setNotes("")
+      setPendingOutbound(null)
+      recordQuickScan(result.success, outboundDetails).catch(() => {})
+    }
+    if (result.notFound.length > 0) {
+      toast.warning(`Serial number(s) not found: ${result.notFound.join(", ")}`)
+      setLastDuplicateMessage(result.notFound)
+    }
+    setIsSubmitting(false)
+  }
+
+  async function handleOutboundModalSubmit() {
+    if (!pendingOutbound) return
+    const selectedClient = outboundClientId && outboundClientId !== "new" ? clients.find((c) => c.id === outboundClientId) : null
+    const outboundDetails: {
+      clientId?: string
+      clientName?: string
+      clientCompany?: string
+      clientEmail?: string
+      clientPhone?: string
+      sites?: ClientSite[]
+    } = {}
+    if (selectedClient) {
+      outboundDetails.clientId = selectedClient.id
+      outboundDetails.clientName = selectedClient.name
+      outboundDetails.clientCompany = selectedClient.company
+      outboundDetails.clientEmail = selectedClient.email
+      outboundDetails.clientPhone = selectedClient.phone
+    } else {
+      const name = newClientName.trim()
+      const company = newClientCompany.trim()
+      if (!name && !company) {
+        toast.error("Select a client or enter client name and company")
+        return
+      }
+      outboundDetails.clientName = name || company
+      outboundDetails.clientCompany = company || name
+      outboundDetails.clientEmail = newClientEmail.trim() || undefined
+      outboundDetails.clientPhone = newClientPhone.trim() || undefined
+    }
+    const validSites = sites.filter((s) => s.address.trim())
+    if (validSites.length > 0) outboundDetails.sites = validSites.map((s) => ({ name: s.name?.trim(), address: s.address.trim() }))
+    doSubmit(outboundDetails)
+  }
+
   function handleSubmit() {
-    if (serialsList.length === 0) {
-      toast.error("Scan or enter at least one serial number")
+    if (!productName.trim()) {
+      toast.error("Select or enter product / item type")
       return
     }
-    if ((selectedType === "Sale" || selectedType === "POC Out" || selectedType === "Rentals") && !clientId) {
-      toast.error("Select a client for this transaction type")
+    if (uniqueSerials.length === 0) {
+      toast.error("Scan or enter at least one serial number")
       return
     }
     if (selectedType === "Transfer" && (!fromLocation || !toLocation)) {
@@ -77,47 +323,56 @@ export function StockMovementContent() {
       toast.error("From and To locations must be different")
       return
     }
-    setIsSubmitting(true)
-    const result = applyMovement({
-      type: selectedType as "Inbound" | "Sale" | "POC Out" | "POC Return" | "Rentals" | "Transfer" | "Dispose",
-      serialNumbers: serialsList,
-      clientId: clientId || undefined,
-      fromLocation: selectedType === "Transfer" ? fromLocation : undefined,
-      toLocation: selectedType === "Transfer" || selectedType === "POC Return" ? toLocation || undefined : undefined,
-      assignedTo: clientId ? clients.find((c) => c.id === clientId)?.company : undefined,
-      invoiceNumber: invoiceNumber.trim() || undefined,
-      notes: notes.trim() || undefined,
+    if (selectedType === "POC Return" && !toLocation) {
+      toast.error("Select return location")
+      return
+    }
+    if (!requiresOutboundDetails) {
+      doSubmit()
+      return
+    }
+    const missing = uniqueSerials.filter((s) => !inventorySerialSet.has(s))
+    if (missing.length > 0) {
+      setMissingSerialsState({
+        missing,
+        productName: productName.trim(),
+        movementType: selectedType,
+        allSerials: uniqueSerials,
+      })
+      return
+    }
+    setPendingOutbound({
+      productName: productName.trim(),
+      movementType: selectedType,
+      serials: uniqueSerials,
     })
-    setIsSubmitting(false)
-    if (result.success.length > 0) {
-      toast.success(`Recorded ${result.success.length} item(s)`)
-      setSerialNumbers("")
-      setInvoiceNumber("")
-      setNotes("")
-    }
-    if (result.notFound.length > 0) {
-      toast.warning(`Serial number(s) not found: ${result.notFound.join(", ")}`)
-    }
+    setOutboundClientId(clientId || "")
+    setOutboundClientSearch("")
+    setNewClientName("")
+    setNewClientCompany("")
+    setNewClientEmail("")
+    setNewClientPhone("")
+    setSites([{ address: "" }])
   }
 
   return (
     <div className="flex flex-col gap-4 md:gap-6 min-w-0">
       {/* Header */}
       <div>
-        <h1 className="text-xl md:text-2xl font-bold text-foreground tracking-tight text-balance">Stock Movement</h1>
+        <h1 className="text-xl md:text-2xl font-bold text-foreground tracking-tight text-balance">Inventory Movement</h1>
         <p className="text-sm text-muted-foreground mt-1">Record inbound and outbound (sale, POC, rental, transfer) stock transactions.</p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
         {/* Left: Form */}
         <div className="lg:col-span-2 flex flex-col gap-4 md:gap-5">
-          {/* Transaction Type */}
-          <Card>
-            <CardHeader className="pb-3">
+          {/* Transaction Type — same height as Transaction Summary */}
+          <Card className="min-h-[260px] lg:min-h-[280px] flex flex-col">
+            <CardHeader className="pb-2">
               <CardTitle className="text-base font-semibold text-foreground">Transaction Type</CardTitle>
             </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
+            <CardContent className="flex-1 flex flex-col min-h-0">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 sm:gap-2 flex-1 content-start">
                 {transactionTypes.map((type) => {
                   const Icon = type.icon
                   const isActive = selectedType === type.value
@@ -126,17 +381,17 @@ export function StockMovementContent() {
                       key={type.value}
                       onClick={() => setSelectedType(type.value)}
                       className={cn(
-                        "flex flex-col items-center gap-2 p-3 sm:p-4 rounded-xl border-2 transition-all text-center",
+                        "flex flex-col items-center gap-1 p-2 sm:p-2.5 rounded-lg border-2 transition-all text-center",
                         isActive
                           ? "border-primary bg-primary/5"
                           : "border-border hover:border-primary/30 bg-card"
                       )}
                     >
-                      <div className={cn("flex items-center justify-center w-9 sm:w-10 h-9 sm:h-10 rounded-lg", type.bg)}>
-                        <Icon className={cn("w-4 sm:w-5 h-4 sm:h-5", type.color)} />
+                      <div className={cn("flex items-center justify-center w-7 sm:w-8 h-7 sm:h-8 rounded-md", type.bg)}>
+                        <Icon className={cn("w-3.5 sm:w-4 h-3.5 sm:h-4", type.color)} />
                       </div>
-                      <span className={cn("text-xs sm:text-sm font-medium", isActive ? "text-primary" : "text-foreground")}>{type.label}</span>
-                      <span className="text-[9px] sm:text-[10px] text-muted-foreground leading-tight hidden sm:block">{type.desc}</span>
+                      <span className={cn("text-[11px] sm:text-xs font-medium", isActive ? "text-primary" : "text-foreground")}>{type.label}</span>
+                      <span className="text-[9px] text-muted-foreground leading-tight hidden sm:block">{type.desc}</span>
                     </button>
                   )
                 })}
@@ -153,46 +408,112 @@ export function StockMovementContent() {
               </CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
-              <div className="flex gap-2">
-                <Input
-                  placeholder="Scan barcode or type serial number..."
-                  className="flex-1 font-mono text-sm h-10 bg-card text-foreground border-border"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && e.currentTarget.value.trim()) {
-                      setSerialNumbers((prev) => prev ? prev + "\n" + e.currentTarget.value.trim() : e.currentTarget.value.trim())
-                      e.currentTarget.value = ""
-                    }
-                  }}
-                />
-                <Button size="icon" className="h-10 w-10 shrink-0 bg-primary text-primary-foreground hover:bg-primary/90">
-                  <Camera className="w-4 h-4" />
-                  <span className="sr-only">Scan with camera</span>
-                </Button>
+              <div className="flex flex-col gap-2">
+                <Label className="text-xs text-muted-foreground">Product / item type</Label>
+                <Popover open={productOpen} onOpenChange={setProductOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      role="combobox"
+                      aria-expanded={productOpen}
+                      className="w-full justify-between h-10 bg-card border-border text-foreground font-normal"
+                    >
+                      <span className={cn("truncate", !productName && "text-muted-foreground")}>
+                        {productName || "Select or search product..."}
+                      </span>
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="min-w-[280px] p-0" align="start">
+                    <Command shouldFilter={false}>
+                      <CommandInput
+                        placeholder="Search products..."
+                        value={comboboxSearch}
+                        onValueChange={setComboboxSearch}
+                      />
+                      <CommandList>
+                        <CommandEmpty>
+                          <span className="py-6 text-center text-sm text-muted-foreground block">
+                            Type to search or add a new product below.
+                          </span>
+                        </CommandEmpty>
+                        {(() => {
+                          const q = comboboxSearch.trim().toLowerCase()
+                          const filtered = q ? allOptions.filter((name) => name.toLowerCase().includes(q)) : allOptions
+                          const canAdd = q && !allOptions.some((o) => o.toLowerCase() === q)
+                          return (
+                            <>
+                              {filtered.length > 0 && (
+                                <CommandGroup heading="Products & types">
+                                  {filtered.map((name) => (
+                                    <CommandItem
+                                      key={name}
+                                      value={name}
+                                      onSelect={() => {
+                                        setProductName(name)
+                                        setComboboxSearch("")
+                                        setProductOpen(false)
+                                      }}
+                                    >
+                                      {name}
+                                    </CommandItem>
+                                  ))}
+                                </CommandGroup>
+                              )}
+                              {canAdd && (
+                                <CommandGroup>
+                                  <CommandItem
+                                    value={`__add:${comboboxSearch.trim()}`}
+                                    onSelect={() => {
+                                      setProductName(comboboxSearch.trim())
+                                      setComboboxSearch("")
+                                      setProductOpen(false)
+                                    }}
+                                    className="text-primary gap-2"
+                                  >
+                                    <Plus className="h-4 w-4" />
+                                    Add &quot;{comboboxSearch.trim()}&quot; as new product
+                                  </CommandItem>
+                                </CommandGroup>
+                              )}
+                            </>
+                          )
+                        })()}
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
               </div>
               <div className="flex flex-col gap-2">
                 <Label className="text-xs text-muted-foreground">
-                  Bulk serial numbers (comma or newline separated; paste a list to add commas)
+                  Serial numbers (comma or newline separated; paste a list to add commas)
                 </Label>
                 <Textarea
                   placeholder="SL-001, SL-002, SL-003 or one per line..."
                   value={serialNumbers}
-                  onChange={(e) => setSerialNumbers(e.target.value)}
-                  onPaste={(e) => {
-                    const pasted = e.clipboardData.getData("text")
-                    if (pasted.includes("\n") && !pasted.includes(",")) {
-                      e.preventDefault()
-                      setSerialNumbers((prev) => {
-                        const normalized = pasted
-                          .split(/\n+/)
-                          .map((s) => s.trim())
-                          .filter(Boolean)
-                          .join(", ")
-                        return prev ? `${prev}, ${normalized}` : normalized
-                      })
-                    }
-                  }}
+                  onChange={handleSerialChange}
+                  onPaste={handleSerialPaste}
+                  disabled={isSubmitting}
                   className="font-mono text-xs min-h-[100px] sm:min-h-[120px] bg-card text-foreground border-border"
                 />
+                {serialsList.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                    <span className="font-medium text-foreground">
+                      {uniqueSerials.length} item{uniqueSerials.length !== 1 ? "s" : ""} to scan
+                    </span>
+                    {inListDuplicateCount > 0 && (
+                      <span>
+                        ({inListDuplicateCount} duplicate{inListDuplicateCount !== 1 ? "s" : ""} in list, will submit unique only)
+                      </span>
+                    )}
+                  </div>
+                )}
+                {lastDuplicateMessage && lastDuplicateMessage.length > 0 && (
+                  <p className="text-xs text-amber-600 dark:text-amber-400 bg-amber-500/10 rounded-md px-2 py-1.5">
+                    Not found (not recorded): {lastDuplicateMessage.slice(0, 5).join(", ")}
+                    {lastDuplicateMessage.length > 5 && ` +${lastDuplicateMessage.length - 5} more`}
+                  </p>
+                )}
               </div>
               {scannedCount > 0 && (
                 <div className="flex items-center gap-2">
@@ -203,7 +524,7 @@ export function StockMovementContent() {
                     variant="ghost"
                     size="sm"
                     className="h-6 text-xs text-muted-foreground hover:text-foreground"
-                    onClick={() => setSerialNumbers("")}
+                    onClick={() => { setSerialNumbers(""); setLastDuplicateMessage(null) }}
                   >
                     Clear all
                   </Button>
@@ -236,6 +557,18 @@ export function StockMovementContent() {
                       ))}
                     </SelectContent>
                   </Select>
+                </div>
+              )}
+              {selectedType === "Rentals" && (
+                <div className="flex flex-col gap-2">
+                  <Label className="text-foreground">Return date (optional)</Label>
+                  <Input
+                    type="date"
+                    className="bg-card text-foreground border-border"
+                    value={rentalReturnDate}
+                    onChange={(e) => setRentalReturnDate(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">When the kit is due back. If empty, defaults to 30 days from today.</p>
                 </div>
               )}
               {selectedType === "Transfer" && (
@@ -306,22 +639,26 @@ export function StockMovementContent() {
               <Button
                 className="w-full sm:w-auto sm:self-end bg-primary text-primary-foreground hover:bg-primary/90"
                 onClick={handleSubmit}
-                disabled={isSubmitting || scannedCount === 0}
+                disabled={isSubmitting || scannedCount === 0 || !productName.trim()}
               >
-                <Package className="w-4 h-4 mr-1.5" />
+                {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin mr-1.5" /> : <Package className="w-4 h-4 mr-1.5" />}
                 {isSubmitting ? "Submitting..." : "Submit Transaction"}
               </Button>
             </CardContent>
           </Card>
         </div>
 
-        {/* Right: Summary */}
+        {/* Right: Summary — same height as Transaction Type panel on lg */}
         <div className="flex flex-col gap-4 md:gap-5">
-          <Card>
-            <CardHeader className="pb-3">
+          <Card className="min-h-[260px] lg:min-h-[280px] flex flex-col">
+            <CardHeader className="pb-2">
               <CardTitle className="text-base font-semibold text-foreground">Transaction Summary</CardTitle>
             </CardHeader>
-            <CardContent className="flex flex-col gap-4">
+            <CardContent className="flex flex-col gap-4 flex-1">
+              <div className="flex items-center justify-between py-2 border-b border-border">
+                <span className="text-sm text-muted-foreground">Product</span>
+                <span className="text-sm text-foreground truncate max-w-[140px]" title={productName}>{productName || "—"}</span>
+              </div>
               <div className="flex items-center justify-between py-2 border-b border-border">
                 <span className="text-sm text-muted-foreground">Type</span>
                 <Badge
@@ -380,25 +717,201 @@ export function StockMovementContent() {
                 <CardTitle className="text-base font-semibold text-foreground">Scanned Items</CardTitle>
               </CardHeader>
               <CardContent className="flex flex-col gap-2">
-                {serialNumbers
-                  .split("\n")
-                  .filter((s) => s.trim())
-                  .map((serial, i) => (
-                    <div
-                      key={i}
-                      className="flex items-center gap-2 px-3 py-2 rounded-lg bg-secondary"
-                    >
-                      <div className="w-6 h-6 rounded-md bg-primary/10 flex items-center justify-center shrink-0">
-                        <span className="text-[10px] font-bold text-primary">{i + 1}</span>
-                      </div>
-                      <span className="font-mono text-xs text-foreground truncate">{serial.trim()}</span>
+                {uniqueSerials.map((serial, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center gap-2 px-3 py-2 rounded-lg bg-secondary"
+                  >
+                    <div className="w-6 h-6 rounded-md bg-primary/10 flex items-center justify-center shrink-0">
+                      <span className="text-[10px] font-bold text-primary">{i + 1}</span>
                     </div>
-                  ))}
+                    <span className="font-mono text-xs text-foreground truncate">{serial}</span>
+                  </div>
+                ))}
               </CardContent>
             </Card>
           )}
         </div>
       </div>
+
+      {/* Missing serials dialog (outbound: add to inventory first) */}
+      <Dialog open={!!missingSerialsState} onOpenChange={(open) => !open && setMissingSerialsState(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Serials not in inventory</DialogTitle>
+          </DialogHeader>
+          {missingSerialsState && (
+            <div className="flex flex-col gap-4">
+              <p className="text-sm text-muted-foreground">
+                The following serial number(s) are not in the system. Add them to inventory first, then continue with client & site details.
+              </p>
+              <ul className="font-mono text-sm bg-muted/50 rounded-md p-3 max-h-40 overflow-y-auto space-y-1">
+                {missingSerialsState.missing.map((s) => (
+                  <li key={s}>{s}</li>
+                ))}
+              </ul>
+              <p className="text-xs text-muted-foreground">
+                They will be added as <strong>{missingSerialsState.productName}</strong>, status In Stock, then you can complete the {missingSerialsState.movementType} transaction.
+              </p>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setMissingSerialsState(null)} disabled={addingToInventory}>
+                  Cancel
+                </Button>
+                <Button onClick={handleAddMissingAndContinue} disabled={addingToInventory}>
+                  {addingToInventory ? <Loader2 className="w-4 h-4 animate-spin" /> : "Add to inventory & continue"}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Client & site details modal (outbound types) */}
+      <Dialog open={!!pendingOutbound} onOpenChange={(open) => !open && setPendingOutbound(null)}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Client & site details</DialogTitle>
+          </DialogHeader>
+          {pendingOutbound && (
+            <div className="flex flex-col gap-4">
+              <p className="text-sm text-muted-foreground">
+                {pendingOutbound.serials.length} item(s) · {pendingOutbound.productName} · {pendingOutbound.movementType}
+              </p>
+              <div className="flex flex-col gap-2">
+                <Label className="text-xs font-medium">Client</Label>
+                <Popover open={outboundClientOpen} onOpenChange={setOutboundClientOpen}>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" role="combobox" className="w-full justify-between h-10 font-normal">
+                      <span className={cn("truncate", !outboundClientId && "text-muted-foreground")}>
+                        {outboundClientId === "new"
+                          ? "New client (enter details below)"
+                          : outboundClientId
+                            ? clients.find((c) => c.id === outboundClientId)?.name + " – " + clients.find((c) => c.id === outboundClientId)?.company
+                            : "Select or add client..."}
+                      </span>
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="min-w-[300px] p-0" align="start">
+                    <Command>
+                      <CommandInput
+                        placeholder="Search clients..."
+                        value={outboundClientSearch}
+                        onValueChange={setOutboundClientSearch}
+                      />
+                      <CommandList>
+                        <CommandEmpty>No client found.</CommandEmpty>
+                        <CommandGroup>
+                          <CommandItem
+                            value="__new"
+                            onSelect={() => {
+                              setOutboundClientId("new")
+                              setOutboundClientOpen(false)
+                            }}
+                          >
+                            <Plus className="h-4 w-4 mr-2" />
+                            Add new client
+                          </CommandItem>
+                          {clients
+                            .filter(
+                              (c) =>
+                                !outboundClientSearch.trim() ||
+                                [c.name, c.company, c.email].some(
+                                  (x) => typeof x === "string" && x.toLowerCase().includes(outboundClientSearch.trim().toLowerCase())
+                                )
+                            )
+                            .map((c) => (
+                              <CommandItem
+                                key={c.id}
+                                value={c.id}
+                                onSelect={() => {
+                                  setOutboundClientId(c.id)
+                                  setOutboundClientOpen(false)
+                                }}
+                              >
+                                {c.name} – {c.company}
+                              </CommandItem>
+                            ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+              </div>
+              {outboundClientId === "new" && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-md border border-border bg-muted/30">
+                  <div className="sm:col-span-2">
+                    <Label className="text-xs">Name</Label>
+                    <Input placeholder="Contact name" value={newClientName} onChange={(e) => setNewClientName(e.target.value)} className="mt-1 h-9" />
+                  </div>
+                  <div>
+                    <Label className="text-xs">Company</Label>
+                    <Input placeholder="Company" value={newClientCompany} onChange={(e) => setNewClientCompany(e.target.value)} className="mt-1 h-9" />
+                  </div>
+                  <div>
+                    <Label className="text-xs">Email</Label>
+                    <Input type="email" placeholder="email@example.com" value={newClientEmail} onChange={(e) => setNewClientEmail(e.target.value)} className="mt-1 h-9" />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <Label className="text-xs">Phone</Label>
+                    <Input placeholder="+250 ..." value={newClientPhone} onChange={(e) => setNewClientPhone(e.target.value)} className="mt-1 h-9" />
+                  </div>
+                </div>
+              )}
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-medium flex items-center gap-1.5">
+                    <MapPin className="w-3.5 h-3.5" />
+                    Site addresses (optional, add multiple)
+                  </Label>
+                  <Button type="button" variant="ghost" size="sm" className="h-8 text-xs" onClick={addSite}>
+                    <Plus className="w-3.5 h-3.5 mr-1" />
+                    Add site
+                  </Button>
+                </div>
+                <div className="space-y-2">
+                  {sites.map((site, i) => (
+                    <div key={i} className="flex gap-2 items-start">
+                      <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <Input
+                          placeholder="Site name (e.g. HQ, Branch A)"
+                          value={site.name ?? ""}
+                          onChange={(e) => updateSite(i, "name", e.target.value)}
+                          className="h-9"
+                        />
+                        <Input
+                          placeholder="Full address"
+                          value={site.address}
+                          onChange={(e) => updateSite(i, "address", e.target.value)}
+                          className="h-9 sm:col-span-1"
+                        />
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-9 w-9 shrink-0 text-muted-foreground hover:text-destructive"
+                        onClick={() => removeSite(i)}
+                        disabled={sites.length <= 1}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <Button variant="outline" onClick={() => setPendingOutbound(null)}>
+                  Cancel
+                </Button>
+                <Button onClick={handleOutboundModalSubmit} disabled={isSubmitting}>
+                  {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Submit Transaction"}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

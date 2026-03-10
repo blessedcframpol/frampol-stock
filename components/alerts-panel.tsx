@@ -10,7 +10,7 @@ export function AlertsPanel() {
   const { getAlerts } = useInventoryStore()
   const alerts = getAlerts()
   const total =
-    alerts.lowStock.length + alerts.warrantyExpiring.length + alerts.pocOverdue.length
+    alerts.lowStock.length + alerts.warrantyExpiring.length + alerts.rentalOverdue.length
   if (total === 0) {
     return (
       <Card className="border-border">
@@ -73,14 +73,14 @@ export function AlertsPanel() {
             </ul>
           </div>
         )}
-        {alerts.pocOverdue.length > 0 && (
+        {alerts.rentalOverdue.length > 0 && (
           <div>
             <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 mb-1.5">
               <Clock className="w-3.5 h-3.5" />
-              POC overdue (&gt;30 days out)
+              Rental past return date
             </p>
             <ul className="space-y-1">
-              {alerts.pocOverdue.map((item) => (
+              {alerts.rentalOverdue.map((item) => (
                 <li key={item.id} className="text-sm text-foreground flex justify-between gap-2">
                   <span className="truncate font-mono">{item.serialNumber}</span>
                   <span className="text-muted-foreground shrink-0">{item.assignedTo ?? "—"}</span>

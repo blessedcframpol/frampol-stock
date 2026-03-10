@@ -3,7 +3,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react"
 import type { InventoryItem, Transaction, TransactionType } from "./data"
 import { inventoryItems as initialInventory, recentTransactions as initialTransactions, clients } from "./data"
-import { getReorderLevelForProduct } from "./settings"
+import { getReorderLevelForProduct, getReorderLevelOverrides } from "./settings"
 import { getSupabaseClient } from "./supabase/client"
 import { rowToInventoryItem, inventoryItemToRow, rowToTransaction, transactionToRow } from "./supabase/inventory-db"
 import { computeMovementResult } from "./supabase/movement-utils"
@@ -39,26 +39,27 @@ export interface MovementParams {
   assignedTo?: string
   invoiceNumber?: string
   notes?: string
+  /** For Rentals: when the kit is due to be returned (ISO date). Defaults to 30 days from today if omitted. */
+  returnDate?: string
 }
 
 export interface AlertsResult {
   lowStock: { groupName: string; itemType: string; inStock: number; threshold: number }[]
   warrantyExpiring: InventoryItem[]
-  pocOverdue: InventoryItem[]
+  /** Rentals past their return date (kit not yet returned) */
+  rentalOverdue: InventoryItem[]
 }
 
 const WARRANTY_DAYS = 30
-const POC_OVERDUE_DAYS = 30
 
 function getAlertsFromInventory(
   inventory: InventoryItem[],
   getThreshold: (productName: string) => number
 ): AlertsResult {
   const now = new Date()
+  now.setHours(0, 0, 0, 0)
   const warrantyLimit = new Date(now)
   warrantyLimit.setDate(warrantyLimit.getDate() + WARRANTY_DAYS)
-  const pocLimit = new Date(now)
-  pocLimit.setDate(pocLimit.getDate() - POC_OVERDUE_DAYS)
 
   const byName = new Map<string, InventoryItem[]>()
   for (const item of inventory) {
@@ -67,14 +68,20 @@ function getAlertsFromInventory(
     byName.set(item.name, list)
   }
 
+  // Consider all product groups: those in inventory and those with reorder overrides (so we still
+  // show low stock when a product has 0 items). Alert clears only when in-stock count exceeds
+  // the reorder level (i.e. when new items have been scanned in to satisfy it).
+  const overrideProductNames = Object.keys(getReorderLevelOverrides())
+  const allProductNames = new Set<string>([...byName.keys(), ...overrideProductNames])
   const lowStock: AlertsResult["lowStock"] = []
-  for (const [name, items] of byName.entries()) {
-    const threshold = getThreshold(name)
+  for (const name of allProductNames) {
+    const items = byName.get(name) ?? []
     const inStock = items.filter((i) => i.status === "In Stock").length
-    if (inStock <= threshold && inStock >= 0) {
+    const threshold = getThreshold(name)
+    if (inStock <= threshold) {
       lowStock.push({
         groupName: name,
-        itemType: items[0].itemType,
+        itemType: items[0]?.itemType ?? name,
         inStock,
         threshold,
       })
@@ -87,13 +94,15 @@ function getAlertsFromInventory(
     return end <= warrantyLimit && end >= now && item.status !== "Disposed" && item.status !== "Sold"
   })
 
-  const pocOverdue = inventory.filter((item) => {
-    if (item.status !== "POC" || !item.pocOutDate) return false
-    const out = new Date(item.pocOutDate)
-    return out < pocLimit
+  /** Rental alert: kit has a return date and it has passed (not yet returned) */
+  const rentalOverdue = inventory.filter((item) => {
+    if (item.status !== "POC" || !item.returnDate) return false
+    const due = new Date(item.returnDate)
+    due.setHours(0, 0, 0, 0)
+    return due < now
   })
 
-  return { lowStock, warrantyExpiring, pocOverdue }
+  return { lowStock, warrantyExpiring, rentalOverdue }
 }
 
 /** Revert state for one inventory item when undoing a transaction */
@@ -130,6 +139,7 @@ function getRevertUpdatesForTransaction(txn: Transaction): Partial<InventoryItem
         client: undefined,
         assignedTo: undefined,
         pocOutDate: undefined,
+        returnDate: undefined,
       }
     case "Transfer":
       return txn.fromLocation ? { location: txn.fromLocation } : {}
@@ -201,7 +211,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
 
   const applyMovement = useCallback(
     (params: MovementParams): { success: string[]; notFound: string[] } => {
-      const { type, serialNumbers, clientId, fromLocation, toLocation, assignedTo, invoiceNumber, notes } = params
+      const { type, serialNumbers, clientId, fromLocation, toLocation, assignedTo, invoiceNumber, notes, returnDate } = params
       const clientDisplay = clientId ? getClientDisplay(clientId) : "Internal"
       const result = computeMovementResult(inventory, {
         type,
@@ -212,6 +222,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
         assignedTo,
         invoiceNumber,
         notes,
+        returnDate,
       })
       if (result.success.length === 0) {
         return { success: [], notFound: result.notFound }

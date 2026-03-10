@@ -26,6 +26,7 @@ export function rowToInventoryItem(row: InventoryRow): InventoryItem {
     purchaseDate: row.purchase_date ?? undefined,
     warrantyEndDate: row.warranty_end_date ?? undefined,
     pocOutDate: row.poc_out_date ?? undefined,
+    returnDate: row.return_date ?? undefined,
     assignmentHistory: assignmentHistory ?? undefined,
   }
 }
@@ -51,6 +52,7 @@ export function inventoryItemToRow(item: InventoryItem): Database["public"]["Tab
     purchase_date: item.purchaseDate ?? null,
     warranty_end_date: item.warrantyEndDate ?? null,
     poc_out_date: item.pocOutDate ?? null,
+    return_date: item.returnDate ?? null,
     assignment_history: history ?? null,
   }
 }

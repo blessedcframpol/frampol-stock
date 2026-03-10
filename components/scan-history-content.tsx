@@ -18,7 +18,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import { History, Undo2, Loader2, List } from "lucide-react"
+import { History, Undo2, Loader2, Search } from "lucide-react"
 import type { QuickScanRecord } from "@/lib/data"
 import { formatDateDDMMYYYY } from "@/lib/utils"
 import { toast } from "sonner"
@@ -69,8 +69,28 @@ export function ScanHistoryContent() {
   const [undoingBatchKey, setUndoingBatchKey] = useState<string | null>(null)
   const [viewingBatch, setViewingBatch] = useState<ScanBatchEntry | null>(null)
   const [batchSearch, setBatchSearch] = useState("")
+  const [pageSearch, setPageSearch] = useState("")
 
   const batches = useMemo(() => groupScansByBatch(scans), [scans])
+
+  const filteredBatches = useMemo(() => {
+    if (!pageSearch.trim()) return batches
+    const q = pageSearch.trim().toLowerCase()
+    return batches.filter((entry) => {
+      const dateStr = formatDateDDMMYYYY(entry.scannedAt).toLowerCase()
+      const movement = (entry.movementType ?? "").toLowerCase()
+      const product = entry.scanType.toLowerCase()
+      const client = entry.clientDisplay.toLowerCase()
+      const serialMatch = entry.records.some((r) => r.serialNumber.toLowerCase().includes(q))
+      return (
+        dateStr.includes(q) ||
+        movement.includes(q) ||
+        product.includes(q) ||
+        client.includes(q) ||
+        serialMatch
+      )
+    })
+  }, [batches, pageSearch])
 
   const fetchScans = useCallback(async () => {
     setLoading(true)
@@ -143,21 +163,52 @@ export function ScanHistoryContent() {
               </p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow className="hover:bg-transparent">
-                    <TableHead className="text-xs text-muted-foreground font-medium">Date & time</TableHead>
-                    <TableHead className="text-xs text-muted-foreground font-medium">Movement</TableHead>
-                    <TableHead className="text-xs text-muted-foreground font-medium">Product</TableHead>
-                    <TableHead className="text-xs text-muted-foreground font-medium">Client</TableHead>
-                    <TableHead className="text-xs text-muted-foreground font-medium">Items</TableHead>
-                    <TableHead className="text-xs text-muted-foreground font-medium w-[100px]">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {batches.map((entry) => (
-                    <TableRow key={entry.batchKey}>
+            <>
+              <div className="p-4 border-b border-border">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search by date, movement, product, client, or serial..."
+                    value={pageSearch}
+                    onChange={(e) => setPageSearch(e.target.value)}
+                    className="pl-9 bg-card text-foreground border-border"
+                  />
+                </div>
+                {pageSearch.trim() && (
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Showing {filteredBatches.length} of {batches.length} entr{batches.length === 1 ? "y" : "ies"}
+                  </p>
+                )}
+              </div>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead className="text-xs text-muted-foreground font-medium">Date & time</TableHead>
+                      <TableHead className="text-xs text-muted-foreground font-medium">Movement</TableHead>
+                      <TableHead className="text-xs text-muted-foreground font-medium">Product</TableHead>
+                      <TableHead className="text-xs text-muted-foreground font-medium">Client</TableHead>
+                      <TableHead className="text-xs text-muted-foreground font-medium">Items</TableHead>
+                      <TableHead className="text-xs text-muted-foreground font-medium w-[100px]">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredBatches.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={6} className="text-center py-12 text-muted-foreground text-sm">
+                          No entries match your search.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      filteredBatches.map((entry) => (
+                    <TableRow
+                      key={entry.batchKey}
+                      className="cursor-pointer hover:bg-muted/50 transition-colors"
+                      onClick={() => {
+                        setViewingBatch(entry)
+                        setBatchSearch("")
+                      }}
+                    >
                       <TableCell className="text-sm text-foreground whitespace-nowrap">
                         {formatDateDDMMYYYY(entry.scannedAt)}
                         <span className="text-muted-foreground text-xs ml-1">
@@ -177,37 +228,10 @@ export function ScanHistoryContent() {
                         {entry.clientDisplay}
                       </TableCell>
                       <TableCell className="text-sm text-foreground tabular-nums">
-                        {entry.count > 1 ? (
-                          <Button
-                            variant="link"
-                            className="h-auto p-0 text-primary font-normal tabular-nums hover:underline"
-                            onClick={() => {
-                              setViewingBatch(entry)
-                              setBatchSearch("")
-                            }}
-                          >
-                            {entry.count} items
-                          </Button>
-                        ) : (
-                          entry.count
-                        )}
+                        {entry.count} item{entry.count !== 1 ? "s" : ""}
                       </TableCell>
-                      <TableCell>
+                      <TableCell onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-1">
-                          {entry.count > 1 && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="gap-1.5"
-                              onClick={() => {
-                                setViewingBatch(entry)
-                                setBatchSearch("")
-                              }}
-                            >
-                              <List className="w-4 h-4 shrink-0" />
-                              <span className="hidden sm:inline">View</span>
-                            </Button>
-                          )}
                           <Button
                             variant="ghost"
                             size="sm"
@@ -225,10 +249,12 @@ export function ScanHistoryContent() {
                         </div>
                       </TableCell>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>

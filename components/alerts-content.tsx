@@ -37,7 +37,7 @@ export function AlertsContent() {
   const { getAlerts } = useInventoryStore()
   const alerts = getAlerts()
   const total =
-    alerts.lowStock.length + alerts.warrantyExpiring.length + alerts.pocOverdue.length
+    alerts.lowStock.length + alerts.warrantyExpiring.length + alerts.rentalOverdue.length
 
   return (
     <div className="flex flex-col gap-6 min-w-0">
@@ -46,7 +46,7 @@ export function AlertsContent() {
           Alerts
         </h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Low stock, warranty expiring, and POC overdue. Take action from here or in Inventory / Stock Movement.
+          Low stock, warranty expiring, and rentals past return date. Take action from here or in Inventory / Stock Movement.
         </p>
       </div>
 
@@ -56,7 +56,7 @@ export function AlertsContent() {
             <AlertTriangle className="w-12 h-12 text-muted-foreground/50 mb-3" />
             <p className="text-sm font-medium text-foreground">No alerts</p>
             <p className="text-sm text-muted-foreground mt-1">
-              You're all set. New alerts will appear here when stock is low, warranty is expiring, or POC is overdue.
+              You're all set. New alerts will appear here when stock is low, warranty is expiring, or a rental is past its return date.
             </p>
           </CardContent>
         </Card>
@@ -102,15 +102,15 @@ export function AlertsContent() {
                 )}
               </TabsTrigger>
               <TabsTrigger
-                value="poc"
+                value="rental"
                 className={cn(
                   "rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-3 gap-1.5 shrink-0"
                 )}
               >
-                POC
-                {alerts.pocOverdue.length > 0 && (
+                Rental
+                {alerts.rentalOverdue.length > 0 && (
                   <Badge variant="secondary" className="h-5 min-w-5 px-1 text-[10px] font-semibold">
-                    {alerts.pocOverdue.length}
+                    {alerts.rentalOverdue.length}
                   </Badge>
                 )}
               </TabsTrigger>
@@ -143,7 +143,7 @@ export function AlertsContent() {
                               <TableCell className="text-sm">{a.inStock}</TableCell>
                               <TableCell>
                                 <Button variant="ghost" size="sm" className="h-8 text-xs" asChild>
-                                  <Link href="/inventory">
+                                  <Link href={`/inventory?group=${encodeURIComponent(a.groupName)}`}>
                                     View in Inventory <ChevronRight className="w-3.5 h-3.5 ml-0.5" />
                                   </Link>
                                 </Button>
@@ -183,7 +183,7 @@ export function AlertsContent() {
                                 <TableCell className="text-sm">{days} days</TableCell>
                                 <TableCell>
                                   <Button variant="ghost" size="sm" className="h-8 text-xs" asChild>
-                                    <Link href="/inventory">View in Inventory <ChevronRight className="w-3.5 h-3.5 ml-0.5" /></Link>
+                                    <Link href={`/inventory?group=${encodeURIComponent(item.name)}`}>View in Inventory <ChevronRight className="w-3.5 h-3.5 ml-0.5" /></Link>
                                   </Button>
                                 </TableCell>
                               </TableRow>
@@ -194,11 +194,11 @@ export function AlertsContent() {
                     </div>
                   </div>
                 )}
-                {alerts.pocOverdue.length > 0 && (
+                {alerts.rentalOverdue.length > 0 && (
                   <div>
                     <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1.5 mb-3">
                       <Clock className="w-3.5 h-3.5" />
-                      POC overdue
+                      Rental past return date
                     </p>
                     <div className="overflow-x-auto -mx-1">
                       <Table>
@@ -207,18 +207,20 @@ export function AlertsContent() {
                             <TableHead className="text-xs text-muted-foreground font-medium">Serial</TableHead>
                             <TableHead className="text-xs text-muted-foreground font-medium">Product</TableHead>
                             <TableHead className="text-xs text-muted-foreground font-medium">Assigned to</TableHead>
+                            <TableHead className="text-xs text-muted-foreground font-medium">Return date</TableHead>
                             <TableHead className="text-xs text-muted-foreground font-medium">Days overdue</TableHead>
                             <TableHead className="text-xs text-muted-foreground font-medium w-20" />
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {alerts.pocOverdue.map((item) => {
-                            const days = item.pocOutDate ? daysOverdue(item.pocOutDate) : 0
+                          {alerts.rentalOverdue.map((item) => {
+                            const days = item.returnDate ? daysOverdue(item.returnDate) : 0
                             return (
                               <TableRow key={item.id} className="border-b border-border/50">
                                 <TableCell className="font-mono text-sm text-foreground">{item.serialNumber}</TableCell>
                                 <TableCell className="text-sm text-foreground">{item.name}</TableCell>
                                 <TableCell className="text-sm text-muted-foreground">{item.assignedTo ?? "—"}</TableCell>
+                                <TableCell className="text-sm text-muted-foreground">{item.returnDate ? formatDateDDMMYYYY(item.returnDate) : "—"}</TableCell>
                                 <TableCell className="text-sm">{days} days</TableCell>
                                 <TableCell>
                                   <Button variant="ghost" size="sm" className="h-8 text-xs" asChild>
@@ -260,7 +262,7 @@ export function AlertsContent() {
                             <TableCell className="text-sm">{a.inStock}</TableCell>
                             <TableCell>
                               <Button variant="ghost" size="sm" className="h-8 text-xs" asChild>
-                                <Link href="/inventory">
+                                <Link href={`/inventory?group=${encodeURIComponent(a.groupName)}`}>
                                   View in Inventory <ChevronRight className="w-3.5 h-3.5 ml-0.5" />
                                 </Link>
                               </Button>
@@ -302,7 +304,7 @@ export function AlertsContent() {
                               <TableCell className="text-sm">{days} days</TableCell>
                               <TableCell>
                                 <Button variant="ghost" size="sm" className="h-8 text-xs" asChild>
-                                  <Link href="/inventory">View in Inventory <ChevronRight className="w-3.5 h-3.5 ml-0.5" /></Link>
+                                  <Link href={`/inventory?group=${encodeURIComponent(item.name)}`}>View in Inventory <ChevronRight className="w-3.5 h-3.5 ml-0.5" /></Link>
                                 </Button>
                               </TableCell>
                             </TableRow>
@@ -315,11 +317,11 @@ export function AlertsContent() {
               </div>
             </TabsContent>
 
-            {/* POC only */}
-            <TabsContent value="poc" className="mt-0">
+            {/* Rental only */}
+            <TabsContent value="rental" className="mt-0">
               <div className="pt-4 px-4 pb-4">
-                {alerts.pocOverdue.length === 0 ? (
-                  <p className="text-sm text-muted-foreground py-4">No POC overdue alerts.</p>
+                {alerts.rentalOverdue.length === 0 ? (
+                  <p className="text-sm text-muted-foreground py-4">No rental alerts. Kits past their return date will appear here.</p>
                 ) : (
                   <div className="overflow-x-auto -mx-1">
                     <Table>
@@ -328,18 +330,20 @@ export function AlertsContent() {
                           <TableHead className="text-xs text-muted-foreground font-medium">Serial</TableHead>
                           <TableHead className="text-xs text-muted-foreground font-medium">Product</TableHead>
                           <TableHead className="text-xs text-muted-foreground font-medium">Assigned to</TableHead>
+                          <TableHead className="text-xs text-muted-foreground font-medium">Return date</TableHead>
                           <TableHead className="text-xs text-muted-foreground font-medium">Days overdue</TableHead>
                           <TableHead className="text-xs text-muted-foreground font-medium w-20" />
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {alerts.pocOverdue.map((item) => {
-                          const days = item.pocOutDate ? daysOverdue(item.pocOutDate) : 0
+                        {alerts.rentalOverdue.map((item) => {
+                          const days = item.returnDate ? daysOverdue(item.returnDate) : 0
                           return (
                             <TableRow key={item.id} className="border-b border-border/50">
                               <TableCell className="font-mono text-sm text-foreground">{item.serialNumber}</TableCell>
                               <TableCell className="text-sm text-foreground">{item.name}</TableCell>
                               <TableCell className="text-sm text-muted-foreground">{item.assignedTo ?? "—"}</TableCell>
+                              <TableCell className="text-sm text-muted-foreground">{item.returnDate ? formatDateDDMMYYYY(item.returnDate) : "—"}</TableCell>
                               <TableCell className="text-sm">{days} days</TableCell>
                               <TableCell>
                                 <Button variant="ghost" size="sm" className="h-8 text-xs" asChild>

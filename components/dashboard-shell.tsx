@@ -52,7 +52,7 @@ import { SearchSuggestions } from "@/components/search-suggestions"
 
 const inventoryChildren = [
   { href: "/inventory/dispatched", label: "Dispatched" },
-  { href: "/inventory/movement", label: "Record movement" },
+  { href: "/inventory/movement", label: "Inventory movement" },
 ]
 
 const navItems = [
@@ -254,7 +254,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   }
   const alerts = getAlerts()
   const alertCount =
-    alerts.lowStock.length + alerts.warrantyExpiring.length + alerts.pocOverdue.length
+    alerts.lowStock.length + alerts.warrantyExpiring.length + alerts.rentalOverdue.length
 
   return (
     <div className="flex h-screen overflow-hidden">
@@ -529,11 +529,11 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                             </Badge>
                           )}
                         </TabsTrigger>
-                        <TabsTrigger value="poc" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-2 sm:px-3 py-2 gap-1 shrink-0">
-                          POC
-                          {alerts.pocOverdue.length > 0 && (
+                        <TabsTrigger value="rental" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-2 sm:px-3 py-2 gap-1 shrink-0">
+                          Rental
+                          {alerts.rentalOverdue.length > 0 && (
                             <Badge variant="secondary" className="h-5 min-w-5 px-1 text-[10px] font-semibold">
-                              {alerts.pocOverdue.length}
+                              {alerts.rentalOverdue.length}
                             </Badge>
                           )}
                         </TabsTrigger>
@@ -577,20 +577,20 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                               </ul>
                             </div>
                           )}
-                          {alerts.pocOverdue.length > 0 && (
+                          {alerts.rentalOverdue.length > 0 && (
                             <div className="px-4 py-1">
                               <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1.5 mb-1">
                                 <Clock className="w-3.5 h-3.5" />
-                                POC overdue
+                                Rental past return date
                               </p>
                               <ul className="space-y-0.5">
-                                {alerts.pocOverdue.slice(0, 3).map((item) => (
+                                {alerts.rentalOverdue.slice(0, 3).map((item) => (
                                   <li key={item.id} className="text-sm text-foreground py-1.5 px-2 rounded-md hover:bg-muted/50 font-mono text-xs">
                                     {item.serialNumber} <span className="text-muted-foreground font-sans">· {item.assignedTo ?? "—"}</span>
                                   </li>
                                 ))}
-                                {alerts.pocOverdue.length > 3 && (
-                                  <li className="text-xs text-muted-foreground px-2 py-1">+{alerts.pocOverdue.length - 3} more</li>
+                                {alerts.rentalOverdue.length > 3 && (
+                                  <li className="text-xs text-muted-foreground px-2 py-1">+{alerts.rentalOverdue.length - 3} more</li>
                                 )}
                               </ul>
                             </div>
@@ -615,9 +615,9 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                             ))}
                           </ul>
                         </TabsContent>
-                        <TabsContent value="poc" className="mt-0">
+                        <TabsContent value="rental" className="mt-0">
                           <ul className="space-y-0.5 px-4">
-                            {alerts.pocOverdue.map((item) => (
+                            {alerts.rentalOverdue.map((item) => (
                               <li key={item.id} className="text-sm text-foreground py-2 px-2 rounded-md hover:bg-muted/50 font-mono text-xs border-b border-border/50 last:border-0">
                                 {item.serialNumber} <span className="text-muted-foreground font-sans">· {item.assignedTo ?? "—"}</span>
                               </li>
