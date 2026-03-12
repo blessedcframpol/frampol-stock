@@ -155,10 +155,12 @@ export function TransactionActions({ transaction, compact }: TransactionActionsP
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuItem onClick={handleUndo} disabled={busy}>
-            <Undo2 className="mr-2 h-4 w-4" />
-            Undo
-          </DropdownMenuItem>
+          {transaction.type !== "Dispose" && (
+            <DropdownMenuItem onClick={handleUndo} disabled={busy}>
+              <Undo2 className="mr-2 h-4 w-4" />
+              Undo
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem onClick={openReassign} disabled={busy}>
             <ArrowRightLeft className="mr-2 h-4 w-4" />
             Reassign to another product

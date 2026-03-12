@@ -36,8 +36,10 @@ function daysOverdue(dateStr: string): number {
 export function AlertsContent() {
   const { getAlerts } = useInventoryStore()
   const alerts = getAlerts()
+  const returnAlertsCount =
+    alerts.pocOverdue.length + alerts.pocApproaching.length + alerts.rentalOverdue.length + alerts.rentalApproaching.length
   const total =
-    alerts.lowStock.length + alerts.warrantyExpiring.length + alerts.rentalOverdue.length
+    alerts.lowStock.length + alerts.warrantyExpiring.length + returnAlertsCount
 
   return (
     <div className="flex flex-col gap-6 min-w-0">
@@ -102,15 +104,15 @@ export function AlertsContent() {
                 )}
               </TabsTrigger>
               <TabsTrigger
-                value="rental"
+                value="return"
                 className={cn(
                   "rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-3 gap-1.5 shrink-0"
                 )}
               >
-                Rental
-                {alerts.rentalOverdue.length > 0 && (
+                POC / Rental return
+                {returnAlertsCount > 0 && (
                   <Badge variant="secondary" className="h-5 min-w-5 px-1 text-[10px] font-semibold">
-                    {alerts.rentalOverdue.length}
+                    {returnAlertsCount}
                   </Badge>
                 )}
               </TabsTrigger>
@@ -194,11 +196,11 @@ export function AlertsContent() {
                     </div>
                   </div>
                 )}
-                {alerts.rentalOverdue.length > 0 && (
+                {(alerts.pocOverdue.length > 0 || alerts.pocApproaching.length > 0) && (
                   <div>
                     <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1.5 mb-3">
                       <Clock className="w-3.5 h-3.5" />
-                      Rental past return date
+                      POC — return date overdue / approaching
                     </p>
                     <div className="overflow-x-auto -mx-1">
                       <Table>
@@ -208,7 +210,59 @@ export function AlertsContent() {
                             <TableHead className="text-xs text-muted-foreground font-medium">Product</TableHead>
                             <TableHead className="text-xs text-muted-foreground font-medium">Assigned to</TableHead>
                             <TableHead className="text-xs text-muted-foreground font-medium">Return date</TableHead>
-                            <TableHead className="text-xs text-muted-foreground font-medium">Days overdue</TableHead>
+                            <TableHead className="text-xs text-muted-foreground font-medium">Status</TableHead>
+                            <TableHead className="text-xs text-muted-foreground font-medium w-20" />
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {alerts.pocOverdue.map((item) => (
+                            <TableRow key={item.id} className="border-b border-border/50">
+                              <TableCell className="font-mono text-sm text-foreground">{item.serialNumber}</TableCell>
+                              <TableCell className="text-sm text-foreground">{item.name}</TableCell>
+                              <TableCell className="text-sm text-muted-foreground">{item.assignedTo ?? "—"}</TableCell>
+                              <TableCell className="text-sm text-muted-foreground">{item.returnDate ? formatDateDDMMYYYY(item.returnDate) : "—"}</TableCell>
+                              <TableCell className="text-sm">Past due</TableCell>
+                              <TableCell>
+                                <Button variant="ghost" size="sm" className="h-8 text-xs" asChild>
+                                  <Link href="/inventory/movement">Record return <ChevronRight className="w-3.5 h-3.5 ml-0.5" /></Link>
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                          {alerts.pocApproaching.map((item) => (
+                            <TableRow key={item.id} className="border-b border-border/50">
+                              <TableCell className="font-mono text-sm text-foreground">{item.serialNumber}</TableCell>
+                              <TableCell className="text-sm text-foreground">{item.name}</TableCell>
+                              <TableCell className="text-sm text-muted-foreground">{item.assignedTo ?? "—"}</TableCell>
+                              <TableCell className="text-sm text-muted-foreground">{item.returnDate ? formatDateDDMMYYYY(item.returnDate) : "—"}</TableCell>
+                              <TableCell className="text-sm text-amber-600 dark:text-amber-400">Approaching</TableCell>
+                              <TableCell>
+                                <Button variant="ghost" size="sm" className="h-8 text-xs" asChild>
+                                  <Link href="/inventory/movement">Record return <ChevronRight className="w-3.5 h-3.5 ml-0.5" /></Link>
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+                )}
+                {(alerts.rentalOverdue.length > 0 || alerts.rentalApproaching.length > 0) && (
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1.5 mb-3">
+                      <Clock className="w-3.5 h-3.5" />
+                      Rental — return date overdue / approaching
+                    </p>
+                    <div className="overflow-x-auto -mx-1">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="hover:bg-transparent border-b border-border">
+                            <TableHead className="text-xs text-muted-foreground font-medium">Serial</TableHead>
+                            <TableHead className="text-xs text-muted-foreground font-medium">Product</TableHead>
+                            <TableHead className="text-xs text-muted-foreground font-medium">Assigned to</TableHead>
+                            <TableHead className="text-xs text-muted-foreground font-medium">Return date</TableHead>
+                            <TableHead className="text-xs text-muted-foreground font-medium">Status</TableHead>
                             <TableHead className="text-xs text-muted-foreground font-medium w-20" />
                           </TableRow>
                         </TableHeader>
@@ -221,7 +275,7 @@ export function AlertsContent() {
                                 <TableCell className="text-sm text-foreground">{item.name}</TableCell>
                                 <TableCell className="text-sm text-muted-foreground">{item.assignedTo ?? "—"}</TableCell>
                                 <TableCell className="text-sm text-muted-foreground">{item.returnDate ? formatDateDDMMYYYY(item.returnDate) : "—"}</TableCell>
-                                <TableCell className="text-sm">{days} days</TableCell>
+                                <TableCell className="text-sm">{days} days overdue</TableCell>
                                 <TableCell>
                                   <Button variant="ghost" size="sm" className="h-8 text-xs" asChild>
                                     <Link href="/inventory/movement">Record return <ChevronRight className="w-3.5 h-3.5 ml-0.5" /></Link>
@@ -230,6 +284,20 @@ export function AlertsContent() {
                               </TableRow>
                             )
                           })}
+                          {alerts.rentalApproaching.map((item) => (
+                            <TableRow key={item.id} className="border-b border-border/50">
+                              <TableCell className="font-mono text-sm text-foreground">{item.serialNumber}</TableCell>
+                              <TableCell className="text-sm text-foreground">{item.name}</TableCell>
+                              <TableCell className="text-sm text-muted-foreground">{item.assignedTo ?? "—"}</TableCell>
+                              <TableCell className="text-sm text-muted-foreground">{item.returnDate ? formatDateDDMMYYYY(item.returnDate) : "—"}</TableCell>
+                              <TableCell className="text-sm text-amber-600 dark:text-amber-400">Approaching</TableCell>
+                              <TableCell>
+                                <Button variant="ghost" size="sm" className="h-8 text-xs" asChild>
+                                  <Link href="/inventory/movement">Record return <ChevronRight className="w-3.5 h-3.5 ml-0.5" /></Link>
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))}
                         </TableBody>
                       </Table>
                     </div>
@@ -317,45 +385,70 @@ export function AlertsContent() {
               </div>
             </TabsContent>
 
-            {/* Rental only */}
-            <TabsContent value="rental" className="mt-0">
-              <div className="pt-4 px-4 pb-4">
-                {alerts.rentalOverdue.length === 0 ? (
-                  <p className="text-sm text-muted-foreground py-4">No rental alerts. Kits past their return date will appear here.</p>
+            {/* POC / Rental return only */}
+            <TabsContent value="return" className="mt-0">
+              <div className="pt-4 px-4 pb-4 flex flex-col gap-6">
+                {alerts.pocOverdue.length === 0 && alerts.pocApproaching.length === 0 && alerts.rentalOverdue.length === 0 && alerts.rentalApproaching.length === 0 ? (
+                  <p className="text-sm text-muted-foreground py-4">No POC or rental return alerts.</p>
                 ) : (
-                  <div className="overflow-x-auto -mx-1">
-                    <Table>
-                      <TableHeader>
-                        <TableRow className="hover:bg-transparent border-b border-border">
-                          <TableHead className="text-xs text-muted-foreground font-medium">Serial</TableHead>
-                          <TableHead className="text-xs text-muted-foreground font-medium">Product</TableHead>
-                          <TableHead className="text-xs text-muted-foreground font-medium">Assigned to</TableHead>
-                          <TableHead className="text-xs text-muted-foreground font-medium">Return date</TableHead>
-                          <TableHead className="text-xs text-muted-foreground font-medium">Days overdue</TableHead>
-                          <TableHead className="text-xs text-muted-foreground font-medium w-20" />
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {alerts.rentalOverdue.map((item) => {
-                          const days = item.returnDate ? daysOverdue(item.returnDate) : 0
-                          return (
-                            <TableRow key={item.id} className="border-b border-border/50">
-                              <TableCell className="font-mono text-sm text-foreground">{item.serialNumber}</TableCell>
-                              <TableCell className="text-sm text-foreground">{item.name}</TableCell>
-                              <TableCell className="text-sm text-muted-foreground">{item.assignedTo ?? "—"}</TableCell>
-                              <TableCell className="text-sm text-muted-foreground">{item.returnDate ? formatDateDDMMYYYY(item.returnDate) : "—"}</TableCell>
-                              <TableCell className="text-sm">{days} days</TableCell>
-                              <TableCell>
-                                <Button variant="ghost" size="sm" className="h-8 text-xs" asChild>
-                                  <Link href="/inventory/movement">Record return <ChevronRight className="w-3.5 h-3.5 ml-0.5" /></Link>
-                                </Button>
-                              </TableCell>
+                  <>
+                    {(alerts.pocOverdue.length > 0 || alerts.pocApproaching.length > 0) && (
+                      <div>
+                        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">POC</p>
+                        <Table>
+                          <TableHeader>
+                            <TableRow className="hover:bg-transparent border-b border-border">
+                              <TableHead className="text-xs text-muted-foreground font-medium">Serial</TableHead>
+                              <TableHead className="text-xs text-muted-foreground font-medium">Product</TableHead>
+                              <TableHead className="text-xs text-muted-foreground font-medium">Return date</TableHead>
+                              <TableHead className="text-xs text-muted-foreground font-medium">Status</TableHead>
                             </TableRow>
-                          )
-                        })}
-                      </TableBody>
-                    </Table>
-                  </div>
+                          </TableHeader>
+                          <TableBody>
+                            {[...alerts.pocOverdue, ...alerts.pocApproaching].map((item) => {
+                              const isOverdue = alerts.pocOverdue.some((i) => i.id === item.id)
+                              return (
+                                <TableRow key={item.id} className="border-b border-border/50">
+                                  <TableCell className="font-mono text-sm">{item.serialNumber}</TableCell>
+                                  <TableCell className="text-sm">{item.name}</TableCell>
+                                  <TableCell className="text-sm text-muted-foreground">{item.returnDate ? formatDateDDMMYYYY(item.returnDate) : "—"}</TableCell>
+                                  <TableCell className="text-sm">{isOverdue ? "Past due" : "Approaching"}</TableCell>
+                                </TableRow>
+                              )
+                            })}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    )}
+                    {(alerts.rentalOverdue.length > 0 || alerts.rentalApproaching.length > 0) && (
+                      <div>
+                        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Rental</p>
+                        <Table>
+                          <TableHeader>
+                            <TableRow className="hover:bg-transparent border-b border-border">
+                              <TableHead className="text-xs text-muted-foreground font-medium">Serial</TableHead>
+                              <TableHead className="text-xs text-muted-foreground font-medium">Product</TableHead>
+                              <TableHead className="text-xs text-muted-foreground font-medium">Return date</TableHead>
+                              <TableHead className="text-xs text-muted-foreground font-medium">Status</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {[...alerts.rentalOverdue, ...alerts.rentalApproaching].map((item) => {
+                              const isOverdue = alerts.rentalOverdue.some((i) => i.id === item.id)
+                              return (
+                                <TableRow key={item.id} className="border-b border-border/50">
+                                  <TableCell className="font-mono text-sm">{item.serialNumber}</TableCell>
+                                  <TableCell className="text-sm">{item.name}</TableCell>
+                                  <TableCell className="text-sm text-muted-foreground">{item.returnDate ? formatDateDDMMYYYY(item.returnDate) : "—"}</TableCell>
+                                  <TableCell className="text-sm">{isOverdue ? "Past due" : "Approaching"}</TableCell>
+                                </TableRow>
+                              )
+                            })}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             </TabsContent>

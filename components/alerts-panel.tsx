@@ -10,7 +10,12 @@ export function AlertsPanel() {
   const { getAlerts } = useInventoryStore()
   const alerts = getAlerts()
   const total =
-    alerts.lowStock.length + alerts.warrantyExpiring.length + alerts.rentalOverdue.length
+    alerts.lowStock.length +
+    alerts.warrantyExpiring.length +
+    alerts.pocOverdue.length +
+    alerts.pocApproaching.length +
+    alerts.rentalOverdue.length +
+    alerts.rentalApproaching.length
   if (total === 0) {
     return (
       <Card className="border-border">
@@ -73,19 +78,22 @@ export function AlertsPanel() {
             </ul>
           </div>
         )}
-        {alerts.rentalOverdue.length > 0 && (
+        {((alerts.pocOverdue.length + alerts.pocApproaching.length + alerts.rentalOverdue.length + alerts.rentalApproaching.length) > 0) && (
           <div>
             <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 mb-1.5">
               <Clock className="w-3.5 h-3.5" />
-              Rental past return date
+              POC / Rental return due
             </p>
             <ul className="space-y-1">
-              {alerts.rentalOverdue.map((item) => (
+              {[...alerts.pocOverdue, ...alerts.pocApproaching, ...alerts.rentalOverdue, ...alerts.rentalApproaching].slice(0, 5).map((item) => (
                 <li key={item.id} className="text-sm text-foreground flex justify-between gap-2">
                   <span className="truncate font-mono">{item.serialNumber}</span>
                   <span className="text-muted-foreground shrink-0">{item.assignedTo ?? "—"}</span>
                 </li>
               ))}
+              {(alerts.pocOverdue.length + alerts.pocApproaching.length + alerts.rentalOverdue.length + alerts.rentalApproaching.length) > 5 && (
+                <li className="text-xs text-muted-foreground">+{(alerts.pocOverdue.length + alerts.pocApproaching.length + alerts.rentalOverdue.length + alerts.rentalApproaching.length) - 5} more</li>
+              )}
             </ul>
           </div>
         )}

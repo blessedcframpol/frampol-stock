@@ -45,7 +45,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger, PopoverAnchor } from "@/components/ui/popover"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useIsMobile } from "@/hooks/use-mobile"
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect } from "react"
 import { clients, appUsers } from "@/lib/data"
 import { runSearch } from "@/lib/search"
 import { SearchSuggestions } from "@/components/search-suggestions"
@@ -236,6 +236,10 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const [searchQuery, setSearchQuery] = useState("")
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false)
   const { inventory, getAlerts } = useInventoryStore()
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => {
+    setMounted(true)
+  }, [])
 
   const searchSuggestions = useMemo(
     () =>
@@ -253,8 +257,15 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
     setMobileSearchOpen(false)
   }
   const alerts = getAlerts()
-  const alertCount =
-    alerts.lowStock.length + alerts.warrantyExpiring.length + alerts.rentalOverdue.length
+  const totalAlertCount =
+    alerts.lowStock.length +
+    alerts.warrantyExpiring.length +
+    alerts.pocOverdue.length +
+    alerts.pocApproaching.length +
+    alerts.rentalOverdue.length +
+    alerts.rentalApproaching.length
+  // Use alert count only after mount to avoid hydration mismatch (store may differ server vs client)
+  const alertCount = mounted ? totalAlertCount : 0
 
   return (
     <div className="flex h-screen overflow-hidden">
@@ -302,8 +313,8 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                     >
                       <item.icon className="w-[18px] h-[18px]" />
                       {badge != null && badge > 0 && (
-                        <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-primary text-primary-foreground text-[9px] flex items-center justify-center font-bold">
-                          {badge}
+                        <span className="absolute -top-0.5 -right-0.5 min-w-[12px] h-[12px] px-0.5 rounded-full bg-primary text-primary-foreground text-[8px] flex items-center justify-center font-bold ring-2 ring-sidebar">
+                          {badge > 99 ? "99+" : badge}
                         </span>
                       )}
                     </Link>
@@ -478,7 +489,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                 <Button variant="ghost" size="icon" className="relative text-muted-foreground hover:text-foreground">
                   <Bell className="w-[18px] h-[18px]" />
                   {alertCount > 0 && (
-                    <span className="absolute top-1.5 right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500 text-amber-950 text-[10px] font-semibold flex items-center justify-center">
+                    <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] px-1 rounded-full bg-amber-500 text-amber-950 text-[9px] font-semibold flex items-center justify-center ring-2 ring-background">
                       {alertCount > 99 ? "99+" : alertCount}
                     </span>
                   )}
@@ -529,11 +540,11 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                             </Badge>
                           )}
                         </TabsTrigger>
-                        <TabsTrigger value="rental" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-2 sm:px-3 py-2 gap-1 shrink-0">
-                          Rental
-                          {alerts.rentalOverdue.length > 0 && (
+                        <TabsTrigger value="return" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-2 sm:px-3 py-2 gap-1 shrink-0">
+                          Return due
+                          {(alerts.pocOverdue.length + alerts.pocApproaching.length + alerts.rentalOverdue.length + alerts.rentalApproaching.length) > 0 && (
                             <Badge variant="secondary" className="h-5 min-w-5 px-1 text-[10px] font-semibold">
-                              {alerts.rentalOverdue.length}
+                              {alerts.pocOverdue.length + alerts.pocApproaching.length + alerts.rentalOverdue.length + alerts.rentalApproaching.length}
                             </Badge>
                           )}
                         </TabsTrigger>
@@ -577,20 +588,20 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                               </ul>
                             </div>
                           )}
-                          {alerts.rentalOverdue.length > 0 && (
+                          {(alerts.pocOverdue.length + alerts.pocApproaching.length + alerts.rentalOverdue.length + alerts.rentalApproaching.length) > 0 && (
                             <div className="px-4 py-1">
                               <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1.5 mb-1">
                                 <Clock className="w-3.5 h-3.5" />
-                                Rental past return date
+                                POC / Rental return due
                               </p>
                               <ul className="space-y-0.5">
-                                {alerts.rentalOverdue.slice(0, 3).map((item) => (
+                                {[...alerts.pocOverdue, ...alerts.pocApproaching, ...alerts.rentalOverdue, ...alerts.rentalApproaching].slice(0, 3).map((item) => (
                                   <li key={item.id} className="text-sm text-foreground py-1.5 px-2 rounded-md hover:bg-muted/50 font-mono text-xs">
                                     {item.serialNumber} <span className="text-muted-foreground font-sans">· {item.assignedTo ?? "—"}</span>
                                   </li>
                                 ))}
-                                {alerts.rentalOverdue.length > 3 && (
-                                  <li className="text-xs text-muted-foreground px-2 py-1">+{alerts.rentalOverdue.length - 3} more</li>
+                                {(alerts.pocOverdue.length + alerts.pocApproaching.length + alerts.rentalOverdue.length + alerts.rentalApproaching.length) > 3 && (
+                                  <li className="text-xs text-muted-foreground px-2 py-1">+{(alerts.pocOverdue.length + alerts.pocApproaching.length + alerts.rentalOverdue.length + alerts.rentalApproaching.length) - 3} more</li>
                                 )}
                               </ul>
                             </div>
@@ -615,9 +626,9 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                             ))}
                           </ul>
                         </TabsContent>
-                        <TabsContent value="rental" className="mt-0">
+                        <TabsContent value="return" className="mt-0">
                           <ul className="space-y-0.5 px-4">
-                            {alerts.rentalOverdue.map((item) => (
+                            {[...alerts.pocOverdue, ...alerts.pocApproaching, ...alerts.rentalOverdue, ...alerts.rentalApproaching].map((item) => (
                               <li key={item.id} className="text-sm text-foreground py-2 px-2 rounded-md hover:bg-muted/50 font-mono text-xs border-b border-border/50 last:border-0">
                                 {item.serialNumber} <span className="text-muted-foreground font-sans">· {item.assignedTo ?? "—"}</span>
                               </li>

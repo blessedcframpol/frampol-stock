@@ -67,11 +67,16 @@ export interface Database {
           item_name: string
           client: string
           date: string
+          client_id: string | null
           invoice_number: string | null
           notes: string | null
           from_location: string | null
           to_location: string | null
           assigned_to: string | null
+          disposal_reason: string | null
+          authorised_by: string | null
+          batch_id: string | null
+          delivery_note_url: string | null
         }
         Insert: {
           id: string
@@ -80,6 +85,11 @@ export interface Database {
           item_name: string
           client: string
           date: string
+          client_id?: string | null
+          disposal_reason?: string | null
+          authorised_by?: string | null
+          batch_id?: string | null
+          delivery_note_url?: string | null
           invoice_number?: string | null
           notes?: string | null
           from_location?: string | null
@@ -93,11 +103,51 @@ export interface Database {
           item_name?: string
           client?: string
           date?: string
+          client_id?: string | null
+          disposal_reason?: string | null
+          authorised_by?: string | null
           invoice_number?: string | null
           notes?: string | null
           from_location?: string | null
           to_location?: string | null
           assigned_to?: string | null
+          batch_id?: string | null
+          delivery_note_url?: string | null
+        }
+      }
+      outbound_batches: {
+        Row: {
+          id: string
+          type: string
+          client: string | null
+          client_id: string | null
+          start_date: string
+          end_date: string | null
+          status: string
+          invoice_number: string | null
+          created_at: string
+        }
+        Insert: {
+          id: string
+          type: string
+          client?: string | null
+          client_id?: string | null
+          start_date: string
+          end_date?: string | null
+          status?: string
+          invoice_number?: string | null
+          created_at: string
+        }
+        Update: {
+          id?: string
+          type?: string
+          client?: string | null
+          client_id?: string | null
+          start_date?: string
+          end_date?: string | null
+          status?: string
+          invoice_number?: string | null
+          created_at?: string
         }
       }
       quick_scans: {

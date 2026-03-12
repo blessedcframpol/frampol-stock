@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const validMovementTypes = ["Inbound", "Sale", "POC Out", "POC Return", "Rentals", "Transfer", "Dispose"] as const
+    const validMovementTypes = ["Inbound", "Sale", "POC Out", "POC Return", "Rental Return", "Rentals", "Transfer", "Dispose"] as const
     const movement = typeof movementType === "string" ? movementType.trim() : ""
     if (!movement || !validMovementTypes.includes(movement as (typeof validMovementTypes)[number])) {
       return NextResponse.json(

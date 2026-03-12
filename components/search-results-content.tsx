@@ -181,6 +181,7 @@ export function SearchResultsContent() {
                                   item.status === "In Stock" && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
                                   item.status === "Sold" && "bg-red-500/10 text-red-500 dark:text-red-400",
                                   item.status === "POC" && "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400",
+                                  item.status === "Rented" && "bg-blue-500/10 text-blue-600 dark:text-blue-400",
                                   item.status === "Maintenance" && "bg-amber-500/10 text-amber-600 dark:text-amber-400",
                                   item.status === "Disposed" && "bg-slate-500/10 text-slate-600 dark:text-slate-400"
                                 )}

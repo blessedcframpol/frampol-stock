@@ -52,9 +52,12 @@ import {
   Plus,
   MapPin,
   Loader2,
+  Upload,
+  X,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
+import { getSupabaseClient } from "@/lib/supabase/client"
 
 const OUTBOUND_LIKE_MOVEMENTS: TransactionType[] = ["Sale", "POC Out", "Transfer", "Dispose", "Rentals"]
 const ITEM_TYPE_OPTIONS: { value: ItemType; label: string }[] = [
@@ -77,6 +80,7 @@ const transactionTypes = [
   { value: "POC Out", label: "POC Out", icon: Send, color: "text-cyan-600 dark:text-cyan-400", bg: "bg-cyan-500/10", desc: "Send for proof of concept" },
   { value: "POC Return", label: "POC Return", icon: RotateCcw, color: "text-amber-600 dark:text-amber-400", bg: "bg-amber-500/10", desc: "Receive POC return" },
   { value: "Rentals", label: "Rentals", icon: Calendar, color: "text-blue-600 dark:text-blue-400", bg: "bg-blue-500/10", desc: "Rent out to client" },
+  { value: "Rental Return", label: "Rental Return", icon: RotateCcw, color: "text-blue-600 dark:text-blue-400", bg: "bg-blue-500/10", desc: "Receive rental return" },
   { value: "Transfer", label: "Transfer", icon: ArrowLeftRight, color: "text-violet-600 dark:text-violet-400", bg: "bg-violet-500/10", desc: "Move between locations" },
   { value: "Dispose", label: "Dispose", icon: Trash2, color: "text-slate-600 dark:text-slate-400", bg: "bg-slate-500/10", desc: "Dispose of asset" },
 ]
@@ -94,6 +98,9 @@ export function StockMovementContent() {
   const [fromLocation, setFromLocation] = useState<string>("")
   const [toLocation, setToLocation] = useState<string>("")
   const [rentalReturnDate, setRentalReturnDate] = useState("")
+  const [pocEndDate, setPocEndDate] = useState("")
+  const [disposalReason, setDisposalReason] = useState("")
+  const [authorisedBy, setAuthorisedBy] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [lastDuplicateMessage, setLastDuplicateMessage] = useState<string[] | null>(null)
   const [missingSerialsState, setMissingSerialsState] = useState<MissingSerialsState | null>(null)
@@ -107,6 +114,7 @@ export function StockMovementContent() {
   const [newClientPhone, setNewClientPhone] = useState("")
   const [sites, setSites] = useState<ClientSite[]>([{ address: "" }])
   const [addingToInventory, setAddingToInventory] = useState(false)
+  const [deliveryNoteFile, setDeliveryNoteFile] = useState<File | null>(null)
 
   const serialsList = useMemo(
     () =>
@@ -234,27 +242,38 @@ export function StockMovementContent() {
     })
   }
 
-  function doSubmit(outboundDetails?: {
-    clientId?: string
-    clientName?: string
-    clientCompany?: string
-    clientEmail?: string
-    clientPhone?: string
-    sites?: ClientSite[]
-  }) {
+  function doSubmit(
+    outboundDetails?: {
+      clientId?: string
+      clientName?: string
+      clientCompany?: string
+      clientEmail?: string
+      clientPhone?: string
+      sites?: ClientSite[]
+    },
+    deliveryNoteUrl?: string
+  ) {
     setLastDuplicateMessage(null)
     setIsSubmitting(true)
     const list = pendingOutbound ? pendingOutbound.serials : uniqueSerials
     const result = applyMovement({
-      type: selectedType as "Inbound" | "Sale" | "POC Out" | "POC Return" | "Rentals" | "Transfer" | "Dispose",
+      type: selectedType as "Inbound" | "Sale" | "POC Out" | "POC Return" | "Rental Return" | "Rentals" | "Transfer" | "Dispose",
       serialNumbers: list,
       clientId: (outboundDetails?.clientId ?? clientId) || undefined,
       fromLocation: selectedType === "Transfer" ? fromLocation : undefined,
-      toLocation: selectedType === "Transfer" || selectedType === "POC Return" ? toLocation || undefined : undefined,
+      toLocation: (selectedType === "Transfer" || selectedType === "POC Return" || selectedType === "Rental Return") ? toLocation || undefined : undefined,
       assignedTo: (outboundDetails?.clientName ?? outboundDetails?.clientCompany) ?? (clientId ? clients.find((c) => c.id === clientId)?.company : undefined),
       invoiceNumber: invoiceNumber.trim() || undefined,
       notes: notes.trim() || undefined,
-      returnDate: selectedType === "Rentals" && rentalReturnDate.trim() ? rentalReturnDate.trim() : undefined,
+      returnDate:
+        selectedType === "Rentals" && rentalReturnDate.trim()
+          ? rentalReturnDate.trim()
+          : selectedType === "POC Out" && pocEndDate.trim()
+            ? pocEndDate.trim()
+            : undefined,
+      disposalReason: selectedType === "Dispose" ? disposalReason.trim() || undefined : undefined,
+      authorisedBy: selectedType === "Dispose" ? authorisedBy.trim() || undefined : undefined,
+      deliveryNoteUrl: selectedType === "Inbound" ? deliveryNoteUrl : undefined,
     })
     if (result.success.length > 0) {
       toast.success(`Recorded ${result.success.length} item(s)`)
@@ -262,6 +281,11 @@ export function StockMovementContent() {
       setProductName("")
       setInvoiceNumber("")
       setNotes("")
+      if (selectedType === "Dispose") {
+        setDisposalReason("")
+        setAuthorisedBy("")
+      }
+      if (selectedType === "Inbound") setDeliveryNoteFile(null)
       setPendingOutbound(null)
       recordQuickScan(result.success, outboundDetails).catch(() => {})
     }
@@ -306,7 +330,20 @@ export function StockMovementContent() {
     doSubmit(outboundDetails)
   }
 
-  function handleSubmit() {
+  async function uploadDeliveryNote(file: File): Promise<string> {
+    const supabase = getSupabaseClient()
+    const ext = file.name.split(".").pop() || "pdf"
+    const path = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}.${ext}`
+    const { error } = await supabase.storage.from("delivery-notes").upload(path, file, {
+      contentType: file.type || "application/pdf",
+      upsert: false,
+    })
+    if (error) throw error
+    const { data } = supabase.storage.from("delivery-notes").getPublicUrl(path)
+    return data.publicUrl
+  }
+
+  async function handleSubmit() {
     if (!productName.trim()) {
       toast.error("Select or enter product / item type")
       return
@@ -323,12 +360,37 @@ export function StockMovementContent() {
       toast.error("From and To locations must be different")
       return
     }
-    if (selectedType === "POC Return" && !toLocation) {
+    if ((selectedType === "POC Return" || selectedType === "Rental Return") && !toLocation) {
       toast.error("Select return location")
       return
     }
+    if ((selectedType === "Sale" || selectedType === "Rentals") && !invoiceNumber.trim()) {
+      toast.error("Invoice number is required for Sale and Rentals")
+      return
+    }
+    if (selectedType === "Dispose") {
+      if (!disposalReason.trim()) {
+        toast.error("Disposal reason is required")
+        return
+      }
+      if (!authorisedBy.trim()) {
+        toast.error("Authorised by is required for disposal")
+        return
+      }
+    }
     if (!requiresOutboundDetails) {
-      doSubmit()
+      if (selectedType === "Inbound" && deliveryNoteFile) {
+        setIsSubmitting(true)
+        try {
+          const url = await uploadDeliveryNote(deliveryNoteFile)
+          doSubmit(undefined, url)
+        } catch (e) {
+          toast.error("Failed to upload delivery note. Ensure Supabase is configured and the delivery-notes bucket exists.")
+          setIsSubmitting(false)
+        }
+      } else {
+        doSubmit()
+      }
       return
     }
     const missing = uniqueSerials.filter((s) => !inventorySerialSet.has(s))
@@ -542,6 +604,43 @@ export function StockMovementContent() {
               </CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
+              {selectedType === "Inbound" && (
+                <div className="flex flex-col gap-2">
+                  <Label className="text-foreground flex items-center gap-2">
+                    <Upload className="w-4 h-4 text-muted-foreground" />
+                    Delivery note (optional)
+                  </Label>
+                  {!deliveryNoteFile ? (
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="file"
+                        accept=".pdf,image/jpeg,image/png,image/webp,application/pdf"
+                        className="cursor-pointer text-sm file:mr-2 file:rounded-md file:border-0 file:bg-primary/10 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-primary"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0]
+                          if (f) setDeliveryNoteFile(f)
+                          e.target.value = ""
+                        }}
+                      />
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm">
+                      <span className="truncate text-foreground">{deliveryNoteFile.name}</span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 w-7 p-0 shrink-0 text-muted-foreground hover:text-foreground"
+                        onClick={() => setDeliveryNoteFile(null)}
+                        aria-label="Remove delivery note"
+                      >
+                        <X className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  )}
+                  <p className="text-xs text-muted-foreground">PDF or image (JPEG, PNG, WebP). Attached to this inbound delivery.</p>
+                </div>
+              )}
               {(selectedType === "Sale" || selectedType === "POC Out" || selectedType === "Rentals") && (
                 <div className="flex flex-col gap-2">
                   <Label className="text-foreground">Client / Customer (assigned to)</Label>
@@ -557,6 +656,18 @@ export function StockMovementContent() {
                       ))}
                     </SelectContent>
                   </Select>
+                </div>
+              )}
+              {selectedType === "POC Out" && (
+                <div className="flex flex-col gap-2">
+                  <Label className="text-foreground">Expected return / POC end date (optional)</Label>
+                  <Input
+                    type="date"
+                    className="bg-card text-foreground border-border"
+                    value={pocEndDate}
+                    onChange={(e) => setPocEndDate(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">When the POC is expected to end. Used for return alerts.</p>
                 </div>
               )}
               {selectedType === "Rentals" && (
@@ -601,7 +712,7 @@ export function StockMovementContent() {
                   </div>
                 </div>
               )}
-              {selectedType === "POC Return" && (
+              {(selectedType === "POC Return" || selectedType === "Rental Return") && (
                 <div className="flex flex-col gap-2">
                   <Label className="text-foreground">Return To Location</Label>
                   <Select value={toLocation} onValueChange={setToLocation}>
@@ -615,6 +726,34 @@ export function StockMovementContent() {
                     </SelectContent>
                   </Select>
                 </div>
+              )}
+              {selectedType === "Dispose" && (
+                <>
+                  <div className="flex flex-col gap-2">
+                    <Label className="text-foreground">Reason for disposal (required)</Label>
+                    <Select value={disposalReason} onValueChange={setDisposalReason}>
+                      <SelectTrigger className="bg-card text-foreground border-border">
+                        <SelectValue placeholder="Select reason..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Beyond repair">Beyond repair</SelectItem>
+                        <SelectItem value="Lost">Lost</SelectItem>
+                        <SelectItem value="End of life">End of life</SelectItem>
+                        <SelectItem value="Other">Other</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <Label className="text-foreground">Authorised by (required)</Label>
+                    <Input
+                      placeholder="Name or ID of person who authorised"
+                      className="bg-card text-foreground border-border"
+                      value={authorisedBy}
+                      onChange={(e) => setAuthorisedBy(e.target.value)}
+                    />
+                    <p className="text-xs text-muted-foreground">Disposal cannot be undone. Authorisation is required.</p>
+                  </div>
+                </>
               )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="flex flex-col gap-2">
@@ -698,6 +837,12 @@ export function StockMovementContent() {
                     <span className="text-sm text-foreground">{toLocation || "—"}</span>
                   </div>
                 </>
+              )}
+              {selectedType === "Inbound" && (
+                <div className="flex items-center justify-between py-2 border-b border-border">
+                  <span className="text-sm text-muted-foreground">Delivery note</span>
+                  <span className="text-sm text-foreground truncate max-w-[140px]" title={deliveryNoteFile?.name}>{deliveryNoteFile ? deliveryNoteFile.name : "—"}</span>
+                </div>
               )}
               <div className="flex items-center justify-between py-2 border-b border-border">
                 <span className="text-sm text-muted-foreground">Invoice</span>

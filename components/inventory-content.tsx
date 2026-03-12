@@ -57,6 +57,7 @@ const statusStyles: Record<ItemStatus, string> = {
   "In Stock": "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
   Sold: "bg-red-500/10 text-red-500 dark:text-red-400",
   POC: "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400",
+  Rented: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
   Maintenance: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
   Disposed: "bg-slate-500/10 text-slate-600 dark:text-slate-400",
 }
@@ -90,7 +91,7 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 export function InventoryContent() {
   const searchParams = useSearchParams()
-  const { inventory, addItem } = useInventoryStore()
+  const { inventory, transactions, addItem } = useInventoryStore()
   const [search, setSearch] = useState("")
 
   const serialFromUrl = searchParams.get("serial")
@@ -182,10 +183,59 @@ export function InventoryContent() {
   const showProductTypesView = (categories.length === 0 || selectedCategory !== null) && selectedGroupName === null
   const showItemsView = selectedGroupName !== null
 
+  const serialFromUrlForHistory = searchParams.get("serial")
+  const kitHistoryForSerial = useMemo(() => {
+    if (!serialFromUrlForHistory?.trim()) return []
+    return transactions.filter((t) => t.serialNumber === serialFromUrlForHistory.trim())
+  }, [transactions, serialFromUrlForHistory])
+
+  const kitHistoryCard = serialFromUrlForHistory && kitHistoryForSerial.length >= 0 && (
+    <Card className="border-border">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base font-semibold text-foreground">Kit history</CardTitle>
+        <p className="text-xs text-muted-foreground">Serial: {serialFromUrlForHistory}</p>
+      </CardHeader>
+      <CardContent>
+        {kitHistoryForSerial.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No transactions recorded for this serial yet.</p>
+        ) : (
+          <div className="overflow-x-auto -mx-1">
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent border-b border-border">
+                  <TableHead className="text-xs text-muted-foreground font-medium">Date</TableHead>
+                  <TableHead className="text-xs text-muted-foreground font-medium">Type</TableHead>
+                  <TableHead className="text-xs text-muted-foreground font-medium">Item</TableHead>
+                  <TableHead className="text-xs text-muted-foreground font-medium">Client / Location</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {kitHistoryForSerial.slice(0, 20).map((txn) => (
+                  <TableRow key={txn.id} className="border-b border-border/50">
+                    <TableCell className="text-sm text-muted-foreground">{formatDateDDMMYYYY(txn.date)}</TableCell>
+                    <TableCell className="text-sm font-medium">{txn.type}</TableCell>
+                    <TableCell className="text-sm">{txn.itemName}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {txn.type === "Transfer" && txn.fromLocation && txn.toLocation ? `${txn.fromLocation} → ${txn.toLocation}` : txn.client}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            {kitHistoryForSerial.length > 20 && (
+              <p className="text-xs text-muted-foreground mt-2">Showing latest 20 of {kitHistoryForSerial.length} transactions.</p>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+
   // —— Level 1: Categories (Starlink, Fortinet)
   if (showCategoriesView) {
     return (
       <div className="flex flex-col gap-4 md:gap-6">
+        {kitHistoryCard}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
             <h1 className="text-xl md:text-2xl font-bold text-foreground tracking-tight text-balance">Inventory</h1>
@@ -366,6 +416,7 @@ export function InventoryContent() {
     const isFlatView = selectedCategory === "__flat__"
     return (
       <div className="flex flex-col gap-4 md:gap-6">
+        {kitHistoryCard}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div className="flex items-center gap-2 flex-wrap">
             {selectedCategory && selectedCategory !== "__flat__" && (
@@ -604,6 +655,7 @@ export function InventoryContent() {
   // —— Level 3: Group detail view (items in selected group, with list/card view)
   return (
     <div className="flex flex-col gap-4 md:gap-6">
+      {kitHistoryCard}
       <div className="flex flex-col gap-3">
         <Button
           variant="ghost"

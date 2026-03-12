@@ -41,13 +41,28 @@ export interface MovementParams {
   notes?: string
   /** For Rentals: when the kit is due to be returned (ISO date). Defaults to 30 days from today if omitted. */
   returnDate?: string
+  /** For Dispose: reason and authorisation */
+  disposalReason?: string
+  authorisedBy?: string
+  /** For POC Out / Rentals: optional batch id (created by store when supabase) */
+  batchId?: string
+  /** For Inbound: public URL of uploaded delivery note */
+  deliveryNoteUrl?: string
 }
+
+const APPROACHING_DAYS = 7
 
 export interface AlertsResult {
   lowStock: { groupName: string; itemType: string; inStock: number; threshold: number }[]
   warrantyExpiring: InventoryItem[]
+  /** POC items past expected return date */
+  pocOverdue: InventoryItem[]
+  /** POC items with return date approaching (within N days) */
+  pocApproaching: InventoryItem[]
   /** Rentals past their return date (kit not yet returned) */
   rentalOverdue: InventoryItem[]
+  /** Rentals with return date approaching (within N days) */
+  rentalApproaching: InventoryItem[]
 }
 
 const WARRANTY_DAYS = 30
@@ -94,15 +109,44 @@ function getAlertsFromInventory(
     return end <= warrantyLimit && end >= now && item.status !== "Disposed" && item.status !== "Sold"
   })
 
-  /** Rental alert: kit has a return date and it has passed (not yet returned) */
-  const rentalOverdue = inventory.filter((item) => {
+  const approachingStart = new Date(now)
+  approachingStart.setDate(approachingStart.getDate() + 1)
+  const approachingEnd = new Date(now)
+  approachingEnd.setDate(approachingEnd.getDate() + APPROACHING_DAYS)
+
+  /** POC: return date has passed */
+  const pocOverdue = inventory.filter((item) => {
     if (item.status !== "POC" || !item.returnDate) return false
     const due = new Date(item.returnDate)
     due.setHours(0, 0, 0, 0)
     return due < now
   })
 
-  return { lowStock, warrantyExpiring, rentalOverdue }
+  /** POC: return date approaching (within N days) */
+  const pocApproaching = inventory.filter((item) => {
+    if (item.status !== "POC" || !item.returnDate) return false
+    const due = new Date(item.returnDate)
+    due.setHours(0, 0, 0, 0)
+    return due >= approachingStart && due <= approachingEnd
+  })
+
+  /** Rental: return date has passed (status Rented) */
+  const rentalOverdue = inventory.filter((item) => {
+    if (item.status !== "Rented" || !item.returnDate) return false
+    const due = new Date(item.returnDate)
+    due.setHours(0, 0, 0, 0)
+    return due < now
+  })
+
+  /** Rental: return date approaching */
+  const rentalApproaching = inventory.filter((item) => {
+    if (item.status !== "Rented" || !item.returnDate) return false
+    const due = new Date(item.returnDate)
+    due.setHours(0, 0, 0, 0)
+    return due >= approachingStart && due <= approachingEnd
+  })
+
+  return { lowStock, warrantyExpiring, pocOverdue, pocApproaching, rentalOverdue, rentalApproaching }
 }
 
 /** Revert state for one inventory item when undoing a transaction */
@@ -131,6 +175,15 @@ function getRevertUpdatesForTransaction(txn: Transaction): Partial<InventoryItem
         location: "Client Site",
         client: undefined,
         assignedTo: undefined,
+      }
+    case "Rental Return":
+      return {
+        status: "Rented",
+        location: "Client Site",
+        client: undefined,
+        assignedTo: undefined,
+        pocOutDate: undefined,
+        returnDate: undefined,
       }
     case "Rentals":
       return {
@@ -211,18 +264,25 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
 
   const applyMovement = useCallback(
     (params: MovementParams): { success: string[]; notFound: string[] } => {
-      const { type, serialNumbers, clientId, fromLocation, toLocation, assignedTo, invoiceNumber, notes, returnDate } = params
+      const { type, serialNumbers, clientId, fromLocation, toLocation, assignedTo, invoiceNumber, notes, returnDate, disposalReason, authorisedBy, batchId, deliveryNoteUrl } = params
       const clientDisplay = clientId ? getClientDisplay(clientId) : "Internal"
+      const isOutboundBatch = type === "POC Out" || type === "Rentals"
+      const newBatchId = isOutboundBatch ? (batchId ?? `BATCH-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`) : undefined
       const result = computeMovementResult(inventory, {
         type,
         serialNumbers,
         clientDisplay,
+        clientId,
         fromLocation,
         toLocation,
         assignedTo,
         invoiceNumber,
         notes,
         returnDate,
+        disposalReason,
+        authorisedBy,
+        batchId: newBatchId,
+        deliveryNoteUrl,
       })
       if (result.success.length === 0) {
         return { success: [], notFound: result.notFound }
@@ -230,6 +290,23 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
 
       const runPersist = async () => {
         if (!supabase) return
+        if (newBatchId && isOutboundBatch && result.newTransactions.length > 0) {
+          const txn = result.newTransactions[0]
+          const dateIso = txn.date
+          const dateOnly = dateIso.slice(0, 10)
+          const endDate = type === "Rentals" && result.updatedItems[0]?.returnDate ? result.updatedItems[0].returnDate : null
+          await supabase.from("outbound_batches").insert({
+            id: newBatchId,
+            type,
+            client: clientDisplay,
+            client_id: clientId ?? null,
+            start_date: dateOnly,
+            end_date: endDate,
+            status: "open",
+            invoice_number: invoiceNumber ?? null,
+            created_at: dateIso,
+          })
+        }
         for (const item of result.updatedItems) {
           await supabase.from("inventory_items").update(inventoryItemToRow(item)).eq("id", item.id)
         }
@@ -302,6 +379,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
     async (txnId: string): Promise<{ ok: boolean; error?: string }> => {
       const txn = transactions.find((t) => t.id === txnId)
       if (!txn) return { ok: false, error: "Transaction not found" }
+      if (txn.type === "Dispose") return { ok: false, error: "Disposal cannot be undone." }
       const item = inventory.find((i) => i.serialNumber === txn.serialNumber)
       const updates = getRevertUpdatesForTransaction(txn)
       if (item && Object.keys(updates).length > 0) {

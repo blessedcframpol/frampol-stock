@@ -58,6 +58,7 @@ const MOVEMENT_TYPE_OPTIONS: { value: TransactionType; label: string }[] = [
   { value: "POC Out", label: "POC Out" },
   { value: "POC Return", label: "POC Return" },
   { value: "Rentals", label: "Rentals" },
+  { value: "Rental Return", label: "Rental Return" },
   { value: "Transfer", label: "Transfer" },
   { value: "Dispose", label: "Dispose" },
 ]

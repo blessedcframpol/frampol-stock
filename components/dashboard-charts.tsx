@@ -28,13 +28,14 @@ const MONTH_LABELS: Record<string, string> = {
 export function StockByCategoryChart() {
   const { inventory } = useInventoryStore()
   const stockByCategory = useMemo(() => {
-    const byType: Record<string, { inStock: number; sold: number; poc: number; maintenance: number; disposed: number }> = {}
+    const byType: Record<string, { inStock: number; sold: number; poc: number; rented: number; maintenance: number; disposed: number }> = {}
     inventory.forEach((item) => {
       const cat = item.itemType
-      if (!byType[cat]) byType[cat] = { inStock: 0, sold: 0, poc: 0, maintenance: 0, disposed: 0 }
+      if (!byType[cat]) byType[cat] = { inStock: 0, sold: 0, poc: 0, rented: 0, maintenance: 0, disposed: 0 }
       if (item.status === "In Stock") byType[cat].inStock++
       else if (item.status === "Sold") byType[cat].sold++
       else if (item.status === "POC") byType[cat].poc++
+      else if (item.status === "Rented") byType[cat].rented++
       else if (item.status === "Maintenance") byType[cat].maintenance++
       else if (item.status === "Disposed") byType[cat].disposed++
     })
@@ -44,9 +45,10 @@ export function StockByCategoryChart() {
         inStock: counts.inStock,
         sold: counts.sold,
         poc: counts.poc,
+        rented: counts.rented,
         maintenance: counts.maintenance,
       }))
-      .sort((a, b) => (b.inStock + b.sold + b.poc + b.maintenance) - (a.inStock + a.sold + a.poc + a.maintenance))
+      .sort((a, b) => (b.inStock + b.sold + b.poc + b.rented + b.maintenance) - (a.inStock + a.sold + a.poc + a.rented + a.maintenance))
   }, [inventory])
 
   return (
@@ -60,6 +62,7 @@ export function StockByCategoryChart() {
             inStock: { label: "In Stock", color: "#6366f1" },
             sold: { label: "Sold", color: "#10b981" },
             poc: { label: "POC", color: "#06b6d4" },
+            rented: { label: "Rented", color: "#3b82f6" },
             maintenance: { label: "Maintenance", color: "#f59e0b" },
           }}
           className="h-[240px] sm:h-[280px]"
@@ -73,6 +76,7 @@ export function StockByCategoryChart() {
               <Bar dataKey="inStock" stackId="a" fill="#6366f1" radius={[0, 0, 0, 0]} name="In Stock" />
               <Bar dataKey="sold" stackId="a" fill="#10b981" name="Sold" />
               <Bar dataKey="poc" stackId="a" fill="#06b6d4" name="POC" />
+              <Bar dataKey="rented" stackId="a" fill="#3b82f6" name="Rented" />
               <Bar dataKey="maintenance" stackId="a" fill="#f59e0b" radius={[4, 4, 0, 0]} name="Maintenance" />
             </BarChart>
           </ResponsiveContainer>

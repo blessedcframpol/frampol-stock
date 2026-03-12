@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS public.inventory_items (
   poc_out_date TEXT,
   assignment_history JSONB,
   CONSTRAINT inventory_items_status_check
-    CHECK (status IN ('In Stock', 'Sold', 'POC', 'Maintenance', 'Disposed'))
+    CHECK (status IN ('In Stock', 'Sold', 'POC', 'Rented', 'Maintenance', 'Disposed'))
 );
 
 -- Add category column if table already exists (run once if you had the table before)
@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS public.transactions (
   to_location TEXT,
   assigned_to TEXT,
   CONSTRAINT transactions_type_check
-    CHECK (type IN ('Inbound', 'Sale', 'POC Out', 'POC Return', 'Transfer', 'Dispose', 'Rentals'))
+    CHECK (type IN ('Inbound', 'Sale', 'POC Out', 'POC Return', 'Rental Return', 'Transfer', 'Dispose', 'Rentals'))
 );
 
 COMMENT ON TABLE public.transactions IS 'History of stock movements (in/out, POC, transfer, dispose).';

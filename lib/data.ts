@@ -1,6 +1,6 @@
 export type ItemType = "Starlink Kit" | "Laptop" | "Desktop" | "Router" | "Switch" | "Access Point" | "UPS" | "Monitor"
-export type ItemStatus = "In Stock" | "Sold" | "POC" | "Maintenance" | "Disposed"
-export type TransactionType = "Inbound" | "Sale" | "POC Out" | "POC Return" | "Transfer" | "Dispose" | "Rentals"
+export type ItemStatus = "In Stock" | "Sold" | "POC" | "Rented" | "Maintenance" | "Disposed"
+export type TransactionType = "Inbound" | "Sale" | "POC Out" | "POC Return" | "Rental Return" | "Transfer" | "Dispose" | "Rentals"
 
 export const LOCATIONS = ["Warehouse A", "Warehouse B", "Service Center", "Client Site", "Delivered"] as const
 export type Location = (typeof LOCATIONS)[number]
@@ -71,6 +71,8 @@ export interface Transaction {
   itemName: string
   client: string
   date: string
+  /** Reference to clients.id when client selected from directory */
+  clientId?: string
   invoiceNumber?: string
   notes?: string
   /** For Transfer: origin location */
@@ -79,6 +81,14 @@ export interface Transaction {
   toLocation?: string
   /** Who the item is assigned to (for POC Out, Sale, etc.) */
   assignedTo?: string
+  /** For Dispose: reason (e.g. beyond repair, lost, end of life) */
+  disposalReason?: string
+  /** For Dispose: who authorised the disposal */
+  authorisedBy?: string
+  /** When part of a POC Out or Rentals batch */
+  batchId?: string
+  /** For Inbound: public URL of uploaded delivery note (e.g. PDF) */
+  deliveryNoteUrl?: string
 }
 
 export interface Client {

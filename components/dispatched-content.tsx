@@ -26,6 +26,7 @@ const statusStyles: Record<ItemStatus, string> = {
   "In Stock": "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
   Sold: "bg-red-500/10 text-red-500 dark:text-red-400",
   POC: "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400",
+  Rented: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
   Maintenance: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
   Disposed: "bg-slate-500/10 text-slate-600 dark:text-slate-400",
 }
@@ -48,7 +49,7 @@ function buildDispatchedList(
   transactions: { type: string; serialNumber: string; date: string }[]
 ): DispatchedRow[] {
   const movedOut = inventory.filter(
-    (i) => i.status === "Sold" || i.status === "POC" || i.status === "Disposed" || i.status === "Maintenance"
+    (i) => i.status === "Sold" || i.status === "POC" || i.status === "Rented" || i.status === "Disposed" || i.status === "Maintenance"
   )
   const outboundBySerial = new Map<string, { type: TransactionType; date: string }>()
   const sortedTxns = [...transactions].filter((t) =>

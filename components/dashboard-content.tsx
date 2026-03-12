@@ -13,6 +13,7 @@ export function DashboardContent() {
   const totalStock = inventory.filter((i) => i.status === "In Stock").length
   const itemsSold = inventory.filter((i) => i.status === "Sold").length
   const pocActive = inventory.filter((i) => i.status === "POC").length
+  const rentedActive = inventory.filter((i) => i.status === "Rented").length
   const maintenance = inventory.filter((i) => i.status === "Maintenance").length
   const lowStockCount = getAlerts().lowStock.length
 

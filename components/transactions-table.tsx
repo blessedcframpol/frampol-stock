@@ -13,6 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useInventoryStore } from "@/lib/inventory-store"
 import { TransactionActions } from "@/components/transaction-actions"
 import { cn, formatDateDDMMYYYY } from "@/lib/utils"
+import { FileText } from "lucide-react"
 
 const statusStyles: Record<string, string> = {
   Inbound: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
@@ -20,6 +21,7 @@ const statusStyles: Record<string, string> = {
   "POC Out": "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400",
   "POC Return": "bg-amber-500/10 text-amber-600 dark:text-amber-400",
   Rentals: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
+  "Rental Return": "bg-blue-500/10 text-blue-600 dark:text-blue-400",
   Transfer: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
   Dispose: "bg-slate-500/10 text-slate-600 dark:text-slate-400",
 }
@@ -41,6 +43,7 @@ export function TransactionsTable() {
               <TableHead className="text-xs text-muted-foreground font-medium hidden md:table-cell">Client / Location</TableHead>
               <TableHead className="text-xs text-muted-foreground font-medium hidden lg:table-cell">Date</TableHead>
               <TableHead className="text-xs text-muted-foreground font-medium hidden lg:table-cell">Invoice</TableHead>
+              <TableHead className="text-xs text-muted-foreground font-medium hidden xl:table-cell w-24">Delivery note</TableHead>
               <TableHead className="text-xs text-muted-foreground font-medium w-[52px]">Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -64,6 +67,21 @@ export function TransactionsTable() {
                 </TableCell>
                 <TableCell className="text-sm text-muted-foreground hidden lg:table-cell">{formatDateDDMMYYYY(txn.date)}</TableCell>
                 <TableCell className="font-mono text-xs text-muted-foreground hidden lg:table-cell">{txn.invoiceNumber || "\u2014"}</TableCell>
+                <TableCell className="hidden xl:table-cell">
+                  {txn.deliveryNoteUrl ? (
+                    <a
+                      href={txn.deliveryNoteUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                    >
+                      <FileText className="w-3.5 h-3.5 shrink-0" />
+                      View
+                    </a>
+                  ) : (
+                    <span className="text-muted-foreground">—</span>
+                  )}
+                </TableCell>
                 <TableCell>
                   <TransactionActions transaction={txn} compact />
                 </TableCell>

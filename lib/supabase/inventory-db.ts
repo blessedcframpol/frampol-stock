@@ -58,6 +58,7 @@ export function inventoryItemToRow(item: InventoryItem): Database["public"]["Tab
 }
 
 export function rowToTransaction(row: TransactionRow): Transaction {
+  const r = row as TransactionRow & { disposal_reason?: string | null; authorised_by?: string | null; batch_id?: string | null; delivery_note_url?: string | null }
   return {
     id: row.id,
     type: row.type as Transaction["type"],
@@ -65,11 +66,16 @@ export function rowToTransaction(row: TransactionRow): Transaction {
     itemName: row.item_name,
     client: row.client,
     date: row.date,
+    clientId: row.client_id ?? undefined,
     invoiceNumber: row.invoice_number ?? undefined,
     notes: row.notes ?? undefined,
     fromLocation: row.from_location ?? undefined,
     toLocation: row.to_location ?? undefined,
     assignedTo: row.assigned_to ?? undefined,
+    disposalReason: r.disposal_reason ?? undefined,
+    authorisedBy: r.authorised_by ?? undefined,
+    batchId: r.batch_id ?? undefined,
+    deliveryNoteUrl: r.delivery_note_url ?? undefined,
   }
 }
 
@@ -81,10 +87,15 @@ export function transactionToRow(txn: Transaction): Database["public"]["Tables"]
     item_name: txn.itemName,
     client: txn.client,
     date: txn.date,
+    client_id: txn.clientId ?? null,
     invoice_number: txn.invoiceNumber ?? null,
     notes: txn.notes ?? null,
     from_location: txn.fromLocation ?? null,
     to_location: txn.toLocation ?? null,
     assigned_to: txn.assignedTo ?? null,
+    disposal_reason: txn.disposalReason ?? null,
+    authorised_by: txn.authorisedBy ?? null,
+    batch_id: txn.batchId ?? null,
+    delivery_note_url: txn.deliveryNoteUrl ?? null,
   }
 }
