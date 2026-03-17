@@ -10,15 +10,15 @@ END $$;
 
 COMMENT ON COLUMN public.transactions.delivery_note_url IS 'Public URL of uploaded delivery note (e.g. PDF) for Inbound transactions.';
 
--- Storage: create delivery-notes bucket and policies (bucket must exist for uploads).
--- Create the bucket in Dashboard: Storage → New bucket → id: delivery-notes, Public: on.
--- Then run the policy statements below, or use Dashboard Storage policies for bucket 'delivery-notes'.
-DROP POLICY IF EXISTS "Allow anon upload delivery notes" ON storage.objects;
-CREATE POLICY "Allow anon upload delivery notes"
+-- Storage: create uploads bucket and policies (bucket must exist for uploads).
+-- Create the bucket in Dashboard: Storage → New bucket → id: uploads, Public: on.
+-- Then run the policy statements below, or use Dashboard Storage policies for bucket 'uploads'.
+DROP POLICY IF EXISTS "Allow anon upload" ON storage.objects;
+CREATE POLICY "Allow anon upload"
   ON storage.objects FOR INSERT TO anon
-  WITH CHECK (bucket_id = 'delivery-notes');
+  WITH CHECK (bucket_id = 'uploads');
 
-DROP POLICY IF EXISTS "Allow anon read delivery notes" ON storage.objects;
-CREATE POLICY "Allow anon read delivery notes"
+DROP POLICY IF EXISTS "Allow anon read uploads" ON storage.objects;
+CREATE POLICY "Allow anon read uploads"
   ON storage.objects FOR SELECT TO anon
-  USING (bucket_id = 'delivery-notes');
+  USING (bucket_id = 'uploads');

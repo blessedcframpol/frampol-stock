@@ -150,6 +150,41 @@ export interface Database {
           created_at?: string
         }
       }
+      clients: {
+        Row: {
+          id: string
+          name: string
+          company: string
+          email: string
+          phone: string | null
+          address: string | null
+          total_orders: number
+          total_spent: number
+          last_order: string | null
+        }
+        Insert: {
+          id: string
+          name: string
+          company: string
+          email: string
+          phone?: string | null
+          address?: string | null
+          total_orders?: number
+          total_spent?: number
+          last_order?: string | null
+        }
+        Update: {
+          id?: string
+          name?: string
+          company?: string
+          email?: string
+          phone?: string | null
+          address?: string | null
+          total_orders?: number
+          total_spent?: number
+          last_order?: string | null
+        }
+      }
       quick_scans: {
         Row: {
           id: string

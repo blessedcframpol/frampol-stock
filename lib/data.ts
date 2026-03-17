@@ -97,6 +97,8 @@ export interface Client {
   company: string
   email: string
   phone: string
+  /** Company or primary business address */
+  address?: string
   totalOrders: number
   totalSpent: number
   lastOrder: string

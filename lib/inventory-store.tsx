@@ -243,18 +243,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
       if (txnRows?.length) {
         setTransactions(txnRows.map(rowToTransaction))
       }
-      if (invRows?.length === 0 && txnRows?.length === 0) {
-        for (const item of initialInventory) {
-          await supabase.from("inventory_items").insert(inventoryItemToRow(deepClone(item)))
-        }
-        for (const txn of initialTransactions) {
-          await supabase.from("transactions").insert(transactionToRow(deepClone(txn)))
-        }
-        if (!cancelled) {
-          setInventory(deepClone(initialInventory))
-          setTransactions(deepClone(initialTransactions))
-        }
-      }
+      // When DB is empty, do not seed dummy data — use actual data only
     }
     load()
     return () => {

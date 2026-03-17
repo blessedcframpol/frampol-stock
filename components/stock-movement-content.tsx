@@ -33,8 +33,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
-import { clients, LOCATIONS } from "@/lib/data"
+import { LOCATIONS } from "@/lib/data"
 import type { ItemType, TransactionType, ClientSite } from "@/lib/data"
+import { useClients } from "@/lib/supabase/clients-db"
 import { useInventoryStore } from "@/lib/inventory-store"
 import {
   ScanBarcode,
@@ -87,6 +88,7 @@ const transactionTypes = [
 
 export function StockMovementContent() {
   const { inventory, applyMovement, addItem } = useInventoryStore()
+  const { clients } = useClients()
   const [selectedType, setSelectedType] = useState<string>("Inbound")
   const [serialNumbers, setSerialNumbers] = useState("")
   const [productName, setProductName] = useState("")
@@ -316,14 +318,16 @@ export function StockMovementContent() {
     } else {
       const name = newClientName.trim()
       const company = newClientCompany.trim()
-      if (!name && !company) {
-        toast.error("Select a client or enter client name and company")
+      const email = newClientEmail.trim()
+      const phone = newClientPhone.trim()
+      if (!name || !company || !email || !phone) {
+        toast.error("All client details are required: name, company, email, and phone")
         return
       }
-      outboundDetails.clientName = name || company
-      outboundDetails.clientCompany = company || name
-      outboundDetails.clientEmail = newClientEmail.trim() || undefined
-      outboundDetails.clientPhone = newClientPhone.trim() || undefined
+      outboundDetails.clientName = name
+      outboundDetails.clientCompany = company
+      outboundDetails.clientEmail = email
+      outboundDetails.clientPhone = phone
     }
     const validSites = sites.filter((s) => s.address.trim())
     if (validSites.length > 0) outboundDetails.sites = validSites.map((s) => ({ name: s.name?.trim(), address: s.address.trim() }))
@@ -334,12 +338,12 @@ export function StockMovementContent() {
     const supabase = getSupabaseClient()
     const ext = file.name.split(".").pop() || "pdf"
     const path = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}.${ext}`
-    const { error } = await supabase.storage.from("delivery-notes").upload(path, file, {
+    const { error } = await supabase.storage.from("uploads").upload(path, file, {
       contentType: file.type || "application/pdf",
       upsert: false,
     })
     if (error) throw error
-    const { data } = supabase.storage.from("delivery-notes").getPublicUrl(path)
+    const { data } = supabase.storage.from("uploads").getPublicUrl(path)
     return data.publicUrl
   }
 
@@ -385,7 +389,7 @@ export function StockMovementContent() {
           const url = await uploadDeliveryNote(deliveryNoteFile)
           doSubmit(undefined, url)
         } catch (e) {
-          toast.error("Failed to upload delivery note. Ensure Supabase is configured and the delivery-notes bucket exists.")
+          toast.error("Failed to upload delivery note. Ensure Supabase is configured and the uploads bucket exists.")
           setIsSubmitting(false)
         }
       } else {
@@ -641,21 +645,26 @@ export function StockMovementContent() {
                   <p className="text-xs text-muted-foreground">PDF or image (JPEG, PNG, WebP). Attached to this inbound delivery.</p>
                 </div>
               )}
-              {(selectedType === "Sale" || selectedType === "POC Out" || selectedType === "Rentals") && (
+              {(selectedType === "Sale" || selectedType === "POC Out" || selectedType === "Rentals" || selectedType === "Transfer" || selectedType === "Dispose") && (
                 <div className="flex flex-col gap-2">
                   <Label className="text-foreground">Client / Customer (assigned to)</Label>
                   <Select value={clientId} onValueChange={setClientId}>
                     <SelectTrigger className="bg-card text-foreground border-border">
-                      <SelectValue placeholder="Select client..." />
+                      <SelectValue placeholder="Select existing client..." />
                     </SelectTrigger>
                     <SelectContent>
                       {clients.map((client) => (
                         <SelectItem key={client.id} value={client.id}>
-                          {client.name} - {client.company}
+                          {client.name} – {client.company}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
+                  <p className="text-xs text-muted-foreground">
+                    {clients.length === 0
+                      ? "No clients yet. Add one from the Clients page or in the confirmation step."
+                      : "Choose an existing client or add details in the confirmation step."}
+                  </p>
                 </div>
               )}
               {selectedType === "POC Out" && (
@@ -986,19 +995,19 @@ export function StockMovementContent() {
               {outboundClientId === "new" && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-md border border-border bg-muted/30">
                   <div className="sm:col-span-2">
-                    <Label className="text-xs">Name</Label>
+                    <Label className="text-xs">Name (required)</Label>
                     <Input placeholder="Contact name" value={newClientName} onChange={(e) => setNewClientName(e.target.value)} className="mt-1 h-9" />
                   </div>
                   <div>
-                    <Label className="text-xs">Company</Label>
+                    <Label className="text-xs">Company (required)</Label>
                     <Input placeholder="Company" value={newClientCompany} onChange={(e) => setNewClientCompany(e.target.value)} className="mt-1 h-9" />
                   </div>
                   <div>
-                    <Label className="text-xs">Email</Label>
+                    <Label className="text-xs">Email (required)</Label>
                     <Input type="email" placeholder="email@example.com" value={newClientEmail} onChange={(e) => setNewClientEmail(e.target.value)} className="mt-1 h-9" />
                   </div>
                   <div className="sm:col-span-2">
-                    <Label className="text-xs">Phone</Label>
+                    <Label className="text-xs">Phone (required)</Label>
                     <Input placeholder="+250 ..." value={newClientPhone} onChange={(e) => setNewClientPhone(e.target.value)} className="mt-1 h-9" />
                   </div>
                 </div>

@@ -46,7 +46,8 @@ import { Popover, PopoverContent, PopoverTrigger, PopoverAnchor } from "@/compon
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useState, useMemo, useEffect } from "react"
-import { clients, appUsers } from "@/lib/data"
+import { appUsers } from "@/lib/data"
+import { useClients } from "@/lib/supabase/clients-db"
 import { runSearch } from "@/lib/search"
 import { SearchSuggestions } from "@/components/search-suggestions"
 
@@ -236,6 +237,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const [searchQuery, setSearchQuery] = useState("")
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false)
   const { inventory, getAlerts } = useInventoryStore()
+  const { clients } = useClients()
   const [mounted, setMounted] = useState(false)
   useEffect(() => {
     setMounted(true)
@@ -247,7 +249,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
         { inventory, clients, users: appUsers },
         searchQuery
       ),
-    [inventory, searchQuery]
+    [inventory, clients, searchQuery]
   )
 
   function handleSearchSubmit(e?: React.FormEvent) {

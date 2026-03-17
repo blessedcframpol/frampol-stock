@@ -34,7 +34,7 @@ import {
 } from "@/components/ui/dialog"
 import { ScanBarcode, Camera, Loader2, ChevronsUpDown, Plus, MapPin, Trash2 } from "lucide-react"
 import type { ItemType, TransactionType, ClientSite } from "@/lib/data"
-import { clients } from "@/lib/data"
+import { useClients } from "@/lib/supabase/clients-db"
 import { useInventoryStore } from "@/lib/inventory-store"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
@@ -78,7 +78,8 @@ type MissingSerialsState = {
 }
 
 export function QuickScan() {
-  const { inventory, addItem } = useInventoryStore()
+  const { inventory, addItem, applyMovement } = useInventoryStore()
+  const { clients } = useClients()
   const [serialInput, setSerialInput] = useState("")
   const [productName, setProductName] = useState("")
   const [movementType, setMovementType] = useState<TransactionType>("Inbound")
@@ -97,6 +98,7 @@ export function QuickScan() {
   const [newClientEmail, setNewClientEmail] = useState("")
   const [newClientPhone, setNewClientPhone] = useState("")
   const [sites, setSites] = useState<ClientSite[]>([{ address: "" }])
+  const [outboundReturnDate, setOutboundReturnDate] = useState("")
 
   // When some serials are not in inventory for outbound: offer to add them first
   const [missingSerialsState, setMissingSerialsState] = useState<MissingSerialsState | null>(null)
@@ -180,6 +182,7 @@ export function QuickScan() {
       setPendingOutbound({ productName: product, movementType, serials: uniqueSerials })
       setOutboundClientId("")
       setOutboundClientSearch("")
+      setOutboundReturnDate("")
       setNewClientName("")
       setNewClientCompany("")
       setNewClientEmail("")
@@ -260,6 +263,38 @@ export function QuickScan() {
     }
   }
 
+  async function recordQuickScan(
+    serials: string[],
+    product: string,
+    movType: TransactionType,
+    outboundDetails?: {
+      clientId?: string
+      clientName?: string
+      clientCompany?: string
+      clientEmail?: string
+      clientPhone?: string
+      sites?: ClientSite[]
+    }
+  ) {
+    const body: Record<string, unknown> =
+      serials.length === 1
+        ? { serialNumber: serials[0], scanType: product, movementType: movType }
+        : { serialNumbers: serials, scanType: product, movementType: movType }
+    if (outboundDetails) {
+      if (outboundDetails.clientId) body.clientId = outboundDetails.clientId
+      if (outboundDetails.clientName) body.clientName = outboundDetails.clientName
+      if (outboundDetails.clientCompany) body.clientCompany = outboundDetails.clientCompany
+      if (outboundDetails.clientEmail) body.clientEmail = outboundDetails.clientEmail
+      if (outboundDetails.clientPhone) body.clientPhone = outboundDetails.clientPhone
+      if (outboundDetails.sites?.length) body.sites = outboundDetails.sites.filter((s) => s.address.trim())
+    }
+    await fetch("/api/quick-scan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+  }
+
   async function handleOutboundModalSubmit() {
     if (!pendingOutbound) return
     const selectedClient = outboundClientId && outboundClientId !== "new" ? clients.find((c) => c.id === outboundClientId) : null
@@ -280,23 +315,44 @@ export function QuickScan() {
     } else {
       const name = newClientName.trim()
       const company = newClientCompany.trim()
-      if (!name && !company) {
-        toast.error("Select a client or enter client name and company")
+      const email = newClientEmail.trim()
+      const phone = newClientPhone.trim()
+      if (!name || !company || !email || !phone) {
+        toast.error("All client details are required: name, company, email, and phone")
         return
       }
-      outboundDetails.clientName = name || company
-      outboundDetails.clientCompany = company || name
-      outboundDetails.clientEmail = newClientEmail.trim() || undefined
-      outboundDetails.clientPhone = newClientPhone.trim() || undefined
+      outboundDetails.clientName = name
+      outboundDetails.clientCompany = company
+      outboundDetails.clientEmail = email
+      outboundDetails.clientPhone = phone
     }
     const validSites = sites.filter((s) => s.address.trim())
     if (validSites.length > 0) outboundDetails.sites = validSites.map((s) => ({ name: s.name?.trim(), address: s.address.trim() }))
-    await submitScan(
-      pendingOutbound.productName,
-      pendingOutbound.movementType,
-      pendingOutbound.serials,
-      outboundDetails
-    )
+
+    setIsSubmitting(true)
+    try {
+      const assignedTo = outboundDetails.clientName ?? outboundDetails.clientCompany ?? (outboundDetails.clientId ? clients.find((c) => c.id === outboundDetails.clientId)?.company : undefined)
+      const returnDate = (pendingOutbound.movementType === "POC Out" || pendingOutbound.movementType === "Rentals") && outboundReturnDate.trim() ? outboundReturnDate.trim() : undefined
+      const result = applyMovement({
+        type: pendingOutbound.movementType,
+        serialNumbers: pendingOutbound.serials,
+        clientId: outboundDetails.clientId,
+        assignedTo,
+        returnDate,
+      })
+      if (result.success.length > 0) {
+        toast.success(`Recorded ${result.success.length} item(s) — inventory updated`)
+        setSerialInput("")
+        setPendingOutbound(null)
+        setOutboundReturnDate("")
+        recordQuickScan(result.success, pendingOutbound.productName, pendingOutbound.movementType, outboundDetails).catch(() => {})
+      }
+      if (result.notFound.length > 0) {
+        toast.warning(`Serial number(s) not found: ${result.notFound.join(", ")}`)
+      }
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   function addSite() {
@@ -338,6 +394,7 @@ export function QuickScan() {
       setPendingOutbound({ productName, movementType, serials: allSerials })
       setOutboundClientId("")
       setOutboundClientSearch("")
+      setOutboundReturnDate("")
       setNewClientName("")
       setNewClientCompany("")
       setNewClientEmail("")
@@ -624,10 +681,22 @@ export function QuickScan() {
                 </Popover>
               </div>
 
+              {(pendingOutbound.movementType === "POC Out" || pendingOutbound.movementType === "Rentals") && (
+                <div className="flex flex-col gap-2">
+                  <Label className="text-xs font-medium">Return date (optional)</Label>
+                  <Input
+                    type="date"
+                    value={outboundReturnDate}
+                    onChange={(e) => setOutboundReturnDate(e.target.value)}
+                    className="h-9"
+                  />
+                </div>
+              )}
+
               {outboundClientId === "new" && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-md border border-border bg-muted/30">
                   <div className="sm:col-span-2">
-                    <Label className="text-xs">Name</Label>
+                    <Label className="text-xs">Name (required)</Label>
                     <Input
                       placeholder="Contact name"
                       value={newClientName}
@@ -636,7 +705,7 @@ export function QuickScan() {
                     />
                   </div>
                   <div>
-                    <Label className="text-xs">Company</Label>
+                    <Label className="text-xs">Company (required)</Label>
                     <Input
                       placeholder="Company"
                       value={newClientCompany}
@@ -645,7 +714,7 @@ export function QuickScan() {
                     />
                   </div>
                   <div>
-                    <Label className="text-xs">Email</Label>
+                    <Label className="text-xs">Email (required)</Label>
                     <Input
                       type="email"
                       placeholder="email@example.com"
@@ -655,7 +724,7 @@ export function QuickScan() {
                     />
                   </div>
                   <div className="sm:col-span-2">
-                    <Label className="text-xs">Phone</Label>
+                    <Label className="text-xs">Phone (required)</Label>
                     <Input
                       placeholder="+250 ..."
                       value={newClientPhone}
