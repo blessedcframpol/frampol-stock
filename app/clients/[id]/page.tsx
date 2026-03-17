@@ -51,7 +51,7 @@ export default function ClientDetailPage() {
   const { clients, isLoading: clientsLoading } = useClients()
   const { transactions } = useInventoryStore()
 
-  const client = id ? clients.find((c) => c.id === id) ?? null
+  const client = id ? (clients.find((c) => c.id === id) ?? null) : null
   const clientOrders = client
     ? transactions.filter((txn) => isOrderForClient(txn, client))
     : []
