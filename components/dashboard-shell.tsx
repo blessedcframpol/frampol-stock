@@ -54,6 +54,7 @@ import { SearchSuggestions } from "@/components/search-suggestions"
 const inventoryChildren = [
   { href: "/inventory/dispatched", label: "Dispatched" },
   { href: "/inventory/movement", label: "Inventory movement" },
+  { href: "/inventory/stock-take", label: "Stock take" },
 ]
 
 const navItems = [

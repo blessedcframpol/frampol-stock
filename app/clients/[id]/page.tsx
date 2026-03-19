@@ -2,6 +2,7 @@
 
 import Link from "next/link"
 import { useParams } from "next/navigation"
+import { useMemo, useState } from "react"
 import {
   Table,
   TableBody,
@@ -13,11 +14,20 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+} from "@/components/ui/sheet"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import { DashboardShell } from "@/components/dashboard-shell"
 import { useInventoryStore } from "@/lib/inventory-store"
 import { useClients } from "@/lib/supabase/clients-db"
 import { cn, formatDateDDMMYYYY } from "@/lib/utils"
-import { FileText, ArrowLeft, Mail, Phone, Building2, MapPin } from "lucide-react"
+import { FileText, ArrowLeft, Mail, Phone, Building2, MapPin, Package, ChevronRight } from "lucide-react"
+import type { Transaction } from "@/lib/data"
 
 const statusStyles: Record<string, string> = {
   Inbound: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
@@ -45,16 +55,81 @@ function isOrderForClient(
   )
 }
 
+type ConsignmentRow = {
+  kind: "consignment"
+  batchId: string
+  type: string
+  date: string
+  invoiceNumber?: string
+  count: number
+  transactions: Transaction[]
+}
+
+type SingleRow = {
+  kind: "single"
+  transaction: Transaction
+}
+
+type ListRow = ConsignmentRow | SingleRow
+
 export default function ClientDetailPage() {
   const params = useParams()
   const id = typeof params?.id === "string" ? params.id : ""
   const { clients, isLoading: clientsLoading } = useClients()
   const { transactions } = useInventoryStore()
+  const [detailOpen, setDetailOpen] = useState(false)
+  const [selectedConsignment, setSelectedConsignment] = useState<ConsignmentRow | null>(null)
+  const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null)
 
   const client = id ? (clients.find((c) => c.id === id) ?? null) : null
   const clientOrders = client
     ? transactions.filter((txn) => isOrderForClient(txn, client))
     : []
+
+  const rows = useMemo((): ListRow[] => {
+    const byBatch = new Map<string | "standalone", Transaction[]>()
+    for (const txn of clientOrders) {
+      const key = txn.batchId ?? "standalone"
+      const list = byBatch.get(key) ?? []
+      list.push(txn)
+      byBatch.set(key, list)
+    }
+    const out: ListRow[] = []
+    byBatch.forEach((txns, key) => {
+      if (key === "standalone") {
+        txns.forEach((t) => out.push({ kind: "single", transaction: t }))
+      } else {
+        const first = txns[0]!
+        out.push({
+          kind: "consignment",
+          batchId: key,
+          type: first.type,
+          date: first.date,
+          invoiceNumber: first.invoiceNumber,
+          count: txns.length,
+          transactions: txns,
+        })
+      }
+    })
+    out.sort((a, b) => {
+      const dateA = a.kind === "consignment" ? a.date : a.transaction.date
+      const dateB = b.kind === "consignment" ? b.date : b.transaction.date
+      return new Date(dateB).getTime() - new Date(dateA).getTime()
+    })
+    return out
+  }, [clientOrders])
+
+  const openConsignment = (row: ConsignmentRow) => {
+    setSelectedConsignment(row)
+    setSelectedTransaction(null)
+    setDetailOpen(true)
+  }
+
+  const openTransaction = (txn: Transaction) => {
+    setSelectedTransaction(txn)
+    setSelectedConsignment(null)
+    setDetailOpen(true)
+  }
 
   if (clientsLoading) {
     return (
@@ -122,7 +197,10 @@ export default function ClientDetailPage() {
             </div>
             <div className="flex gap-4 mt-3 text-sm">
               <span className="text-muted-foreground">
-                {clientOrders.length} order{clientOrders.length !== 1 ? "s" : ""}
+                {clientOrders.length} transaction{clientOrders.length !== 1 ? "s" : ""}
+                {rows.length > 0 && (
+                  <span> in {rows.length} consignment{rows.length !== 1 ? "s" : ""} / order{rows.length !== 1 ? "s" : ""}</span>
+                )}
               </span>
               {(client.totalSpent ?? 0) > 0 && (
                 <span className="text-muted-foreground">
@@ -138,97 +216,224 @@ export default function ClientDetailPage() {
           </CardHeader>
         </Card>
 
-        {/* Orders table */}
+        {/* Transactions & consignments */}
         <Card className="flex flex-col min-h-[200px]">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base font-semibold text-foreground">
-              Orders
+            <CardTitle className="text-base font-semibold text-foreground flex items-center gap-2">
+              <Package className="w-4 h-4" />
+              Transactions & consignments
             </CardTitle>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Click a row to see the items moved and movement type.
+            </p>
           </CardHeader>
           <CardContent className="flex-1 min-h-0 overflow-auto overflow-x-auto">
-            {clientOrders.length === 0 ? (
+            {rows.length === 0 ? (
               <p className="text-sm text-muted-foreground py-4">
-                No orders recorded for this client.
+                No transactions or consignments recorded for this client.
               </p>
             ) : (
               <Table className="min-w-[560px]">
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">
-                    <TableHead className="text-xs text-muted-foreground font-medium">
-                      Date
-                    </TableHead>
-                    <TableHead className="text-xs text-muted-foreground font-medium">
-                      Type
-                    </TableHead>
-                    <TableHead className="text-xs text-muted-foreground font-medium">
-                      Serial Number
-                    </TableHead>
+                    <TableHead className="text-xs text-muted-foreground font-medium">Date</TableHead>
+                    <TableHead className="text-xs text-muted-foreground font-medium">Type</TableHead>
+                    <TableHead className="text-xs text-muted-foreground font-medium">Items</TableHead>
                     <TableHead className="text-xs text-muted-foreground font-medium hidden sm:table-cell">
-                      Item
+                      Serial / Ref
                     </TableHead>
                     <TableHead className="text-xs text-muted-foreground font-medium hidden lg:table-cell">
                       Invoice
                     </TableHead>
-                    <TableHead className="text-xs text-muted-foreground font-medium hidden xl:table-cell">
-                      Delivery note
-                    </TableHead>
-                    <TableHead className="text-xs text-muted-foreground font-medium hidden md:table-cell">
-                      Notes
-                    </TableHead>
+                    <TableHead className="w-8" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {clientOrders.map((txn) => (
-                    <TableRow key={txn.id}>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {formatDateDDMMYYYY(txn.date)}
-                      </TableCell>
-                      <TableCell>
-                        <Badge
-                          variant="secondary"
-                          className={cn(
-                            "text-[10px] font-medium border-0",
-                            statusStyles[txn.type]
-                          )}
+                  {rows.map((row) => {
+                    if (row.kind === "consignment") {
+                      return (
+                        <TableRow
+                          key={row.batchId}
+                          className="cursor-pointer hover:bg-muted/50"
+                          onClick={() => openConsignment(row)}
                         >
-                          {txn.type}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="font-mono text-xs text-foreground">
-                        {txn.serialNumber}
-                      </TableCell>
-                      <TableCell className="text-sm text-foreground hidden sm:table-cell">
-                        {txn.itemName}
-                      </TableCell>
-                      <TableCell className="font-mono text-xs text-muted-foreground hidden lg:table-cell">
-                        {txn.invoiceNumber || "—"}
-                      </TableCell>
-                      <TableCell className="hidden xl:table-cell">
-                        {txn.deliveryNoteUrl ? (
-                          <a
-                            href={txn.deliveryNoteUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                          <TableCell className="text-sm text-muted-foreground">
+                            {formatDateDDMMYYYY(row.date)}
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              variant="secondary"
+                              className={cn("text-[10px] font-medium border-0", statusStyles[row.type])}
+                            >
+                              {row.type}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-sm font-medium">{row.count} item{row.count !== 1 ? "s" : ""}</TableCell>
+                          <TableCell className="text-sm text-muted-foreground hidden sm:table-cell">—</TableCell>
+                          <TableCell className="font-mono text-xs text-muted-foreground hidden lg:table-cell">
+                            {row.invoiceNumber || "—"}
+                          </TableCell>
+                          <TableCell>
+                            <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                          </TableCell>
+                        </TableRow>
+                      )
+                    }
+                    const t = row.transaction
+                    return (
+                      <TableRow
+                        key={t.id}
+                        className="cursor-pointer hover:bg-muted/50"
+                        onClick={() => openTransaction(t)}
+                      >
+                        <TableCell className="text-sm text-muted-foreground">
+                          {formatDateDDMMYYYY(t.date)}
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant="secondary"
+                            className={cn("text-[10px] font-medium border-0", statusStyles[t.type])}
                           >
-                            <FileText className="w-3.5 h-3.5 shrink-0" />
-                            View
-                          </a>
-                        ) : (
-                          <span className="text-muted-foreground">—</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground hidden md:table-cell max-w-[200px] truncate">
-                        {txn.notes || "—"}
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                            {t.type}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-sm">1 item</TableCell>
+                        <TableCell className="font-mono text-xs text-foreground hidden sm:table-cell">
+                          {t.serialNumber}
+                        </TableCell>
+                        <TableCell className="font-mono text-xs text-muted-foreground hidden lg:table-cell">
+                          {t.invoiceNumber || "—"}
+                        </TableCell>
+                        <TableCell>
+                          <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
                 </TableBody>
               </Table>
             )}
           </CardContent>
         </Card>
       </div>
+
+      {/* Detail sheet */}
+      <Sheet open={detailOpen} onOpenChange={setDetailOpen}>
+        <SheetContent className="flex flex-col w-full sm:max-w-xl overflow-hidden">
+          <SheetHeader>
+            <SheetTitle>
+              {selectedConsignment
+                ? `Consignment — ${selectedConsignment.type}`
+                : selectedTransaction
+                  ? `Transaction — ${selectedTransaction.type}`
+                  : "Details"}
+            </SheetTitle>
+            <SheetDescription>
+              {selectedConsignment
+                ? `${selectedConsignment.count} item${selectedConsignment.count !== 1 ? "s" : ""} · ${formatDateDDMMYYYY(selectedConsignment.date)}`
+                : selectedTransaction
+                  ? formatDateDDMMYYYY(selectedTransaction.date)
+                  : ""}
+            </SheetDescription>
+          </SheetHeader>
+          <ScrollArea className="flex-1 -mx-6 px-6">
+            {selectedConsignment && (
+              <div className="space-y-4 pb-6">
+                <div className="flex flex-wrap gap-2 text-sm">
+                  <span className="text-muted-foreground">Invoice:</span>
+                  <span className="font-mono">{selectedConsignment.invoiceNumber || "—"}</span>
+                </div>
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead className="text-xs">Type</TableHead>
+                      <TableHead className="text-xs">Serial</TableHead>
+                      <TableHead className="text-xs">Item</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {selectedConsignment.transactions.map((txn) => (
+                      <TableRow key={txn.id}>
+                        <TableCell>
+                          <Badge variant="secondary" className={cn("text-[10px]", statusStyles[txn.type])}>
+                            {txn.type}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="font-mono text-xs">{txn.serialNumber}</TableCell>
+                        <TableCell className="text-sm">{txn.itemName}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+            {selectedTransaction && (
+              <dl className="space-y-3 text-sm pb-6">
+                <div>
+                  <dt className="text-muted-foreground text-xs font-medium">Movement type</dt>
+                  <dd className="mt-0.5">
+                    <Badge variant="secondary" className={cn(statusStyles[selectedTransaction.type])}>
+                      {selectedTransaction.type}
+                    </Badge>
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-muted-foreground text-xs font-medium">Serial number</dt>
+                  <dd className="font-mono mt-0.5">{selectedTransaction.serialNumber}</dd>
+                </div>
+                <div>
+                  <dt className="text-muted-foreground text-xs font-medium">Item</dt>
+                  <dd className="mt-0.5">{selectedTransaction.itemName}</dd>
+                </div>
+                <div>
+                  <dt className="text-muted-foreground text-xs font-medium">Date</dt>
+                  <dd className="mt-0.5">{formatDateDDMMYYYY(selectedTransaction.date)}</dd>
+                </div>
+                {selectedTransaction.invoiceNumber && (
+                  <div>
+                    <dt className="text-muted-foreground text-xs font-medium">Invoice</dt>
+                    <dd className="font-mono mt-0.5">{selectedTransaction.invoiceNumber}</dd>
+                  </div>
+                )}
+                {selectedTransaction.fromLocation != null && (
+                  <div>
+                    <dt className="text-muted-foreground text-xs font-medium">From</dt>
+                    <dd className="mt-0.5">{selectedTransaction.fromLocation}</dd>
+                  </div>
+                )}
+                {selectedTransaction.toLocation != null && (
+                  <div>
+                    <dt className="text-muted-foreground text-xs font-medium">To</dt>
+                    <dd className="mt-0.5">{selectedTransaction.toLocation}</dd>
+                  </div>
+                )}
+                {selectedTransaction.deliveryNoteUrl && (
+                  <div>
+                    <dt className="text-muted-foreground text-xs font-medium">Delivery note</dt>
+                    <dd className="mt-0.5">
+                      <a
+                        href={selectedTransaction.deliveryNoteUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-primary hover:underline"
+                      >
+                        <FileText className="w-3.5 h-3.5" />
+                        View
+                      </a>
+                    </dd>
+                  </div>
+                )}
+                {selectedTransaction.notes && (
+                  <div>
+                    <dt className="text-muted-foreground text-xs font-medium">Notes</dt>
+                    <dd className="mt-0.5 text-muted-foreground">{selectedTransaction.notes}</dd>
+                  </div>
+                )}
+              </dl>
+            )}
+          </ScrollArea>
+        </SheetContent>
+      </Sheet>
     </DashboardShell>
   )
 }

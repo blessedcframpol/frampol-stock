@@ -229,6 +229,23 @@ export interface Database {
           sites?: { name?: string; address: string }[] | null
         }
       }
+      stock_takes: {
+        Row: {
+          id: string
+          completed_at: string
+          result_snapshot: Json
+        }
+        Insert: {
+          id: string
+          completed_at: string
+          result_snapshot: Json
+        }
+        Update: {
+          id?: string
+          completed_at?: string
+          result_snapshot?: Json
+        }
+      }
     }
   }
 }

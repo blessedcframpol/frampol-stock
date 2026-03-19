@@ -112,6 +112,29 @@ export interface AppUser {
   role?: string
 }
 
+/** One row in stock take snapshot (matched or not scanned item) for persistence */
+export interface StockTakeSnapshotItem {
+  serialNumber: string
+  name: string
+  status: string
+  location: string
+}
+
+/** Snapshot of a completed stock take (stored in DB for read-only history) */
+export interface StockTakeSnapshot {
+  scannedSerials: string[]
+  matched: StockTakeSnapshotItem[]
+  notInSystem: string[]
+  notScanned: StockTakeSnapshotItem[]
+}
+
+/** Persisted stock take record (from API/DB) */
+export interface StockTakeRecord {
+  id: string
+  completedAt: string
+  resultSnapshot: StockTakeSnapshot
+}
+
 export const inventoryItems: InventoryItem[] = [
   { id: "INV001", serialNumber: "SL-2024-00142", itemType: "Starlink Kit", name: "Starlink Standard Kit v3", status: "In Stock", dateAdded: "2024-11-15", location: "Warehouse A", purchaseDate: "2024-11-01", warrantyEndDate: "2027-11-01" },
   { id: "INV002", serialNumber: "SL-2024-00143", itemType: "Starlink Kit", name: "Starlink Business Kit", status: "POC", dateAdded: "2024-11-10", location: "Client Site", client: "Kigali Mining Co.", assignedTo: "Kigali Mining Co.", purchaseDate: "2024-10-15", warrantyEndDate: "2027-10-15", pocOutDate: "2024-11-10" },

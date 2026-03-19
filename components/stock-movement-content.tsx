@@ -35,7 +35,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { LOCATIONS } from "@/lib/data"
 import type { ItemType, TransactionType, ClientSite } from "@/lib/data"
-import { useClients } from "@/lib/supabase/clients-db"
+import { useClients, insertClient } from "@/lib/supabase/clients-db"
 import { useInventoryStore } from "@/lib/inventory-store"
 import {
   ScanBarcode,
@@ -88,7 +88,7 @@ const transactionTypes = [
 
 export function StockMovementContent() {
   const { inventory, applyMovement, addItem } = useInventoryStore()
-  const { clients } = useClients()
+  const { clients, refetch: refetchClients } = useClients()
   const [selectedType, setSelectedType] = useState<string>("Inbound")
   const [serialNumbers, setSerialNumbers] = useState("")
   const [productName, setProductName] = useState("")
@@ -324,10 +324,24 @@ export function StockMovementContent() {
         toast.error("All client details are required: name, company, email, and phone")
         return
       }
-      outboundDetails.clientName = name
-      outboundDetails.clientCompany = company
-      outboundDetails.clientEmail = email
-      outboundDetails.clientPhone = phone
+      try {
+        const newClient = await insertClient({
+          name,
+          company,
+          email,
+          phone,
+          address: sites[0]?.address?.trim() ?? "",
+        })
+        outboundDetails.clientId = newClient.id
+        outboundDetails.clientName = newClient.name
+        outboundDetails.clientCompany = newClient.company
+        outboundDetails.clientEmail = newClient.email
+        outboundDetails.clientPhone = newClient.phone
+        await refetchClients()
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Failed to save client")
+        return
+      }
     }
     const validSites = sites.filter((s) => s.address.trim())
     if (validSites.length > 0) outboundDetails.sites = validSites.map((s) => ({ name: s.name?.trim(), address: s.address.trim() }))
