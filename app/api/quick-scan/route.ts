@@ -6,10 +6,12 @@ import {
   addBulkQuickScansToSupabase,
   deleteQuickScansByBatchIdFromSupabase,
 } from "@/lib/supabase/quick-scans-db"
+import { createServerSupabaseClient } from "@/lib/supabase/server"
 
 export async function GET() {
   try {
-    const fromDb = await getAllQuickScansFromSupabase()
+    const supabase = await createServerSupabaseClient()
+    const fromDb = await getAllQuickScansFromSupabase(supabase)
     const scans = fromDb ?? getAllQuickScans()
     return NextResponse.json(scans)
   } catch (error) {
@@ -95,13 +97,14 @@ export async function POST(request: NextRequest) {
           { status: 400 }
         )
       }
-      const existing = await getAllQuickScansFromSupabase()
+      const supabase = await createServerSupabaseClient()
+      const existing = await getAllQuickScansFromSupabase(supabase)
       const existingSet = new Set((existing ?? getAllQuickScans()).map((s) => s.serialNumber))
       const toInsert = unique.filter((s) => !existingSet.has(s))
       const duplicates = unique.filter((s) => existingSet.has(s))
       let records: { id: string; serialNumber: string; scanType: string; scannedAt: string; movementType?: string }[] = []
       if (toInsert.length > 0) {
-        const fromDb = await addBulkQuickScansToSupabase(toInsert, productName, movement, outbound)
+        const fromDb = await addBulkQuickScansToSupabase(toInsert, productName, movement, outbound, supabase)
         records = fromDb.length > 0 ? fromDb : addBulkQuickScans(toInsert, productName, movement, outbound)
       }
       return NextResponse.json(
@@ -118,7 +121,8 @@ export async function POST(request: NextRequest) {
     }
 
     const trimmed = serialNumber.trim()
-    const existing = await getAllQuickScansFromSupabase()
+    const supabase = await createServerSupabaseClient()
+    const existing = await getAllQuickScansFromSupabase(supabase)
     const existingList = existing ?? getAllQuickScans()
     if (existingList.some((s) => s.serialNumber === trimmed)) {
       return NextResponse.json(
@@ -126,7 +130,7 @@ export async function POST(request: NextRequest) {
         { status: 200 }
       )
     }
-    const fromDb = await addQuickScanToSupabase(trimmed, productName, movement, outbound)
+    const fromDb = await addQuickScanToSupabase(trimmed, productName, movement, outbound, supabase)
     const record = fromDb ?? addQuickScan(trimmed, productName, movement, outbound)
     return NextResponse.json(record, { status: 201 })
   } catch (error) {
@@ -144,7 +148,8 @@ export async function DELETE(request: NextRequest) {
         { status: 400 }
       )
     }
-    const fromDb = await deleteQuickScansByBatchIdFromSupabase(batchId)
+    const supabase = await createServerSupabaseClient()
+    const fromDb = await deleteQuickScansByBatchIdFromSupabase(batchId, supabase)
     const deleted = fromDb > 0 ? fromDb : deleteQuickScansByBatchId(batchId)
     if (deleted === 0) {
       return NextResponse.json(

@@ -61,12 +61,21 @@ function buildDispatchedList(
     }
   }
 
+  const statusToMovementType: Record<string, TransactionType | null> = {
+    Sold: "Sale",
+    POC: "POC Out",
+    Rented: "Rentals",
+    Disposed: "Dispose",
+    Maintenance: null,
+  }
+
   return movedOut.map((item) => {
     const out = outboundBySerial.get(item.serialNumber)
     const dateOut = out?.date ?? (item.pocOutDate ?? item.dateAdded)
+    const movementType = out?.type ?? statusToMovementType[item.status] ?? null
     return {
       item,
-      movementType: out?.type ?? null,
+      movementType,
       dateOut: dateOut ?? null,
     }
   })

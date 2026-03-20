@@ -10,6 +10,8 @@ import {
 } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { useAuth } from "@/lib/auth-context"
+import { canViewFinancials } from "@/lib/permissions"
 import { useInventoryStore } from "@/lib/inventory-store"
 import { TransactionActions } from "@/components/transaction-actions"
 import { cn, formatDateDDMMYYYY } from "@/lib/utils"
@@ -28,6 +30,8 @@ const statusStyles: Record<string, string> = {
 
 export function TransactionsTable() {
   const { transactions } = useInventoryStore()
+  const { role } = useAuth()
+  const showFinancials = canViewFinancials(role)
   return (
     <Card className="h-full min-h-[300px] sm:min-h-[340px] flex flex-col">
       <CardHeader className="pb-3">
@@ -42,7 +46,9 @@ export function TransactionsTable() {
               <TableHead className="text-xs text-muted-foreground font-medium">Type</TableHead>
               <TableHead className="text-xs text-muted-foreground font-medium hidden md:table-cell">Client / Location</TableHead>
               <TableHead className="text-xs text-muted-foreground font-medium hidden lg:table-cell">Date</TableHead>
-              <TableHead className="text-xs text-muted-foreground font-medium hidden lg:table-cell">Invoice</TableHead>
+              {showFinancials && (
+                <TableHead className="text-xs text-muted-foreground font-medium hidden lg:table-cell">Invoice</TableHead>
+              )}
               <TableHead className="text-xs text-muted-foreground font-medium hidden xl:table-cell w-24">Delivery note</TableHead>
               <TableHead className="text-xs text-muted-foreground font-medium w-[52px]">Actions</TableHead>
             </TableRow>
@@ -66,7 +72,9 @@ export function TransactionsTable() {
                     : txn.client}
                 </TableCell>
                 <TableCell className="text-sm text-muted-foreground hidden lg:table-cell">{formatDateDDMMYYYY(txn.date)}</TableCell>
-                <TableCell className="font-mono text-xs text-muted-foreground hidden lg:table-cell">{txn.invoiceNumber || "\u2014"}</TableCell>
+                {showFinancials && (
+                  <TableCell className="font-mono text-xs text-muted-foreground hidden lg:table-cell">{txn.invoiceNumber || "\u2014"}</TableCell>
+                )}
                 <TableCell className="hidden xl:table-cell">
                   {txn.deliveryNoteUrl ? (
                     <a

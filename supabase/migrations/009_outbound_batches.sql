@@ -1,4 +1,6 @@
 -- Outbound batches for POC Out and Rentals (group items sent out together; used for return flow)
+-- Single CHECK per column: do not add a duplicate named constraint (PostgreSQL names the
+-- column-level CHECK outbound_batches_type_check, which clashes with a second CONSTRAINT of the same name).
 CREATE TABLE IF NOT EXISTS public.outbound_batches (
   id TEXT PRIMARY KEY,
   type TEXT NOT NULL CHECK (type IN ('POC Out', 'Rentals')),
@@ -8,8 +10,7 @@ CREATE TABLE IF NOT EXISTS public.outbound_batches (
   end_date TEXT,
   status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'partial_return', 'closed')),
   invoice_number TEXT,
-  created_at TEXT NOT NULL,
-  CONSTRAINT outbound_batches_type_check CHECK (type IN ('POC Out', 'Rentals'))
+  created_at TEXT NOT NULL
 );
 
 COMMENT ON TABLE public.outbound_batches IS 'Groups of items sent out for POC or Rental; used to track return and close when all returned.';

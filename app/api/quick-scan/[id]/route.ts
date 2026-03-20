@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { deleteQuickScan } from "@/lib/quick-scans-db"
 import { deleteQuickScanFromSupabase } from "@/lib/supabase/quick-scans-db"
+import { createServerSupabaseClient } from "@/lib/supabase/server"
 
 export async function DELETE(
   _request: NextRequest,
@@ -14,7 +15,8 @@ export async function DELETE(
         { status: 400 }
       )
     }
-    const fromDb = await deleteQuickScanFromSupabase(id)
+    const supabase = await createServerSupabaseClient()
+    const fromDb = await deleteQuickScanFromSupabase(id, supabase)
     if (fromDb) {
       return NextResponse.json({ ok: true, deleted: id })
     }

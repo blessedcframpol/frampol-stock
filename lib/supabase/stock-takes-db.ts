@@ -1,5 +1,11 @@
+import type { SupabaseClient } from "@supabase/supabase-js"
+import type { Database } from "./database.types"
 import { getSupabaseClient } from "@/lib/supabase/client"
 import type { StockTakeRecord, StockTakeSnapshot } from "@/lib/data"
+
+function getClient(serverClient?: SupabaseClient<Database> | null) {
+  return serverClient ?? getSupabaseClient()
+}
 
 function rowToRecord(row: { id: string; completed_at: string; result_snapshot: unknown }): StockTakeRecord {
   const snapshot = row.result_snapshot as StockTakeSnapshot
@@ -15,8 +21,8 @@ function isTableNotFound(error: { code?: string; message?: string } | null): boo
   return (error?.code === "PGRST205") || (error?.message?.includes("Could not find the table") ?? false)
 }
 
-export async function getAllStockTakes(): Promise<StockTakeRecord[]> {
-  const supabase = getSupabaseClient()
+export async function getAllStockTakes(serverClient?: SupabaseClient<Database> | null): Promise<StockTakeRecord[]> {
+  const supabase = getClient(serverClient)
   const { data, error } = await supabase
     .from("stock_takes")
     .select("id, completed_at, result_snapshot")
@@ -28,8 +34,8 @@ export async function getAllStockTakes(): Promise<StockTakeRecord[]> {
   return (data ?? []).map(rowToRecord)
 }
 
-export async function getStockTakeById(id: string): Promise<StockTakeRecord | null> {
-  const supabase = getSupabaseClient()
+export async function getStockTakeById(id: string, serverClient?: SupabaseClient<Database> | null): Promise<StockTakeRecord | null> {
+  const supabase = getClient(serverClient)
   const { data, error } = await supabase
     .from("stock_takes")
     .select("id, completed_at, result_snapshot")
@@ -48,8 +54,8 @@ export function isStockTakesTableMissingError(error: unknown): boolean {
   return (e?.code === "PGRST205") || (e?.message?.includes("Could not find the table") ?? false)
 }
 
-export async function createStockTake(snapshot: StockTakeSnapshot): Promise<StockTakeRecord> {
-  const supabase = getSupabaseClient()
+export async function createStockTake(snapshot: StockTakeSnapshot, serverClient?: SupabaseClient<Database> | null): Promise<StockTakeRecord> {
+  const supabase = getClient(serverClient)
   const id = `ST-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
   const completedAt = new Date().toISOString()
   const { data, error } = await supabase

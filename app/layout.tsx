@@ -3,6 +3,7 @@ import { Inter, JetBrains_Mono } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import { ThemeProvider } from '@/components/theme-provider'
 import { Toaster } from '@/components/ui/sonner'
+import { AuthProvider } from '@/lib/auth-context'
 import { InventoryStoreProvider } from '@/lib/inventory-store'
 import './globals.css'
 
@@ -15,7 +16,10 @@ export const metadata: Metadata = {
 }
 
 export const viewport: Viewport = {
-  themeColor: '#1a1a2e',
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#fafafa' },
+    { media: '(prefers-color-scheme: dark)', color: '#0a0a0a' },
+  ],
 }
 
 export default function RootLayout({
@@ -27,9 +31,11 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <body className={`${inter.variable} ${jetbrainsMono.variable} font-sans antialiased`}>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
-          <InventoryStoreProvider>
-            {children}
-          </InventoryStoreProvider>
+          <AuthProvider>
+            <InventoryStoreProvider>
+              {children}
+            </InventoryStoreProvider>
+          </AuthProvider>
         </ThemeProvider>
         <Toaster />
         <Analytics />

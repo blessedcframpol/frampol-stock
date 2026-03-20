@@ -47,6 +47,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useState, useMemo, useEffect } from "react"
 import { appUsers } from "@/lib/data"
+import { useAuth } from "@/lib/auth-context"
+import { canAccessReports, canAccessRequests } from "@/lib/permissions"
 import { useClients } from "@/lib/supabase/clients-db"
 import { runSearch } from "@/lib/search"
 import { SearchSuggestions } from "@/components/search-suggestions"
@@ -57,22 +59,42 @@ const inventoryChildren = [
   { href: "/inventory/stock-take", label: "Stock take" },
 ]
 
-const navItems = [
+type NavItem = {
+  href: string
+  label: string
+  icon: React.ComponentType<{ className?: string }>
+  children?: { href: string; label: string }[]
+  badge?: number
+}
+
+const allNavItems: NavItem[] = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/search", label: "Search", icon: Search },
   { href: "/inventory", label: "Inventory", icon: Package, children: inventoryChildren },
   { href: "/scan-history", label: "Scan history", icon: History },
   { href: "/alerts", label: "Alerts", icon: Bell },
   { href: "/clients", label: "Clients", icon: Users },
-  { href: "/reports", label: "Reports", icon: BarChart3 },
   { href: "/requests", label: "Requests", icon: MessageSquare, badge: 3 },
+  { href: "/reports", label: "Reports", icon: BarChart3 },
 ]
 
 const bottomNavItems = [
   { href: "/settings", label: "Settings", icon: Settings },
 ]
 
-function SidebarNav({ onNavigate, alertCount = 0 }: { onNavigate?: () => void; alertCount?: number }) {
+function filterNavByRole(items: NavItem[], role: string | null | undefined): NavItem[] {
+  return items.filter((item) => {
+    if (item.href === "/reports") return canAccessReports(role as import("@/lib/permissions").AppRole)
+    if (item.href === "/requests") return canAccessRequests(role as import("@/lib/permissions").AppRole)
+    return true
+  })
+}
+
+function SidebarNav({
+  onNavigate,
+  alertCount = 0,
+  navItems,
+}: { onNavigate?: () => void; alertCount?: number; navItems: NavItem[] }) {
   const pathname = usePathname()
   const [inventoryExpanded, setInventoryExpanded] = useState(true)
 
@@ -237,12 +259,21 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false)
+  const { user, profile, role, signOut } = useAuth()
   const { inventory, getAlerts } = useInventoryStore()
   const { clients } = useClients()
   const [mounted, setMounted] = useState(false)
   useEffect(() => {
     setMounted(true)
   }, [])
+
+  const filteredNavItems = useMemo(
+    () => filterNavByRole(allNavItems, role),
+    [role]
+  )
+  const displayName = profile?.display_name || user?.email?.split("@")[0] || "User"
+  const initials = (displayName.slice(0, 2) || "?").toUpperCase()
+  const roleLabel = role ? role.charAt(0).toUpperCase() + role.slice(1) : ""
 
   const searchSuggestions = useMemo(
     () =>
@@ -296,7 +327,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           {collapsed ? (
             <>
               <nav className="flex-1 flex flex-col py-4 px-3 gap-1 overflow-y-auto">
-                {navItems.map((item) => {
+                {filteredNavItems.map((item) => {
                   const isActive =
                     item.href === "/inventory"
                       ? pathname.startsWith("/inventory")
@@ -353,7 +384,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
             </>
           ) : (
             <>
-              <SidebarNav alertCount={alertCount} />
+              <SidebarNav alertCount={alertCount} navItems={filteredNavItems} />
               <div className="px-3 pb-2">
                 <button
                   onClick={() => setCollapsed(true)}
@@ -379,7 +410,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
               Fram-Stock
             </SheetTitle>
           </SheetHeader>
-          <SidebarNav onNavigate={() => setMobileOpen(false)} alertCount={alertCount} />
+          <SidebarNav onNavigate={() => setMobileOpen(false)} alertCount={alertCount} navItems={filteredNavItems} />
         </SheetContent>
       </Sheet>
 
@@ -651,15 +682,32 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
             </Popover>
 
             <div className="flex items-center gap-2 sm:gap-3 ml-1 sm:ml-2">
-              <Avatar className="w-8 h-8">
-                <AvatarFallback className="bg-primary text-primary-foreground text-xs font-semibold">
-                  EM
-                </AvatarFallback>
-              </Avatar>
-              <div className="hidden lg:block">
-                <p className="text-sm font-medium text-foreground leading-none">Eric Mugabo</p>
-                <p className="text-xs text-muted-foreground mt-0.5">Admin</p>
-              </div>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button className="flex items-center gap-2 sm:gap-3 rounded-md hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                    <Avatar className="w-8 h-8">
+                      <AvatarFallback className="bg-primary text-primary-foreground text-xs font-semibold">
+                        {initials}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="hidden lg:block text-left">
+                      <p className="text-sm font-medium text-foreground leading-none">{displayName}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">{roleLabel}</p>
+                    </div>
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-48">
+                  <DropdownMenuItem
+                    onClick={async () => {
+                      await signOut()
+                      router.push("/login")
+                      router.refresh()
+                    }}
+                  >
+                    Sign out
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
         </header>

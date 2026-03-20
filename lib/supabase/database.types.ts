@@ -246,6 +246,35 @@ export interface Database {
           result_snapshot?: Json
         }
       }
+      profiles: {
+        Row: {
+          id: string
+          email: string
+          display_name: string | null
+          role: string
+          active: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id: string
+          email: string
+          display_name?: string | null
+          role?: string
+          active?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          email?: string
+          display_name?: string | null
+          role?: string
+          active?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+      }
     }
   }
 }

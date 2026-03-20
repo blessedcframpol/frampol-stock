@@ -1,5 +1,11 @@
 import type { QuickScanRecord, ClientSite } from "@/lib/data"
+import type { SupabaseClient } from "@supabase/supabase-js"
+import type { Database } from "./database.types"
 import { getSupabaseClient } from "./client"
+
+function getClient(serverClient?: SupabaseClient<Database> | null) {
+  return serverClient ?? getSupabaseClient()
+}
 
 export type QuickScanOutboundDetails = {
   clientId?: string
@@ -14,9 +20,9 @@ function generateId(): string {
   return `QSCAN-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 }
 
-export async function getAllQuickScansFromSupabase(): Promise<QuickScanRecord[] | null> {
+export async function getAllQuickScansFromSupabase(serverClient?: SupabaseClient<Database> | null): Promise<QuickScanRecord[] | null> {
   try {
-    const supabase = getSupabaseClient()
+    const supabase = getClient(serverClient)
     const { data, error } = await supabase.from("quick_scans").select("*").order("scanned_at", { ascending: false })
     if (error) {
       console.error("Supabase quick_scans select error:", error)
@@ -45,10 +51,11 @@ export async function addQuickScanToSupabase(
   serialNumber: string,
   scanType: string,
   movementType?: string,
-  outbound?: QuickScanOutboundDetails
+  outbound?: QuickScanOutboundDetails,
+  serverClient?: SupabaseClient<Database> | null
 ): Promise<QuickScanRecord | null> {
   try {
-    const supabase = getSupabaseClient()
+    const supabase = getClient(serverClient)
     const record: QuickScanRecord = {
       id: generateId(),
       serialNumber: serialNumber.trim(),
@@ -97,11 +104,12 @@ export async function addBulkQuickScansToSupabase(
   serialNumbers: string[],
   scanType: string,
   movementType?: string,
-  outbound?: QuickScanOutboundDetails
+  outbound?: QuickScanOutboundDetails,
+  serverClient?: SupabaseClient<Database> | null
 ): Promise<QuickScanRecord[]> {
   if (serialNumbers.length === 0) return []
   try {
-    const supabase = getSupabaseClient()
+    const supabase = getClient(serverClient)
     const now = new Date().toISOString()
     const batchId = generateBatchId()
     const records: QuickScanRecord[] = serialNumbers.map((serial) => ({
@@ -143,9 +151,9 @@ export async function addBulkQuickScansToSupabase(
   }
 }
 
-export async function deleteQuickScanFromSupabase(id: string): Promise<boolean> {
+export async function deleteQuickScanFromSupabase(id: string, serverClient?: SupabaseClient<Database> | null): Promise<boolean> {
   try {
-    const supabase = getSupabaseClient()
+    const supabase = getClient(serverClient)
     const { error } = await supabase.from("quick_scans").delete().eq("id", id)
     if (error) {
       console.error("Supabase quick_scans delete error:", error)
@@ -158,9 +166,9 @@ export async function deleteQuickScanFromSupabase(id: string): Promise<boolean> 
 }
 
 /** Delete all records in a batch (batchId) or a single record by id (for legacy/single scans). */
-export async function deleteQuickScansByBatchIdFromSupabase(batchId: string): Promise<number> {
+export async function deleteQuickScansByBatchIdFromSupabase(batchId: string, serverClient?: SupabaseClient<Database> | null): Promise<number> {
   try {
-    const supabase = getSupabaseClient()
+    const supabase = getClient(serverClient)
     const isBatchKey = batchId.startsWith("BATCH-")
     const { data, error } = isBatchKey
       ? await supabase.from("quick_scans").delete().eq("batch_id", batchId).select("id")

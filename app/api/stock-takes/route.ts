@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getAllStockTakes, createStockTake, isStockTakesTableMissingError } from "@/lib/supabase/stock-takes-db"
+import { createServerSupabaseClient } from "@/lib/supabase/server"
 import type { StockTakeSnapshot } from "@/lib/data"
 
 export async function GET() {
   try {
-    const list = await getAllStockTakes()
+    const supabase = await createServerSupabaseClient()
+    const list = await getAllStockTakes(supabase)
     return NextResponse.json(list)
   } catch (error) {
     console.error("Stock takes GET error:", error)
@@ -22,7 +24,8 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       )
     }
-    const record = await createStockTake(snapshot)
+    const supabase = await createServerSupabaseClient()
+    const record = await createStockTake(snapshot, supabase)
     return NextResponse.json(record, { status: 201 })
   } catch (error) {
     console.error("Stock takes POST error:", error)

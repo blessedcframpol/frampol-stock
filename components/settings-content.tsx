@@ -1,12 +1,19 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Separator } from "@/components/ui/separator"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import {
   getLowStockEmailsEnabled,
   setLowStockEmailsEnabled,
@@ -17,9 +24,20 @@ import {
   getReorderLevelOverrides,
   setReorderLevelOverrides,
 } from "@/lib/settings"
+import { useAuth } from "@/lib/auth-context"
+import { canManageUsers } from "@/lib/permissions"
 import { useInventoryStore } from "@/lib/inventory-store"
-import { Mail, Package, Plus, Trash2 } from "lucide-react"
+import { Mail, Package, Plus, Trash2, Users, Loader2 } from "lucide-react"
 import { toast } from "sonner"
+
+type ProfileRow = {
+  id: string
+  email: string
+  display_name: string | null
+  role: string
+  active: boolean
+  created_at?: string
+}
 
 function useProductNames(): string[] {
   const { inventory } = useInventoryStore()
@@ -28,12 +46,42 @@ function useProductNames(): string[] {
 }
 
 export function SettingsContent() {
+  const { role, profile, user } = useAuth()
+  const isAdmin = canManageUsers(role)
   const productNames = useProductNames()
   const [emailsEnabled, setEmailsEnabledState] = useState(true)
   const [emailRecipients, setEmailRecipientsState] = useState<string[]>([])
   const [newEmail, setNewEmail] = useState("")
   const [reorderDefault, setReorderDefaultState] = useState(2)
   const [overrides, setOverridesState] = useState<Record<string, number>>({})
+  const [profiles, setProfiles] = useState<ProfileRow[]>([])
+  const [profilesLoading, setProfilesLoading] = useState(false)
+  const [createEmail, setCreateEmail] = useState("")
+  const [createPassword, setCreatePassword] = useState("")
+  const [createDisplayName, setCreateDisplayName] = useState("")
+  const [createRole, setCreateRole] = useState<string>("technicians")
+  const [creating, setCreating] = useState(false)
+  const [updatingId, setUpdatingId] = useState<string | null>(null)
+
+  const fetchProfiles = useCallback(async () => {
+    if (!isAdmin) return
+    setProfilesLoading(true)
+    try {
+      const res = await fetch("/api/admin/profiles")
+      if (!res.ok) throw new Error(res.status === 403 ? "Forbidden" : "Failed to load")
+      const data = await res.json()
+      setProfiles(Array.isArray(data) ? data : [])
+    } catch {
+      toast.error("Could not load users")
+      setProfiles([])
+    } finally {
+      setProfilesLoading(false)
+    }
+  }, [isAdmin])
+
+  useEffect(() => {
+    fetchProfiles()
+  }, [fetchProfiles])
 
   useEffect(() => {
     setEmailsEnabledState(getLowStockEmailsEnabled())
@@ -101,12 +149,189 @@ export function SettingsContent() {
     toast.success("Using default reorder level for this product")
   }
 
+  async function handleCreateUser(e: React.FormEvent) {
+    e.preventDefault()
+    if (!createEmail.trim() || !createPassword) {
+      toast.error("Email and password required")
+      return
+    }
+    setCreating(true)
+    try {
+      const res = await fetch("/api/admin/profiles", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: createEmail.trim(),
+          password: createPassword,
+          display_name: createDisplayName.trim() || undefined,
+          role: createRole,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "Failed to create user")
+      toast.success("User created")
+      setCreateEmail("")
+      setCreatePassword("")
+      setCreateDisplayName("")
+      setCreateRole("technicians")
+      fetchProfiles()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to create user")
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  async function handleUpdateProfile(id: string, updates: { role?: string; active?: boolean }) {
+    setUpdatingId(id)
+    try {
+      const res = await fetch(`/api/admin/profiles/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "Update failed")
+      toast.success("Updated")
+      fetchProfiles()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Update failed")
+    } finally {
+      setUpdatingId(null)
+    }
+  }
+
   return (
     <div className="flex flex-col gap-6 w-full max-w-full">
       <div>
         <h1 className="text-xl md:text-2xl font-bold text-foreground tracking-tight text-balance">Settings</h1>
         <p className="text-sm text-muted-foreground mt-1">Manage your account and application preferences.</p>
       </div>
+
+      {isAdmin && (
+        <Card className="border-border">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base font-semibold text-foreground flex items-center gap-2">
+              <Users className="w-4 h-4" />
+              Accounts & roles
+            </CardTitle>
+            <p className="text-sm text-muted-foreground font-normal mt-1">
+              Create users and assign roles. Only admins can access this section.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <form onSubmit={handleCreateUser} className="flex flex-col sm:flex-row gap-3 flex-wrap items-end">
+              <div className="flex flex-col gap-1.5 min-w-[180px]">
+                <Label className="text-foreground text-xs">Email</Label>
+                <Input
+                  type="email"
+                  placeholder="user@example.com"
+                  value={createEmail}
+                  onChange={(e) => setCreateEmail(e.target.value)}
+                  className="bg-card border-border"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5 min-w-[140px]">
+                <Label className="text-foreground text-xs">Password</Label>
+                <Input
+                  type="password"
+                  placeholder="••••••••"
+                  value={createPassword}
+                  onChange={(e) => setCreatePassword(e.target.value)}
+                  className="bg-card border-border"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5 min-w-[140px]">
+                <Label className="text-foreground text-xs">Display name</Label>
+                <Input
+                  placeholder="Optional"
+                  value={createDisplayName}
+                  onChange={(e) => setCreateDisplayName(e.target.value)}
+                  className="bg-card border-border"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5 min-w-[120px]">
+                <Label className="text-foreground text-xs">Role</Label>
+                <Select value={createRole} onValueChange={setCreateRole}>
+                  <SelectTrigger className="bg-card border-border">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="admin">Admin</SelectItem>
+                    <SelectItem value="sales">Sales</SelectItem>
+                    <SelectItem value="accounts">Accounts</SelectItem>
+                    <SelectItem value="technicians">Technicians</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button type="submit" disabled={creating}>
+                {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                {creating ? "Creating…" : "Create user"}
+              </Button>
+            </form>
+            <Separator />
+            <div>
+              <Label className="text-foreground text-sm font-medium">Users</Label>
+              {profilesLoading ? (
+                <p className="text-sm text-muted-foreground py-4 flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" /> Loading…
+                </p>
+              ) : profiles.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-4">No users yet. Create one above.</p>
+              ) : (
+                <div className="mt-2 rounded-lg border border-border overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-muted/50 border-b border-border">
+                        <th className="text-left p-3 font-medium text-foreground">Email</th>
+                        <th className="text-left p-3 font-medium text-foreground">Name</th>
+                        <th className="text-left p-3 font-medium text-foreground">Role</th>
+                        <th className="text-left p-3 font-medium text-foreground">Active</th>
+                        <th className="text-right p-3 font-medium text-foreground">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {profiles.map((p) => (
+                        <tr key={p.id} className="border-b border-border/50 last:border-0">
+                          <td className="p-3 text-foreground">{p.email}</td>
+                          <td className="p-3 text-muted-foreground">{p.display_name || "—"}</td>
+                          <td className="p-3">
+                            <Select
+                              value={p.role}
+                              onValueChange={(value) => handleUpdateProfile(p.id, { role: value })}
+                              disabled={updatingId === p.id}
+                            >
+                              <SelectTrigger className="w-[120px] h-8 bg-card border-border">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="admin">Admin</SelectItem>
+                                <SelectItem value="sales">Sales</SelectItem>
+                                <SelectItem value="accounts">Accounts</SelectItem>
+                                <SelectItem value="technicians">Technicians</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </td>
+                          <td className="p-3">
+                            <Switch
+                              checked={p.active}
+                              onCheckedChange={(checked) => handleUpdateProfile(p.id, { active: checked })}
+                              disabled={updatingId === p.id}
+                            />
+                          </td>
+                          <td className="p-3 text-right">
+                            {updatingId === p.id && <Loader2 className="w-4 h-4 animate-spin inline" />}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
         {/* Left column: Email, Profile, Other */}
@@ -181,21 +406,32 @@ export function SettingsContent() {
           <CardTitle className="text-base font-semibold text-foreground">Profile</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4 flex-1 min-h-0">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="flex flex-col gap-2">
-              <Label className="text-foreground">First Name</Label>
-              <Input defaultValue="Eric" className="bg-card text-foreground border-border" />
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label className="text-foreground">Last Name</Label>
-              <Input defaultValue="Mugabo" className="bg-card text-foreground border-border" />
-            </div>
-          </div>
           <div className="flex flex-col gap-2">
             <Label className="text-foreground">Email</Label>
-            <Input defaultValue="eric.mugabo@stockflow.rw" className="bg-card text-foreground border-border" />
+            <Input
+              value={profile?.email ?? user?.email ?? ""}
+              readOnly
+              className="bg-muted/50 text-foreground border-border"
+            />
           </div>
-          <Button className="w-full sm:w-fit bg-primary text-primary-foreground hover:bg-primary/90">Save Changes</Button>
+          <div className="flex flex-col gap-2">
+            <Label className="text-foreground">Display name</Label>
+            <Input
+              value={profile?.display_name ?? ""}
+              readOnly
+              placeholder="—"
+              className="bg-muted/50 text-foreground border-border"
+            />
+          </div>
+          <div className="flex flex-col gap-2">
+            <Label className="text-foreground">Role</Label>
+            <Input
+              value={role ? role.charAt(0).toUpperCase() + role.slice(1) : ""}
+              readOnly
+              className="bg-muted/50 text-foreground border-border"
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">Contact an admin to change your role or display name.</p>
         </CardContent>
       </Card>
 

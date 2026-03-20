@@ -23,6 +23,8 @@ import {
 } from "@/components/ui/sheet"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { DashboardShell } from "@/components/dashboard-shell"
+import { useAuth } from "@/lib/auth-context"
+import { canViewFinancials } from "@/lib/permissions"
 import { useInventoryStore } from "@/lib/inventory-store"
 import { useClients } from "@/lib/supabase/clients-db"
 import { cn, formatDateDDMMYYYY } from "@/lib/utils"
@@ -75,6 +77,8 @@ type ListRow = ConsignmentRow | SingleRow
 export default function ClientDetailPage() {
   const params = useParams()
   const id = typeof params?.id === "string" ? params.id : ""
+  const { role } = useAuth()
+  const showFinancials = canViewFinancials(role)
   const { clients, isLoading: clientsLoading } = useClients()
   const { transactions } = useInventoryStore()
   const [detailOpen, setDetailOpen] = useState(false)
@@ -242,9 +246,11 @@ export default function ClientDetailPage() {
                     <TableHead className="text-xs text-muted-foreground font-medium hidden sm:table-cell">
                       Serial / Ref
                     </TableHead>
-                    <TableHead className="text-xs text-muted-foreground font-medium hidden lg:table-cell">
-                      Invoice
-                    </TableHead>
+                    {showFinancials && (
+                      <TableHead className="text-xs text-muted-foreground font-medium hidden lg:table-cell">
+                        Invoice
+                      </TableHead>
+                    )}
                     <TableHead className="w-8" />
                   </TableRow>
                 </TableHeader>
@@ -270,9 +276,11 @@ export default function ClientDetailPage() {
                           </TableCell>
                           <TableCell className="text-sm font-medium">{row.count} item{row.count !== 1 ? "s" : ""}</TableCell>
                           <TableCell className="text-sm text-muted-foreground hidden sm:table-cell">—</TableCell>
-                          <TableCell className="font-mono text-xs text-muted-foreground hidden lg:table-cell">
-                            {row.invoiceNumber || "—"}
-                          </TableCell>
+                          {showFinancials && (
+                            <TableCell className="font-mono text-xs text-muted-foreground hidden lg:table-cell">
+                              {row.invoiceNumber || "—"}
+                            </TableCell>
+                          )}
                           <TableCell>
                             <ChevronRight className="w-4 h-4 text-muted-foreground" />
                           </TableCell>
@@ -301,9 +309,11 @@ export default function ClientDetailPage() {
                         <TableCell className="font-mono text-xs text-foreground hidden sm:table-cell">
                           {t.serialNumber}
                         </TableCell>
-                        <TableCell className="font-mono text-xs text-muted-foreground hidden lg:table-cell">
-                          {t.invoiceNumber || "—"}
-                        </TableCell>
+                        {showFinancials && (
+                          <TableCell className="font-mono text-xs text-muted-foreground hidden lg:table-cell">
+                            {t.invoiceNumber || "—"}
+                          </TableCell>
+                        )}
                         <TableCell>
                           <ChevronRight className="w-4 h-4 text-muted-foreground" />
                         </TableCell>
@@ -339,10 +349,12 @@ export default function ClientDetailPage() {
           <ScrollArea className="flex-1 -mx-6 px-6">
             {selectedConsignment && (
               <div className="space-y-4 pb-6">
-                <div className="flex flex-wrap gap-2 text-sm">
-                  <span className="text-muted-foreground">Invoice:</span>
-                  <span className="font-mono">{selectedConsignment.invoiceNumber || "—"}</span>
-                </div>
+                {showFinancials && (
+                  <div className="flex flex-wrap gap-2 text-sm">
+                    <span className="text-muted-foreground">Invoice:</span>
+                    <span className="font-mono">{selectedConsignment.invoiceNumber || "—"}</span>
+                  </div>
+                )}
                 <Table>
                   <TableHeader>
                     <TableRow className="hover:bg-transparent">
@@ -389,7 +401,7 @@ export default function ClientDetailPage() {
                   <dt className="text-muted-foreground text-xs font-medium">Date</dt>
                   <dd className="mt-0.5">{formatDateDDMMYYYY(selectedTransaction.date)}</dd>
                 </div>
-                {selectedTransaction.invoiceNumber && (
+                {showFinancials && selectedTransaction.invoiceNumber && (
                   <div>
                     <dt className="text-muted-foreground text-xs font-medium">Invoice</dt>
                     <dd className="font-mono mt-0.5">{selectedTransaction.invoiceNumber}</dd>
