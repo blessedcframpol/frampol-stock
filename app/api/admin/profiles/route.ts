@@ -76,7 +76,7 @@ export async function POST(request: NextRequest) {
       email: email.trim(),
       password,
       email_confirm: true,
-      user_metadata: { display_name: display_name?.trim() || null, role: appRole },
+      user_metadata: { display_name: display_name?.trim() || null },
     })
     if (createError) {
       console.error("Admin create user error:", createError)

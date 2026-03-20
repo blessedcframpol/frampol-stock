@@ -22,6 +22,7 @@ import {
   MICROSOFT_OAUTH_SCOPES,
   MICROSOFT_PROVIDER,
 } from "@/lib/auth/microsoft-oauth"
+import { useAuth, hasAppAccess } from "@/lib/auth-context"
 
 /** Hero / brand panel artwork */
 const LOGIN_VISUAL = "/pexels-daniel-dan-47825192-7598913.jpg"
@@ -105,6 +106,7 @@ function LoginPageContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const redirectTo = searchParams.get("redirectTo") ?? "/"
+  const { user, profile, loading: authLoading } = useAuth()
 
   const [mode, setMode] = useState<"signin" | "signup">("signin")
   const [email, setEmail] = useState("")
@@ -121,6 +123,24 @@ function LoginPageContent() {
     const q = searchParams.get("error")
     if (q) setError(q)
   }, [searchParams])
+
+  useEffect(() => {
+    if (authLoading) return
+    if (!user) return
+    const safeRedirect = redirectTo.startsWith("/login") ? "/" : redirectTo
+    if (hasAppAccess(profile)) {
+      router.replace(safeRedirect)
+      router.refresh()
+      return
+    }
+    if (profile && !profile.active) {
+      router.replace("/pending-role?reason=inactive")
+      return
+    }
+    if (profile?.active && profile.role === null) {
+      router.replace("/pending-role?reason=no-role")
+    }
+  }, [authLoading, user, profile, redirectTo, router])
 
   function clearMessages() {
     setError(null)

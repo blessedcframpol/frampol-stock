@@ -1,5 +1,6 @@
 "use client"
 
+import { useEffect, useState } from "react"
 import { Package, ShoppingCart, Radio, AlertTriangle } from "lucide-react"
 import { StatCard } from "@/components/stat-card"
 import { StockByCategoryChart, CategoryDistributionChart, MonthlySalesChart } from "@/components/dashboard-charts"
@@ -10,12 +11,17 @@ import { useInventoryStore } from "@/lib/inventory-store"
 
 export function DashboardContent() {
   const { inventory, getAlerts } = useInventoryStore()
+  /** Avoid hydration mismatch: reorder levels read localStorage on client only (see lib/settings.ts). */
+  const [statsReady, setStatsReady] = useState(false)
+  useEffect(() => setStatsReady(true), [])
+
   const totalStock = inventory.filter((i) => i.status === "In Stock").length
   const itemsSold = inventory.filter((i) => i.status === "Sold").length
   const pocActive = inventory.filter((i) => i.status === "POC").length
-  const rentedActive = inventory.filter((i) => i.status === "Rented").length
-  const maintenance = inventory.filter((i) => i.status === "Maintenance").length
   const lowStockCount = getAlerts().lowStock.length
+
+  const showStats = statsReady
+  const dash = "—" as const
 
   return (
     <div className="flex flex-col gap-4 md:gap-6 min-w-0">
@@ -29,7 +35,7 @@ export function DashboardContent() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
         <StatCard
           title="Total Inventory"
-          value={totalStock}
+          value={showStats ? totalStock : dash}
           change="In stock"
           changeType="neutral"
           icon={Package}
@@ -38,7 +44,7 @@ export function DashboardContent() {
         />
         <StatCard
           title="Items Sold"
-          value={itemsSold}
+          value={showStats ? itemsSold : dash}
           change="Sold to date"
           changeType="neutral"
           icon={ShoppingCart}
@@ -47,8 +53,8 @@ export function DashboardContent() {
         />
         <StatCard
           title="POC Active"
-          value={pocActive}
-          change={pocActive > 0 ? "On POC" : "None"}
+          value={showStats ? pocActive : dash}
+          change={showStats ? (pocActive > 0 ? "On POC" : "None") : "…"}
           changeType="neutral"
           icon={Radio}
           iconBg="bg-cyan-500/10"
@@ -56,9 +62,9 @@ export function DashboardContent() {
         />
         <StatCard
           title="Low Stock Alerts"
-          value={lowStockCount}
-          change={lowStockCount > 0 ? "View alerts" : "All good"}
-          changeType={lowStockCount > 0 ? "negative" : "neutral"}
+          value={showStats ? lowStockCount : dash}
+          change={showStats ? (lowStockCount > 0 ? "View alerts" : "All good") : "…"}
+          changeType={showStats && lowStockCount > 0 ? "negative" : "neutral"}
           icon={AlertTriangle}
           iconBg="bg-amber-500/10"
           iconColor="text-amber-600 dark:text-amber-400"

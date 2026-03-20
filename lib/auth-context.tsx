@@ -3,14 +3,21 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react"
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser"
 import type { AppRole } from "@/lib/permissions"
+import { isValidRole } from "@/lib/permissions"
 import type { User } from "@supabase/supabase-js"
 
 export type Profile = {
   id: string
   email: string
   display_name: string | null
-  role: AppRole
+  /** Set by an admin; null until assigned (self-service users). */
+  role: AppRole | null
   active: boolean
+}
+
+/** User can use the app (RLS + UI) once they have an active profile with a role. */
+export function hasAppAccess(profile: Profile | null | undefined): boolean {
+  return Boolean(profile?.active && profile.role != null)
 }
 
 type AuthState = {
@@ -39,11 +46,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .eq("id", userId)
         .single()
       if (error || !data) return null
+      const rawRole = data.role
       return {
         id: data.id,
         email: data.email,
         display_name: data.display_name ?? null,
-        role: data.role as AppRole,
+        role: rawRole != null && isValidRole(rawRole) ? rawRole : null,
         active: data.active,
       }
     },

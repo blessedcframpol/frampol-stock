@@ -13,6 +13,13 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next()
   }
 
+  // OAuth PKCE: verifier cookies must reach the Route Handler untouched. Running the
+  // Supabase client here (e.g. getUser) can rewrite auth cookies before exchangeCodeForSession.
+  const p = request.nextUrl.pathname
+  if (p === "/auth/callback" || p.startsWith("/auth/callback/")) {
+    return NextResponse.next({ request: { headers: request.headers } })
+  }
+
   let response = NextResponse.next({ request: { headers: request.headers } })
 
   const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {

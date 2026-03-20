@@ -24,6 +24,7 @@ import {
   ShieldAlert,
   Clock,
   History,
+  Loader2,
 } from "lucide-react"
 import { cn, formatDateDDMMYYYY } from "@/lib/utils"
 import { Input } from "@/components/ui/input"
@@ -259,13 +260,32 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false)
-  const { user, profile, role, signOut } = useAuth()
+  const { user, profile, role, signOut, loading, refetch } = useAuth()
   const { inventory, getAlerts } = useInventoryStore()
   const { clients } = useClients()
   const [mounted, setMounted] = useState(false)
   useEffect(() => {
     setMounted(true)
   }, [])
+
+  const blockReason: "inactive" | "no-role" | null =
+    user && profile && !profile.active
+      ? "inactive"
+      : user && profile?.active && profile.role === null
+        ? "no-role"
+        : null
+
+  useEffect(() => {
+    if (loading) return
+    if (!user) {
+      const next = pathname.startsWith("/login") ? "/" : pathname || "/"
+      router.replace(`/login?redirectTo=${encodeURIComponent(next)}`)
+      return
+    }
+    if (user && profile && blockReason) {
+      router.replace(`/pending-role?reason=${blockReason}`)
+    }
+  }, [loading, user, profile, blockReason, pathname, router])
 
   const filteredNavItems = useMemo(
     () => filterNavByRole(allNavItems, role),
@@ -300,6 +320,29 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
     alerts.rentalApproaching.length
   // Use alert count only after mount to avoid hydration mismatch (store may differ server vs client)
   const alertCount = mounted ? totalAlertCount : 0
+
+  const authGateSpinner = (
+    <div className="flex h-screen items-center justify-center bg-background">
+      <Loader2 className="size-8 animate-spin text-muted-foreground" aria-hidden />
+      <span className="sr-only">Loading…</span>
+    </div>
+  )
+
+  if (loading) return authGateSpinner
+  if (!user) return authGateSpinner
+  if (user && !profile) {
+    return (
+      <div className="flex h-screen flex-col items-center justify-center gap-4 bg-background px-4">
+        <p className="max-w-sm text-center text-sm text-muted-foreground">
+          We couldn&apos;t load your account profile. Try again, or contact your administrator if this keeps happening.
+        </p>
+        <Button type="button" variant="secondary" onClick={() => void refetch()}>
+          Retry
+        </Button>
+      </div>
+    )
+  }
+  if (blockReason) return authGateSpinner
 
   return (
     <div className="flex h-screen overflow-hidden">

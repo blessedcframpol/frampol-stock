@@ -251,7 +251,7 @@ export interface Database {
           id: string
           email: string
           display_name: string | null
-          role: string
+          role: string | null
           active: boolean
           created_at: string
           updated_at: string
@@ -260,7 +260,7 @@ export interface Database {
           id: string
           email: string
           display_name?: string | null
-          role?: string
+          role?: string | null
           active?: boolean
           created_at?: string
           updated_at?: string
@@ -269,7 +269,7 @@ export interface Database {
           id?: string
           email?: string
           display_name?: string | null
-          role?: string
+          role?: string | null
           active?: boolean
           created_at?: string
           updated_at?: string

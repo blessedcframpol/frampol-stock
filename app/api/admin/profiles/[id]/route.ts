@@ -36,7 +36,12 @@ export async function PATCH(
       return adminConfigError
     }
     const body = await _request.json() as { role?: string; active?: boolean; display_name?: string }
-    const updates: { role?: string; active?: boolean; display_name?: string; updated_at: string } = {
+    const updates: {
+      role?: string
+      active?: boolean
+      display_name?: string | null
+      updated_at: string
+    } = {
       updated_at: new Date().toISOString(),
     }
     const validRoles = ["admin", "sales", "accounts", "technicians"] as const
