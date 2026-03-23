@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -15,20 +15,45 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
+import { countOrderGroupsForClient } from "@/lib/client-transactions"
+import { useInventoryStore } from "@/lib/inventory-store"
 import { useClients, insertClient } from "@/lib/supabase/clients-db"
-import { Search, Mail, Phone, Building2, ShoppingBag, Plus, MapPin } from "lucide-react"
+import type { ClientSite } from "@/lib/data"
+import { Search, Mail, Phone, Building2, ShoppingBag, Plus, MapPin, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 export function ClientsContent() {
   const [search, setSearch] = useState("")
   const { clients, isLoading, error, refetch } = useClients()
+  const { transactions } = useInventoryStore()
+
+  /** One per batch (multi-item shipment) or per unbatched movement — not per serial line. */
+  const orderCountByClientId = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const c of clients) {
+      map.set(c.id, countOrderGroupsForClient(transactions, c))
+    }
+    return map
+  }, [clients, transactions])
   const [addModalOpen, setAddModalOpen] = useState(false)
   const [newName, setNewName] = useState("")
   const [newCompany, setNewCompany] = useState("")
   const [newEmail, setNewEmail] = useState("")
   const [newPhone, setNewPhone] = useState("")
-  const [newAddress, setNewAddress] = useState("")
+  const [newSites, setNewSites] = useState<ClientSite[]>([{ address: "" }])
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  function addNewSiteRow() {
+    setNewSites((prev) => [...prev, { address: "" }])
+  }
+
+  function removeNewSiteRow(index: number) {
+    setNewSites((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  function updateNewSite(index: number, field: "name" | "address", value: string) {
+    setNewSites((prev) => prev.map((s, i) => (i === index ? { ...s, [field]: value } : s)))
+  }
 
   const filtered = clients.filter(
     (c) =>
@@ -41,21 +66,30 @@ export function ClientsContent() {
     const company = newCompany.trim()
     const email = newEmail.trim()
     const phone = newPhone.trim()
-    const address = newAddress.trim()
-    if (!name || !company || !email || !phone || !address) {
-      toast.error("All fields are required: name, company, email, phone, and company address")
+    const validSites = newSites
+      .filter((s) => s.address.trim())
+      .map((s) => ({
+        ...(s.name?.trim() ? { name: s.name.trim() } : {}),
+        address: s.address.trim(),
+      }))
+    if (!name || !company || !email || !phone) {
+      toast.error("All fields are required: name, company, email, and phone")
+      return
+    }
+    if (validSites.length === 0) {
+      toast.error("Add at least one site with an address")
       return
     }
     setIsSubmitting(true)
     try {
-      await insertClient({ name, company, email, phone, address })
+      await insertClient({ name, company, email, phone, sites: validSites })
       await refetch()
       setAddModalOpen(false)
       setNewName("")
       setNewCompany("")
       setNewEmail("")
       setNewPhone("")
-      setNewAddress("")
+      setNewSites([{ address: "" }])
       toast.success("Client added")
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to add client")
@@ -81,8 +115,14 @@ export function ClientsContent() {
       </div>
 
       {/* Add client modal */}
-      <Dialog open={addModalOpen} onOpenChange={setAddModalOpen}>
-        <DialogContent className="sm:max-w-md">
+      <Dialog
+        open={addModalOpen}
+        onOpenChange={(open) => {
+          setAddModalOpen(open)
+          if (!open) setNewSites([{ address: "" }])
+        }}
+      >
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Add client</DialogTitle>
           </DialogHeader>
@@ -126,13 +166,47 @@ export function ClientsContent() {
               />
             </div>
             <div className="flex flex-col gap-2">
-              <Label htmlFor="new-client-address">Company address</Label>
-              <Input
-                id="new-client-address"
-                placeholder="Street, city, country"
-                value={newAddress}
-                onChange={(e) => setNewAddress(e.target.value)}
-              />
+              <div className="flex items-center justify-between gap-2">
+                <Label className="flex items-center gap-1.5">
+                  <MapPin className="w-3.5 h-3.5 text-muted-foreground" />
+                  Sites
+                </Label>
+                <Button type="button" variant="ghost" size="sm" className="h-8 text-xs" onClick={addNewSiteRow}>
+                  <Plus className="w-3.5 h-3.5 mr-1" />
+                  Add site
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">Add one or more office, branch, or delivery addresses.</p>
+              <div className="space-y-2">
+                {newSites.map((site, i) => (
+                  <div key={i} className="flex gap-2 items-start">
+                    <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <Input
+                        placeholder="Site name (e.g. HQ, Branch A)"
+                        value={site.name ?? ""}
+                        onChange={(e) => updateNewSite(i, "name", e.target.value)}
+                        className="h-9"
+                      />
+                      <Input
+                        placeholder="Full address"
+                        value={site.address}
+                        onChange={(e) => updateNewSite(i, "address", e.target.value)}
+                        className="h-9"
+                      />
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-9 w-9 shrink-0 text-muted-foreground hover:text-destructive"
+                      onClick={() => removeNewSiteRow(i)}
+                      disabled={newSites.length <= 1}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
           <DialogFooter>
@@ -182,7 +256,9 @@ export function ClientsContent() {
         </div>
       ) : (
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 md:gap-4">
-        {filtered.map((client) => (
+        {filtered.map((client) => {
+          const orderCount = orderCountByClientId.get(client.id) ?? 0
+          return (
           <Link key={client.id} href={`/clients/${client.id}`}>
             <Card className="hover:shadow-md transition-shadow cursor-pointer h-full">
             <CardContent className="pt-6">
@@ -210,18 +286,25 @@ export function ClientsContent() {
                   <Phone className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
                   <span className="text-xs text-muted-foreground">{client.phone}</span>
                 </div>
-                {client.address && (
+                {(client.sites?.length ?? 0) > 1 ? (
+                  <div className="flex items-center gap-2">
+                    <MapPin className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                    <span className="text-xs text-muted-foreground">{client.sites!.length} sites</span>
+                  </div>
+                ) : client.address ? (
                   <div className="flex items-center gap-2">
                     <MapPin className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
                     <span className="text-xs text-muted-foreground truncate">{client.address}</span>
                   </div>
-                )}
+                ) : null}
               </div>
 
               <div className="flex items-center justify-between mt-4 pt-4 border-t border-border">
                 <div className="flex items-center gap-1.5">
                   <ShoppingBag className="w-3.5 h-3.5 text-muted-foreground" />
-                  <span className="text-xs text-muted-foreground">{client.totalOrders} orders</span>
+                  <span className="text-xs text-muted-foreground">
+                    {orderCount} order{orderCount !== 1 ? "s" : ""}
+                  </span>
                 </div>
                 <Badge variant="secondary" className="text-[10px] bg-primary/10 text-primary border-0">
                   ${(client.totalSpent ?? 0).toLocaleString()}
@@ -230,7 +313,8 @@ export function ClientsContent() {
             </CardContent>
           </Card>
           </Link>
-        ))}
+          )
+        })}
       </div>
       )}
 

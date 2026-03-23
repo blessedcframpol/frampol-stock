@@ -14,6 +14,15 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import {
   Sheet,
   SheetContent,
@@ -21,15 +30,20 @@ import {
   SheetTitle,
   SheetDescription,
 } from "@/components/ui/sheet"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { DashboardShell } from "@/components/dashboard-shell"
 import { useAuth } from "@/lib/auth-context"
 import { canViewFinancials } from "@/lib/permissions"
 import { useInventoryStore } from "@/lib/inventory-store"
-import { useClients } from "@/lib/supabase/clients-db"
+import { useClients, updateClient } from "@/lib/supabase/clients-db"
 import { cn, formatDateDDMMYYYY } from "@/lib/utils"
-import { FileText, ArrowLeft, Mail, Phone, Building2, MapPin, Package, ChevronRight } from "lucide-react"
-import type { Transaction } from "@/lib/data"
+import { FileText, ArrowLeft, Mail, Phone, Building2, MapPin, Package, ChevronRight, Pencil, Plus, Trash2 } from "lucide-react"
+import { toast } from "sonner"
+import {
+  getTransactionOrderGroupKey,
+  groupClientOrderTransactions,
+  isTransactionForClient,
+} from "@/lib/client-transactions"
+import type { ClientSite, Transaction } from "@/lib/data"
 
 const statusStyles: Record<string, string> = {
   Inbound: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
@@ -40,21 +54,6 @@ const statusStyles: Record<string, string> = {
   "Rental Return": "bg-blue-500/10 text-blue-600 dark:text-blue-400",
   Transfer: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
   Dispose: "bg-slate-500/10 text-slate-600 dark:text-slate-400",
-}
-
-function isOrderForClient(
-  txn: { clientId?: string; client: string },
-  client: { id: string; company: string; name: string }
-): boolean {
-  if (txn.clientId === client.id) return true
-  if (!txn.client) return false
-  const c = txn.client.trim()
-  return (
-    c === client.company ||
-    c === client.name ||
-    c.includes(client.company) ||
-    c === `${client.name} - ${client.company}`
-  )
 }
 
 type ConsignmentRow = {
@@ -79,34 +78,35 @@ export default function ClientDetailPage() {
   const id = typeof params?.id === "string" ? params.id : ""
   const { role } = useAuth()
   const showFinancials = canViewFinancials(role)
-  const { clients, isLoading: clientsLoading } = useClients()
+  const { clients, isLoading: clientsLoading, refetch: refetchClients } = useClients()
   const { transactions } = useInventoryStore()
   const [detailOpen, setDetailOpen] = useState(false)
   const [selectedConsignment, setSelectedConsignment] = useState<ConsignmentRow | null>(null)
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null)
+  const [editOpen, setEditOpen] = useState(false)
+  const [editName, setEditName] = useState("")
+  const [editCompany, setEditCompany] = useState("")
+  const [editEmail, setEditEmail] = useState("")
+  const [editPhone, setEditPhone] = useState("")
+  const [editSites, setEditSites] = useState<ClientSite[]>([{ address: "" }])
+  const [isSavingClient, setIsSavingClient] = useState(false)
 
   const client = id ? (clients.find((c) => c.id === id) ?? null) : null
   const clientOrders = client
-    ? transactions.filter((txn) => isOrderForClient(txn, client))
+    ? transactions.filter((txn) => isTransactionForClient(txn, client))
     : []
 
   const rows = useMemo((): ListRow[] => {
-    const byBatch = new Map<string | "standalone", Transaction[]>()
-    for (const txn of clientOrders) {
-      const key = txn.batchId ?? "standalone"
-      const list = byBatch.get(key) ?? []
-      list.push(txn)
-      byBatch.set(key, list)
-    }
+    const groups = groupClientOrderTransactions(clientOrders)
     const out: ListRow[] = []
-    byBatch.forEach((txns, key) => {
-      if (key === "standalone") {
-        txns.forEach((t) => out.push({ kind: "single", transaction: t }))
+    for (const txns of groups) {
+      if (txns.length === 1) {
+        out.push({ kind: "single", transaction: txns[0]! })
       } else {
         const first = txns[0]!
         out.push({
           kind: "consignment",
-          batchId: key,
+          batchId: getTransactionOrderGroupKey(first),
           type: first.type,
           date: first.date,
           invoiceNumber: first.invoiceNumber,
@@ -114,7 +114,7 @@ export default function ClientDetailPage() {
           transactions: txns,
         })
       }
-    })
+    }
     out.sort((a, b) => {
       const dateA = a.kind === "consignment" ? a.date : a.transaction.date
       const dateB = b.kind === "consignment" ? b.date : b.transaction.date
@@ -158,6 +158,67 @@ export default function ClientDetailPage() {
     )
   }
 
+  const activeClient = client
+
+  function openEditClient() {
+    setEditName(activeClient.name)
+    setEditCompany(activeClient.company)
+    setEditEmail(activeClient.email)
+    setEditPhone(activeClient.phone ?? "")
+    setEditSites(
+      activeClient.sites?.length
+        ? activeClient.sites.map((s) => ({ name: s.name ?? "", address: s.address }))
+        : activeClient.address
+          ? [{ name: "", address: activeClient.address }]
+          : [{ name: "", address: "" }]
+    )
+    setEditOpen(true)
+  }
+
+  function addEditSiteRow() {
+    setEditSites((prev) => [...prev, { name: "", address: "" }])
+  }
+
+  function removeEditSiteRow(index: number) {
+    setEditSites((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  function updateEditSite(index: number, field: "name" | "address", value: string) {
+    setEditSites((prev) => prev.map((s, i) => (i === index ? { ...s, [field]: value } : s)))
+  }
+
+  async function handleSaveClientDetails() {
+    const name = editName.trim()
+    const company = editCompany.trim()
+    const email = editEmail.trim()
+    const phone = editPhone.trim()
+    const validSites = editSites
+      .filter((s) => s.address.trim())
+      .map((s) => ({
+        ...(s.name?.trim() ? { name: s.name.trim() } : {}),
+        address: s.address.trim(),
+      }))
+    if (!name || !company || !email || !phone) {
+      toast.error("All fields are required: name, company, email, and phone")
+      return
+    }
+    if (validSites.length === 0) {
+      toast.error("Add at least one site with an address")
+      return
+    }
+    setIsSavingClient(true)
+    try {
+      await updateClient(activeClient.id, { name, company, email, phone, sites: validSites })
+      await refetchClients()
+      setEditOpen(false)
+      toast.success("Client updated")
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to update client")
+    } finally {
+      setIsSavingClient(false)
+    }
+  }
+
   return (
     <DashboardShell>
       <div className="flex flex-col gap-6 min-w-0">
@@ -171,34 +232,60 @@ export default function ClientDetailPage() {
         {/* Client header */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-lg">{client.name}</CardTitle>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <CardTitle className="text-lg">{activeClient.name}</CardTitle>
+              <Button type="button" variant="outline" size="sm" className="w-fit shrink-0" onClick={openEditClient}>
+                <Pencil className="w-4 h-4 mr-2" />
+                Edit details
+              </Button>
+            </div>
             <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-muted-foreground mt-1">
               <span className="flex items-center gap-1.5">
                 <Building2 className="w-4 h-4 shrink-0" />
-                {client.company}
+                {activeClient.company}
               </span>
-              {client.email && (
+              {activeClient.email && (
                 <a
-                  href={`mailto:${client.email}`}
+                  href={`mailto:${activeClient.email}`}
                   className="flex items-center gap-1.5 hover:text-foreground"
                 >
                   <Mail className="w-4 h-4 shrink-0" />
-                  {client.email}
+                  {activeClient.email}
                 </a>
               )}
-              {client.phone && (
+              {activeClient.phone && (
                 <span className="flex items-center gap-1.5">
                   <Phone className="w-4 h-4 shrink-0" />
-                  {client.phone}
-                </span>
-              )}
-              {client.address && (
-                <span className="flex items-start gap-1.5">
-                  <MapPin className="w-4 h-4 shrink-0 mt-0.5" />
-                  <span className="text-muted-foreground">{client.address}</span>
+                  {activeClient.phone}
                 </span>
               )}
             </div>
+            {(activeClient.sites?.length ?? 0) > 0 ? (
+              <div className="mt-3 space-y-2 w-full min-w-0">
+                <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+                  <MapPin className="w-3.5 h-3.5" />
+                  Sites
+                </p>
+                <ul className="space-y-2 text-sm text-muted-foreground">
+                  {activeClient.sites!.map((s, i) => (
+                    <li key={i} className="flex items-start gap-2 min-w-0">
+                      <MapPin className="w-4 h-4 shrink-0 mt-0.5" />
+                      <span className="min-w-0 break-words">
+                        {s.name ? <span className="text-foreground font-medium">{s.name}: </span> : null}
+                        {s.address}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : activeClient.address ? (
+              <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-muted-foreground mt-3">
+                <span className="flex items-start gap-1.5">
+                  <MapPin className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{activeClient.address}</span>
+                </span>
+              </div>
+            ) : null}
             <div className="flex gap-4 mt-3 text-sm">
               <span className="text-muted-foreground">
                 {clientOrders.length} transaction{clientOrders.length !== 1 ? "s" : ""}
@@ -206,19 +293,118 @@ export default function ClientDetailPage() {
                   <span> in {rows.length} consignment{rows.length !== 1 ? "s" : ""} / order{rows.length !== 1 ? "s" : ""}</span>
                 )}
               </span>
-              {(client.totalSpent ?? 0) > 0 && (
+              {(activeClient.totalSpent ?? 0) > 0 && (
                 <span className="text-muted-foreground">
-                  Total spent: ${(client.totalSpent ?? 0).toLocaleString()}
+                  Total spent: ${(activeClient.totalSpent ?? 0).toLocaleString()}
                 </span>
               )}
-              {client.lastOrder && (
+              {activeClient.lastOrder && (
                 <span className="text-muted-foreground">
-                  Last order: {formatDateDDMMYYYY(client.lastOrder)}
+                  Last order: {formatDateDDMMYYYY(activeClient.lastOrder)}
                 </span>
               )}
             </div>
           </CardHeader>
         </Card>
+
+        <Dialog open={editOpen} onOpenChange={setEditOpen}>
+          <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Edit client</DialogTitle>
+            </DialogHeader>
+            <div className="flex flex-col gap-4 py-2">
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="edit-client-name">Name</Label>
+                <Input
+                  id="edit-client-name"
+                  placeholder="Contact name"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                />
+              </div>
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="edit-client-company">Company</Label>
+                <Input
+                  id="edit-client-company"
+                  placeholder="Company name"
+                  value={editCompany}
+                  onChange={(e) => setEditCompany(e.target.value)}
+                />
+              </div>
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="edit-client-email">Email</Label>
+                <Input
+                  id="edit-client-email"
+                  type="email"
+                  placeholder="email@example.com"
+                  value={editEmail}
+                  onChange={(e) => setEditEmail(e.target.value)}
+                />
+              </div>
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="edit-client-phone">Phone</Label>
+                <Input
+                  id="edit-client-phone"
+                  type="tel"
+                  placeholder="+250 788 123 456"
+                  value={editPhone}
+                  onChange={(e) => setEditPhone(e.target.value)}
+                />
+              </div>
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center justify-between gap-2">
+                  <Label className="flex items-center gap-1.5">
+                    <MapPin className="w-3.5 h-3.5 text-muted-foreground" />
+                    Sites
+                  </Label>
+                  <Button type="button" variant="ghost" size="sm" className="h-8 text-xs" onClick={addEditSiteRow}>
+                    <Plus className="w-3.5 h-3.5 mr-1" />
+                    Add site
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">At least one site address is required.</p>
+                <div className="space-y-2">
+                  {editSites.map((site, i) => (
+                    <div key={i} className="flex gap-2 items-start">
+                      <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <Input
+                          placeholder="Site name (e.g. HQ, Branch A)"
+                          value={site.name ?? ""}
+                          onChange={(e) => updateEditSite(i, "name", e.target.value)}
+                          className="h-9"
+                        />
+                        <Input
+                          placeholder="Full address"
+                          value={site.address}
+                          onChange={(e) => updateEditSite(i, "address", e.target.value)}
+                          className="h-9"
+                        />
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-9 w-9 shrink-0 text-muted-foreground hover:text-destructive"
+                        onClick={() => removeEditSiteRow(i)}
+                        disabled={editSites.length <= 1}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setEditOpen(false)} disabled={isSavingClient}>
+                Cancel
+              </Button>
+              <Button onClick={handleSaveClientDetails} disabled={isSavingClient}>
+                {isSavingClient ? "Saving…" : "Save changes"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* Transactions & consignments */}
         <Card className="flex flex-col min-h-[200px]">
@@ -329,8 +515,8 @@ export default function ClientDetailPage() {
 
       {/* Detail sheet */}
       <Sheet open={detailOpen} onOpenChange={setDetailOpen}>
-        <SheetContent className="flex flex-col w-full sm:max-w-xl overflow-hidden">
-          <SheetHeader>
+        <SheetContent className="flex flex-col w-full min-w-0 sm:max-w-2xl overflow-hidden pl-6 pr-[1.4rem] pt-4 pb-6 sm:pl-7 sm:pr-7">
+          <SheetHeader className="p-0 space-y-1.5 pb-4 text-left pr-[1.4rem] sm:pr-7 shrink-0">
             <SheetTitle>
               {selectedConsignment
                 ? `Consignment — ${selectedConsignment.type}`
@@ -346,15 +532,16 @@ export default function ClientDetailPage() {
                   : ""}
             </SheetDescription>
           </SheetHeader>
-          <ScrollArea className="flex-1 -mx-6 px-6">
+          <div className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-auto overscroll-y-contain [scrollbar-gutter:stable]">
             {selectedConsignment && (
-              <div className="space-y-4 pb-6">
+              <div className="space-y-4 pb-6 pl-2 sm:pl-3 pr-px max-w-full">
                 {showFinancials && (
                   <div className="flex flex-wrap gap-2 text-sm">
                     <span className="text-muted-foreground">Invoice:</span>
                     <span className="font-mono">{selectedConsignment.invoiceNumber || "—"}</span>
                   </div>
                 )}
+                <div className="min-w-0 w-full max-w-full">
                 <Table>
                   <TableHeader>
                     <TableRow className="hover:bg-transparent">
@@ -377,10 +564,11 @@ export default function ClientDetailPage() {
                     ))}
                   </TableBody>
                 </Table>
+                </div>
               </div>
             )}
             {selectedTransaction && (
-              <dl className="space-y-3 text-sm pb-6">
+              <dl className="space-y-3 text-sm pb-6 pl-2 sm:pl-3">
                 <div>
                   <dt className="text-muted-foreground text-xs font-medium">Movement type</dt>
                   <dd className="mt-0.5">
@@ -443,7 +631,7 @@ export default function ClientDetailPage() {
                 )}
               </dl>
             )}
-          </ScrollArea>
+          </div>
         </SheetContent>
       </Sheet>
     </DashboardShell>

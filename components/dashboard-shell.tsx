@@ -101,8 +101,8 @@ function SidebarNav({
 
   return (
     <>
-      <nav className="flex-1 flex flex-col py-4 px-3 gap-1 overflow-y-auto">
-        <span className="text-[11px] font-medium uppercase tracking-wider text-sidebar-foreground/40 px-3 mb-2">
+      <nav className="flex-1 flex flex-col py-5 px-4 gap-1 overflow-y-auto">
+        <span className="text-[11px] font-medium uppercase tracking-wider text-sidebar-foreground/40 mb-3 block px-0.5">
           Main Menu
         </span>
         {navItems.map((item) => {
@@ -137,7 +137,7 @@ function SidebarNav({
                         e.preventDefault()
                         setInventoryExpanded((v) => !v)
                       }}
-                      className="p-2 rounded-md hover:bg-sidebar-primary/20 shrink-0"
+                      className="p-2 rounded-md hover:bg-sidebar-primary/20 shrink-0 mr-0.5"
                       aria-label={isExpanded ? "Collapse" : "Expand"}
                     >
                       {isExpanded ? (
@@ -149,7 +149,7 @@ function SidebarNav({
                   )}
                 </div>
                 {item.href === "/inventory" && isExpanded && (
-                  <div className="flex flex-col gap-0.5 pl-2 ml-3 border-l border-sidebar-border/60">
+                  <div className="flex flex-col gap-0.5 mt-0.5 ml-2 pl-4 border-l-2 border-sidebar-border/50">
                     {item.children.map((child) => {
                       const isChildActive = pathname === child.href
                       return (
@@ -158,7 +158,7 @@ function SidebarNav({
                           href={child.href}
                           onClick={onNavigate}
                           className={cn(
-                            "flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors",
+                            "flex items-center gap-2 pl-3 pr-3 py-2 rounded-md text-sm transition-colors",
                             isChildActive
                               ? "bg-sidebar-accent text-sidebar-foreground font-medium"
                               : "text-sidebar-foreground/70 hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground"
@@ -186,8 +186,8 @@ function SidebarNav({
                   : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
               )}
             >
-              <item.icon className="w-[18px] h-[18px] shrink-0" />
-              <span className="flex-1">{item.label}</span>
+              <item.icon className="w-[18px] h-[18px] shrink-0 ml-0.5" />
+              <span className="flex-1 pr-1">{item.label}</span>
               {badge != null && badge > 0 && (
                 <Badge className="bg-sidebar-primary/20 text-sidebar-primary-foreground border-0 text-[10px] h-5 min-w-5 flex items-center justify-center">
                   {badge}
@@ -197,7 +197,7 @@ function SidebarNav({
           )
         })}
       </nav>
-      <div className="px-3 pb-4 flex flex-col gap-1 border-t border-sidebar-border pt-4">
+      <div className="px-4 pb-5 flex flex-col gap-1 border-t border-sidebar-border pt-4">
         {bottomNavItems.map((item) => {
           const isActive = pathname === item.href
           return (
@@ -212,8 +212,8 @@ function SidebarNav({
                   : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
               )}
             >
-              <item.icon className="w-[18px] h-[18px] shrink-0" />
-              <span>{item.label}</span>
+              <item.icon className="w-[18px] h-[18px] shrink-0 ml-0.5" />
+              <span className="pr-1">{item.label}</span>
             </Link>
           )
         })}
@@ -351,11 +351,11 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
         <aside
           className={cn(
             "hidden md:flex flex-col bg-sidebar text-sidebar-foreground border-r border-sidebar-border transition-all duration-300 shrink-0",
-            collapsed ? "w-[68px]" : "w-[260px]"
+            collapsed ? "w-[72px]" : "w-[272px]"
           )}
         >
           {/* Logo */}
-          <div className="flex items-center gap-3 px-5 h-16 border-b border-sidebar-border shrink-0">
+          <div className="flex items-center gap-3 px-4 h-16 border-b border-sidebar-border shrink-0">
             <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-sidebar-primary">
               <Satellite className="w-4 h-4 text-sidebar-primary-foreground" />
             </div>
@@ -369,7 +369,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           {/* Nav */}
           {collapsed ? (
             <>
-              <nav className="flex-1 flex flex-col py-4 px-3 gap-1 overflow-y-auto">
+              <nav className="flex-1 flex flex-col py-4 px-2 gap-1 overflow-y-auto">
                 {filteredNavItems.map((item) => {
                   const isActive =
                     item.href === "/inventory"
@@ -398,7 +398,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                   )
                 })}
               </nav>
-              <div className="px-3 pb-4 flex flex-col gap-1 border-t border-sidebar-border pt-4">
+              <div className="px-2 pb-4 flex flex-col gap-1 border-t border-sidebar-border pt-4">
                 {bottomNavItems.map((item) => {
                   const isActive = pathname === item.href
                   return (
@@ -407,7 +407,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                       href={item.href}
                       title={item.label}
                       className={cn(
-                        "flex items-center justify-center p-2.5 rounded-lg transition-colors",
+                        "flex items-center justify-center p-2.5 rounded-lg transition-colors mx-auto w-10",
                         isActive
                           ? "bg-sidebar-primary text-sidebar-primary-foreground"
                           : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
@@ -428,8 +428,9 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           ) : (
             <>
               <SidebarNav alertCount={alertCount} navItems={filteredNavItems} />
-              <div className="px-3 pb-2">
+              <div className="px-4 pb-3">
                 <button
+                  type="button"
                   onClick={() => setCollapsed(true)}
                   className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors w-full"
                 >
@@ -444,8 +445,8 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
 
       {/* Mobile Sidebar Sheet */}
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-        <SheetContent side="left" className="w-[280px] p-0 bg-sidebar text-sidebar-foreground border-sidebar-border [&>button]:text-sidebar-foreground">
-          <SheetHeader className="px-5 h-16 flex-row items-center gap-3 border-b border-sidebar-border space-y-0">
+        <SheetContent side="left" className="w-[min(100vw-2rem,300px)] p-0 bg-sidebar text-sidebar-foreground border-sidebar-border [&>button]:text-sidebar-foreground">
+          <SheetHeader className="px-4 h-16 flex-row items-center gap-3 border-b border-sidebar-border space-y-0">
             <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-sidebar-primary">
               <Satellite className="w-4 h-4 text-sidebar-primary-foreground" />
             </div>

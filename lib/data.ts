@@ -97,8 +97,10 @@ export interface Client {
   company: string
   email: string
   phone: string
-  /** Company or primary business address */
+  /** First site address; mirrors sites[0] when sites are stored */
   address?: string
+  /** Office / branch / delivery locations */
+  sites?: ClientSite[]
   totalOrders: number
   totalSpent: number
   lastOrder: string

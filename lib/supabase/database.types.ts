@@ -158,6 +158,7 @@ export interface Database {
           email: string
           phone: string | null
           address: string | null
+          sites: { name?: string; address: string }[] | null
           total_orders: number
           total_spent: number
           last_order: string | null
@@ -169,6 +170,7 @@ export interface Database {
           email: string
           phone?: string | null
           address?: string | null
+          sites?: { name?: string; address: string }[] | null
           total_orders?: number
           total_spent?: number
           last_order?: string | null
@@ -180,6 +182,7 @@ export interface Database {
           email?: string
           phone?: string | null
           address?: string | null
+          sites?: { name?: string; address: string }[] | null
           total_orders?: number
           total_spent?: number
           last_order?: string | null

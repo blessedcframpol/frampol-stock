@@ -322,13 +322,24 @@ export function QuickScan() {
         toast.error("All client details are required: name, company, email, and phone")
         return
       }
+      const validSitesForNew = sites
+        .filter((s) => s.address.trim())
+        .map((s) => ({
+          ...(s.name?.trim() ? { name: s.name.trim() } : {}),
+          address: s.address.trim(),
+        }))
+      if (validSitesForNew.length === 0) {
+        toast.error("Add at least one site address for the new client")
+        setIsSubmitting(false)
+        return
+      }
       try {
         const newClient = await insertClient({
           name,
           company,
           email,
           phone,
-          address: sites[0]?.address?.trim() ?? "",
+          sites: validSitesForNew,
         })
         outboundDetails.clientId = newClient.id
         outboundDetails.clientName = newClient.name

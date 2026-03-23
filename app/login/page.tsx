@@ -36,6 +36,10 @@ const primaryButtonClass =
 const microsoftButtonClass =
   "flex h-12 w-full items-center justify-center gap-3 rounded-xl border border-input bg-card text-[15px] font-semibold text-card-foreground shadow-none transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
 
+/** Contrast-safe on dark backgrounds (WCAG); avoids `text-destructive` token tuned for buttons. */
+const loginFormErrorClass =
+  "rounded-xl border border-red-600/40 bg-red-50 px-3 py-2.5 text-sm leading-snug text-red-950 dark:border-red-400/45 dark:bg-red-950/50 dark:text-red-100"
+
 function MicrosoftLogo() {
   return (
     <svg width="21" height="21" viewBox="0 0 21 21" aria-hidden className="shrink-0">
@@ -394,7 +398,7 @@ function LoginPageContent() {
             <>
               <h1 className="text-3xl font-bold tracking-tight text-foreground">Create an account</h1>
               <p className="mt-2 text-[15px] text-muted-foreground">
-                Get started — you&apos;ll get technician access by default.
+                Get started — an administrator will assign your role after sign-up.
               </p>
 
               <div className="mt-10 space-y-5">
@@ -474,9 +478,9 @@ function LoginPageContent() {
                   />
                 </div>
                 {error && (
-                  <p className="text-sm text-destructive" role="alert">
+                  <div className={loginFormErrorClass} role="alert">
                     {error}
-                  </p>
+                  </div>
                 )}
                 {info && (
                   <p className="text-sm text-muted-foreground" role="status">

@@ -255,8 +255,10 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
     (params: MovementParams): { success: string[]; notFound: string[] } => {
       const { type, serialNumbers, clientId, fromLocation, toLocation, assignedTo, invoiceNumber, notes, returnDate, disposalReason, authorisedBy, batchId, deliveryNoteUrl } = params
       const clientDisplay = clientId ? getClientDisplay(clientId) : "Internal"
-      const isOutboundBatch = type === "POC Out" || type === "Rentals"
-      const newBatchId = isOutboundBatch ? (batchId ?? `BATCH-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`) : undefined
+      const assignOutboundBatchId = type === "POC Out" || type === "Rentals" || type === "Sale"
+      const newBatchId = assignOutboundBatchId
+        ? (batchId ?? `BATCH-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`)
+        : undefined
       const result = computeMovementResult(inventory, {
         type,
         serialNumbers,
@@ -279,7 +281,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
 
       const runPersist = async () => {
         if (!supabase) return
-        if (newBatchId && isOutboundBatch && result.newTransactions.length > 0) {
+        if (newBatchId && (type === "POC Out" || type === "Rentals") && result.newTransactions.length > 0) {
           const txn = result.newTransactions[0]
           const dateIso = txn.date
           const dateOnly = dateIso.slice(0, 10)

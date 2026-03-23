@@ -10,6 +10,14 @@ function safeNextPath(next: string): string {
   return next
 }
 
+/**
+ * React 18 Strict Mode (dev) mounts, unmounts, and remounts effects. A second
+ * `exchangeCodeForSession` burns the PKCE verifier and surfaces
+ * "PKCE code verifier not found". This Set lives for the page load and ensures
+ * we only exchange once per auth `code`.
+ */
+const pkceExchangeStartedForCode = new Set<string>()
+
 function AuthCallbackContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -29,30 +37,64 @@ function AuthCallbackContent() {
     const code = searchParams.get("code")
     const next = safeNextPath(searchParams.get("next") ?? "/")
 
+    async function waitForSession(supabase: ReturnType<typeof createAuthReturnBrowserClient>, maxAttempts = 60) {
+      for (let i = 0; i < maxAttempts; i++) {
+        if (cancelled) return false
+        const {
+          data: { session },
+        } = await supabase.auth.getSession()
+        if (session) return true
+        await new Promise((r) => setTimeout(r, 100))
+      }
+      return false
+    }
+
     async function run() {
       try {
         const supabase = createAuthReturnBrowserClient()
 
+        const {
+          data: { session: already },
+        } = await supabase.auth.getSession()
+        if (already) {
+          if (!cancelled) {
+            router.replace(next)
+            router.refresh()
+          }
+          return
+        }
+
         if (code) {
-          const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code)
-          if (exchangeError) {
-            const { data: { session: existing } } = await supabase.auth.getSession()
-            if (!existing) {
+          const duplicateStrictModePass = pkceExchangeStartedForCode.has(code)
+          if (!duplicateStrictModePass) {
+            pkceExchangeStartedForCode.add(code)
+          }
+
+          if (!duplicateStrictModePass) {
+            const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code)
+            if (exchangeError) {
+              const ok = await waitForSession(supabase, 40)
+              if (!ok) {
+                if (!cancelled) {
+                  router.replace(`/login?error=${encodeURIComponent(exchangeError.message)}`)
+                }
+                return
+              }
+            }
+          } else {
+            const ok = await waitForSession(supabase)
+            if (!ok) {
               if (!cancelled) {
-                router.replace(`/login?error=${encodeURIComponent(exchangeError.message)}`)
+                router.replace(
+                  `/login?error=${encodeURIComponent("Sign-in did not complete. Please try Microsoft sign-in again.")}`
+                )
               }
               return
             }
           }
         } else {
-          for (let i = 0; i < 48; i++) {
-            if (cancelled) return
-            const { data: { session } } = await supabase.auth.getSession()
-            if (session) break
-            await new Promise((r) => setTimeout(r, 250))
-          }
-          const { data: { session } } = await supabase.auth.getSession()
-          if (!session) {
+          const ok = await waitForSession(supabase, 48)
+          if (!ok) {
             if (!cancelled) {
               router.replace(
                 `/login?error=${encodeURIComponent("Missing authorization code. Try signing in again.")}`
