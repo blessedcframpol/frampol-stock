@@ -31,7 +31,7 @@ export function StatCard({ title, value, change, changeType = "neutral", icon: I
               "text-[10px] sm:text-xs font-medium px-2 py-1 rounded-md hidden sm:inline-block",
               changeType === "positive" && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
               changeType === "negative" && "bg-red-500/10 text-red-600 dark:text-red-400",
-              changeType === "neutral" && "bg-secondary text-muted-foreground"
+              changeType === "neutral" && "bg-secondary text-secondary-foreground"
             )}
           >
             {change}

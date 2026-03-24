@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { apiClientError, apiErrorResponse } from "@/lib/api-error-response"
 import { deleteQuickScan } from "@/lib/quick-scans-db"
 import { deleteQuickScanFromSupabase } from "@/lib/supabase/quick-scans-db"
 import { createServerSupabaseClient } from "@/lib/supabase/server"
@@ -10,10 +11,7 @@ export async function DELETE(
   try {
     const { id } = await params
     if (!id?.trim()) {
-      return NextResponse.json(
-        { error: "Scan ID is required" },
-        { status: 400 }
-      )
+      return apiClientError(400, "Scan ID is required")
     }
     const supabase = await createServerSupabaseClient()
     const fromDb = await deleteQuickScanFromSupabase(id, supabase)
@@ -24,15 +22,8 @@ export async function DELETE(
     if (fromFile) {
       return NextResponse.json({ ok: true, deleted: id })
     }
-    return NextResponse.json(
-      { error: "Scan not found or could not be deleted" },
-      { status: 404 }
-    )
+    return apiClientError(404, "Scan not found or could not be deleted", { log: "warn" })
   } catch (error) {
-    console.error("Quick scan DELETE error:", error)
-    return NextResponse.json(
-      { error: "Failed to delete scan" },
-      { status: 500 }
-    )
+    return apiErrorResponse(500, "Failed to delete scan", { cause: error, logLabel: "Quick scan DELETE" })
   }
 }

@@ -31,6 +31,7 @@ import { useInventoryStore } from "@/lib/inventory-store"
 import { cn } from "@/lib/utils"
 import { Mail, Plus, Trash2, Loader2, HelpCircle, Info } from "lucide-react"
 import { toast } from "sonner"
+import { toastFromApiErrorBody, toastFromCaughtError } from "@/lib/toast-reportable-error"
 
 type ProfileRow = {
   id: string
@@ -133,11 +134,15 @@ export function SettingsContent() {
     setProfilesLoading(true)
     try {
       const res = await fetch("/api/admin/profiles")
-      if (!res.ok) throw new Error(res.status === 403 ? "Forbidden" : "Failed to load")
-      const data = await res.json()
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        toastFromApiErrorBody(data, "Could not load users")
+        setProfiles([])
+        return
+      }
       setProfiles(Array.isArray(data) ? data : [])
-    } catch {
-      toast.error("Could not load users")
+    } catch (e) {
+      toastFromCaughtError(e, "Could not load users")
       setProfiles([])
     } finally {
       setProfilesLoading(false)
@@ -232,8 +237,11 @@ export function SettingsContent() {
           role: createRole,
         }),
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || "Failed to create user")
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        toastFromApiErrorBody(data, "Failed to create user")
+        return
+      }
       toast.success("User created")
       setCreateEmail("")
       setCreatePassword("")
@@ -241,7 +249,7 @@ export function SettingsContent() {
       setCreateRole("technicians")
       fetchProfiles()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to create user")
+      toastFromCaughtError(err, "Failed to create user")
     } finally {
       setCreating(false)
     }
@@ -255,12 +263,15 @@ export function SettingsContent() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updates),
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || "Update failed")
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        toastFromApiErrorBody(data, "Update failed")
+        return
+      }
       toast.success("Updated")
       fetchProfiles()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Update failed")
+      toastFromCaughtError(err, "Update failed")
     } finally {
       setUpdatingId(null)
     }

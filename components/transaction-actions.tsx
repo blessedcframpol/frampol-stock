@@ -98,7 +98,10 @@ export function TransactionActions({ transaction, compact }: TransactionActionsP
       if (result.ok) {
         toast.success("Transaction undone")
       } else {
-        toast.error(result.error ?? "Failed to undo")
+        toast.error("Failed to undo", {
+          description: result.error || undefined,
+          duration: 14_000,
+        })
       }
     } finally {
       setBusy(false)
@@ -122,7 +125,10 @@ export function TransactionActions({ transaction, compact }: TransactionActionsP
         toast.success(`Reassigned to ${name}`)
         setReassignOpen(false)
       } else {
-        toast.error(result.error ?? "Failed to reassign")
+        toast.error("Failed to reassign", {
+          description: result.error || undefined,
+          duration: 14_000,
+        })
       }
     } finally {
       setBusy(false)

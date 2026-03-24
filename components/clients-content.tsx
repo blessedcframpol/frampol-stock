@@ -21,6 +21,7 @@ import { useClients, insertClient } from "@/lib/supabase/clients-db"
 import type { ClientSite } from "@/lib/data"
 import { Search, Mail, Phone, Building2, ShoppingBag, Plus, MapPin, Trash2 } from "lucide-react"
 import { toast } from "sonner"
+import { toastFromCaughtError } from "@/lib/toast-reportable-error"
 
 export function ClientsContent() {
   const [search, setSearch] = useState("")
@@ -92,7 +93,7 @@ export function ClientsContent() {
       setNewSites([{ address: "" }])
       toast.success("Client added")
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to add client")
+      toastFromCaughtError(e, "Failed to add client")
     } finally {
       setIsSubmitting(false)
     }
@@ -264,7 +265,7 @@ export function ClientsContent() {
             <CardContent className="pt-6">
               <div className="flex items-start gap-4">
                 <Avatar className="w-11 h-11 shrink-0">
-                  <AvatarFallback className="bg-primary/10 text-primary text-sm font-semibold">
+                  <AvatarFallback className="bg-muted text-foreground text-sm font-semibold">
                     {client.name.split(" ").map((n) => n[0]).join("")}
                   </AvatarFallback>
                 </Avatar>
@@ -306,7 +307,7 @@ export function ClientsContent() {
                     {orderCount} order{orderCount !== 1 ? "s" : ""}
                   </span>
                 </div>
-                <Badge variant="secondary" className="text-[10px] bg-primary/10 text-primary border-0">
+                <Badge variant="secondary" className="text-[10px] text-secondary-foreground border-transparent">
                   ${(client.totalSpent ?? 0).toLocaleString()}
                 </Badge>
               </div>

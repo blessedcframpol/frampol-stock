@@ -33,6 +33,7 @@ import { useInventoryStore } from "@/lib/inventory-store"
 import { compareStockTake, buildStockTakeSnapshot } from "@/lib/stock-take"
 import Link from "next/link"
 import { toast } from "sonner"
+import { toastFromApiErrorBody, toastFromCaughtError } from "@/lib/toast-reportable-error"
 import { cn } from "@/lib/utils"
 
 const STOCK_TAKE_STORAGE_KEY = "fram-stock-take-scans"
@@ -154,14 +155,15 @@ export function StockTakeContent() {
       })
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
-        throw new Error(data.error ?? "Failed to save")
+        toastFromApiErrorBody(data, "Failed to save stock take")
+        return
       }
       setSerialNumbers("")
       setHasCompared(false)
       saveSessionToStorage("")
       toast.success("Stock take saved to history")
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to save stock take")
+      toastFromCaughtError(e, "Failed to save stock take")
     } finally {
       setIsSaving(false)
     }

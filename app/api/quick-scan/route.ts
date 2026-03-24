@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { apiClientError, apiErrorResponse } from "@/lib/api-error-response"
 import { addQuickScan, addBulkQuickScans, getAllQuickScans, deleteQuickScansByBatchId } from "@/lib/quick-scans-db"
 import {
   getAllQuickScansFromSupabase,
@@ -15,8 +16,7 @@ export async function GET() {
     const scans = fromDb ?? getAllQuickScans()
     return NextResponse.json(scans)
   } catch (error) {
-    console.error("Quick scan GET error:", error)
-    return NextResponse.json({ error: "Failed to load scans" }, { status: 500 })
+    return apiErrorResponse(500, "Failed to load scans", { cause: error, logLabel: "Quick scan GET" })
   }
 }
 
@@ -49,19 +49,13 @@ export async function POST(request: NextRequest) {
 
     const productName = typeof scanType === "string" ? scanType.trim() : ""
     if (!productName) {
-      return NextResponse.json(
-        { error: "Product or item type (what's being scanned in) is required" },
-        { status: 400 }
-      )
+      return apiClientError(400, "Product or item type (what's being scanned in) is required")
     }
 
     const validMovementTypes = ["Inbound", "Sale", "POC Out", "POC Return", "Rental Return", "Rentals", "Transfer", "Dispose"] as const
     const movement = typeof movementType === "string" ? movementType.trim() : ""
     if (!movement || !validMovementTypes.includes(movement as (typeof validMovementTypes)[number])) {
-      return NextResponse.json(
-        { error: "Stock movement type is required" },
-        { status: 400 }
-      )
+      return apiClientError(400, "Stock movement type is required")
     }
 
     const outbound =
@@ -92,10 +86,7 @@ export async function POST(request: NextRequest) {
         .map((s) => s.trim())
       const unique = [...new Set(list)]
       if (unique.length === 0) {
-        return NextResponse.json(
-          { error: "At least one serial number is required" },
-          { status: 400 }
-        )
+        return apiClientError(400, "At least one serial number is required")
       }
       const supabase = await createServerSupabaseClient()
       const existing = await getAllQuickScansFromSupabase(supabase)
@@ -114,10 +105,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (!serialNumber || typeof serialNumber !== "string" || !serialNumber.trim()) {
-      return NextResponse.json(
-        { error: "Serial number is required" },
-        { status: 400 }
-      )
+      return apiClientError(400, "Serial number is required")
     }
 
     const trimmed = serialNumber.trim()
@@ -134,8 +122,7 @@ export async function POST(request: NextRequest) {
     const record = fromDb ?? addQuickScan(trimmed, productName, movement, outbound)
     return NextResponse.json(record, { status: 201 })
   } catch (error) {
-    console.error("Quick scan POST error:", error)
-    return NextResponse.json({ error: "Failed to record scan" }, { status: 500 })
+    return apiErrorResponse(500, "Failed to record scan", { cause: error, logLabel: "Quick scan POST" })
   }
 }
 
@@ -143,26 +130,19 @@ export async function DELETE(request: NextRequest) {
   try {
     const batchId = request.nextUrl.searchParams.get("batchId")
     if (!batchId?.trim()) {
-      return NextResponse.json(
-        { error: "batchId query parameter is required" },
-        { status: 400 }
-      )
+      return apiClientError(400, "batchId query parameter is required")
     }
     const supabase = await createServerSupabaseClient()
     const fromDb = await deleteQuickScansByBatchIdFromSupabase(batchId, supabase)
     const deleted = fromDb > 0 ? fromDb : deleteQuickScansByBatchId(batchId)
     if (deleted === 0) {
-      return NextResponse.json(
-        { error: "No scan(s) found for this batch" },
-        { status: 404 }
-      )
+      return apiClientError(404, "No scan(s) found for this batch", { log: "warn" })
     }
     return NextResponse.json({ ok: true, deleted })
   } catch (error) {
-    console.error("Quick scan DELETE by batch error:", error)
-    return NextResponse.json(
-      { error: "Failed to delete scan batch" },
-      { status: 500 }
-    )
+    return apiErrorResponse(500, "Failed to delete scan batch", {
+      cause: error,
+      logLabel: "Quick scan DELETE by batch",
+    })
   }
 }

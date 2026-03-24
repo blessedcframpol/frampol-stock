@@ -102,7 +102,7 @@ function SidebarNav({
   return (
     <>
       <nav className="flex-1 flex flex-col py-5 px-4 gap-1 overflow-y-auto">
-        <span className="text-[11px] font-medium uppercase tracking-wider text-sidebar-foreground/40 mb-3 block px-0.5">
+        <span className="text-[11px] font-medium uppercase tracking-wider text-sidebar-foreground/70 mb-3 block px-0.5">
           Main Menu
         </span>
         {navItems.map((item) => {
@@ -525,8 +525,6 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     aria-label="Search"
-                    aria-autocomplete="list"
-                    aria-expanded={searchQuery.trim().length >= 1}
                   />
                 </form>
               </PopoverAnchor>

@@ -7,6 +7,7 @@ import { getReorderLevelForProduct, getReorderLevelOverrides } from "./settings"
 import { getSupabaseClient } from "./supabase/client"
 import { rowToInventoryItem, inventoryItemToRow, rowToTransaction, transactionToRow } from "./supabase/inventory-db"
 import { computeMovementResult } from "./supabase/movement-utils"
+import { toast } from "sonner"
 
 function deepClone<T>(arr: T[]): T[] {
   return JSON.parse(JSON.stringify(arr))
@@ -34,6 +35,11 @@ export interface MovementParams {
   type: TransactionType
   serialNumbers: string[]
   clientId?: string
+  /**
+   * Directory label for transactions/inventory (e.g. "Name - Company").
+   * When omitted, falls back to seed-data lookup — use this with live clients from Supabase.
+   */
+  clientDisplayOverride?: string
   fromLocation?: string
   toLocation?: string
   assignedTo?: string
@@ -253,8 +259,24 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
 
   const applyMovement = useCallback(
     (params: MovementParams): { success: string[]; notFound: string[] } => {
-      const { type, serialNumbers, clientId, fromLocation, toLocation, assignedTo, invoiceNumber, notes, returnDate, disposalReason, authorisedBy, batchId, deliveryNoteUrl } = params
-      const clientDisplay = clientId ? getClientDisplay(clientId) : "Internal"
+      const {
+        type,
+        serialNumbers,
+        clientId,
+        clientDisplayOverride,
+        fromLocation,
+        toLocation,
+        assignedTo,
+        invoiceNumber,
+        notes,
+        returnDate,
+        disposalReason,
+        authorisedBy,
+        batchId,
+        deliveryNoteUrl,
+      } = params
+      const clientDisplay =
+        clientDisplayOverride ?? (clientId ? getClientDisplay(clientId) : "Internal")
       const assignOutboundBatchId = type === "POC Out" || type === "Rentals" || type === "Sale"
       const newBatchId = assignOutboundBatchId
         ? (batchId ?? `BATCH-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`)
@@ -281,32 +303,53 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
 
       const runPersist = async () => {
         if (!supabase) return
-        if (newBatchId && (type === "POC Out" || type === "Rentals") && result.newTransactions.length > 0) {
-          const txn = result.newTransactions[0]
-          const dateIso = txn.date
-          const dateOnly = dateIso.slice(0, 10)
-          const endDate = type === "Rentals" && result.updatedItems[0]?.returnDate ? result.updatedItems[0].returnDate : null
-          await supabase.from("outbound_batches").insert({
-            id: newBatchId,
-            type,
-            client: clientDisplay,
-            client_id: clientId ?? null,
-            start_date: dateOnly,
-            end_date: endDate,
-            status: "open",
-            invoice_number: invoiceNumber ?? null,
-            created_at: dateIso,
+        const reportFail = (step: string, error: { message: string } | null) => {
+          if (!error) return false
+          toast.error("Could not save stock movement", {
+            description: `${step}: ${error.message}`,
+            duration: 20_000,
           })
+          return true
         }
-        for (const item of result.updatedItems) {
-          await supabase.from("inventory_items").update(inventoryItemToRow(item)).eq("id", item.id)
-        }
-        if (result.newTransactions.length) {
-          await supabase.from("transactions").insert(result.newTransactions.map(transactionToRow))
+        try {
+          if (newBatchId && (type === "POC Out" || type === "Rentals") && result.newTransactions.length > 0) {
+            const txn = result.newTransactions[0]
+            const dateIso = txn.date
+            const dateOnly = dateIso.slice(0, 10)
+            const endDate = type === "Rentals" && result.updatedItems[0]?.returnDate ? result.updatedItems[0].returnDate : null
+            const { error } = await supabase.from("outbound_batches").insert({
+              id: newBatchId,
+              type,
+              client: clientDisplay,
+              client_id: clientId ?? null,
+              start_date: dateOnly,
+              end_date: endDate,
+              status: "open",
+              invoice_number: invoiceNumber ?? null,
+              created_at: dateIso,
+            })
+            if (reportFail("Outbound batch", error)) return
+          }
+          for (const item of result.updatedItems) {
+            const { error } = await supabase
+              .from("inventory_items")
+              .update(inventoryItemToRow(item))
+              .eq("id", item.id)
+            if (reportFail("Inventory update", error)) return
+          }
+          if (result.newTransactions.length) {
+            const { error } = await supabase
+              .from("transactions")
+              .insert(result.newTransactions.map(transactionToRow))
+            if (reportFail("Transaction log", error)) return
+          }
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e)
+          toast.error("Could not save stock movement", { description: msg, duration: 20_000 })
         }
       }
 
-      runPersist().catch(console.error)
+      void runPersist()
 
       setInventory((prev) =>
         prev.map((item) => {
@@ -385,7 +428,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
             .eq("id", item.id)
           if (error) {
             console.error("Undo: inventory update error", error)
-            return { ok: false, error: "Failed to revert inventory" }
+            return { ok: false, error: error.message || "Failed to revert inventory" }
           }
         }
       }
@@ -394,7 +437,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
         const { error } = await supabase.from("transactions").delete().eq("id", txnId)
         if (error) {
           console.error("Undo: transaction delete error", error)
-          return { ok: false, error: "Failed to remove transaction" }
+          return { ok: false, error: error.message || "Failed to remove transaction" }
         }
       }
       return { ok: true }
@@ -424,7 +467,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
           .eq("id", txnId)
         if (txnErr) {
           console.error("Reassign: transaction update error", txnErr)
-          return { ok: false, error: "Failed to update transaction" }
+          return { ok: false, error: txnErr.message || "Failed to update transaction" }
         }
       }
       if (item) {
@@ -441,7 +484,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
             .eq("id", item.id)
           if (error) {
             console.error("Reassign: inventory update error", error)
-            return { ok: false, error: "Failed to update item" }
+            return { ok: false, error: error.message || "Failed to update item" }
           }
         }
       }

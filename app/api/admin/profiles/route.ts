@@ -1,21 +1,21 @@
 import { NextRequest, NextResponse } from "next/server"
+import { apiClientError, apiErrorResponse } from "@/lib/api-error-response"
 import { createServerSupabaseClient } from "@/lib/supabase/server"
 import { createAdminClient, isAdminApiConfigured } from "@/lib/supabase/admin"
 
-const adminConfigError = NextResponse.json(
-  {
-    error:
-      "Admin features need SUPABASE_SERVICE_ROLE_KEY in .env.local (Supabase Dashboard → Settings → API → service_role). Restart next dev after adding it.",
-  },
-  { status: 503 }
-)
+function adminConfigError() {
+  return apiClientError(
+    503,
+    "Admin features need SUPABASE_SERVICE_ROLE_KEY in .env.local (Supabase Dashboard → Settings → API → service_role). Restart next dev after adding it."
+  )
+}
 
 export async function GET() {
   try {
     const supabase = await createServerSupabaseClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+      return apiClientError(401, "Unauthorized", { log: "warn" })
     }
     const { data: profile } = await supabase
       .from("profiles")
@@ -23,10 +23,10 @@ export async function GET() {
       .eq("id", user.id)
       .single()
     if (profile?.role !== "admin") {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+      return apiClientError(403, "Forbidden", { log: "warn" })
     }
     if (!isAdminApiConfigured()) {
-      return adminConfigError
+      return adminConfigError()
     }
     const admin = createAdminClient()
     const { data: profiles, error } = await admin
@@ -34,13 +34,14 @@ export async function GET() {
       .select("id, email, display_name, role, active, created_at")
       .order("email")
     if (error) {
-      console.error("Admin profiles list error:", error)
-      return NextResponse.json({ error: error.message }, { status: 500 })
+      return apiErrorResponse(500, "Could not load user list", {
+        cause: error,
+        logLabel: "Admin profiles list",
+      })
     }
     return NextResponse.json(profiles ?? [])
   } catch (err) {
-    console.error("Admin profiles GET error:", err)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    return apiErrorResponse(500, "Internal server error", { cause: err, logLabel: "Admin profiles GET" })
   }
 }
 
@@ -49,7 +50,7 @@ export async function POST(request: NextRequest) {
     const supabase = await createServerSupabaseClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+      return apiClientError(401, "Unauthorized", { log: "warn" })
     }
     const { data: profile } = await supabase
       .from("profiles")
@@ -57,15 +58,15 @@ export async function POST(request: NextRequest) {
       .eq("id", user.id)
       .single()
     if (profile?.role !== "admin") {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+      return apiClientError(403, "Forbidden", { log: "warn" })
     }
     if (!isAdminApiConfigured()) {
-      return adminConfigError
+      return adminConfigError()
     }
     const body = await request.json() as { email: string; password: string; display_name?: string; role?: string }
     const { email, password, display_name, role } = body
     if (!email?.trim() || !password) {
-      return NextResponse.json({ error: "email and password required" }, { status: 400 })
+      return apiClientError(400, "email and password required")
     }
     const validRoles = ["admin", "sales", "accounts", "technicians"] as const
     const appRole = role && validRoles.includes(role as (typeof validRoles)[number])
@@ -79,11 +80,10 @@ export async function POST(request: NextRequest) {
       user_metadata: { display_name: display_name?.trim() || null },
     })
     if (createError) {
-      console.error("Admin create user error:", createError)
-      return NextResponse.json({ error: createError.message }, { status: 400 })
+      return apiClientError(400, createError.message, { log: "warn", logLabel: "Admin create user" })
     }
     if (!newUser.user) {
-      return NextResponse.json({ error: "User not created" }, { status: 500 })
+      return apiErrorResponse(500, "User not created", { logLabel: "Admin create user: no user in response" })
     }
     const { error: profileError } = await admin
       .from("profiles")
@@ -94,8 +94,10 @@ export async function POST(request: NextRequest) {
       })
       .eq("id", newUser.user.id)
     if (profileError) {
-      console.error("Admin profile update after create error:", profileError)
-      return NextResponse.json({ error: profileError.message }, { status: 500 })
+      return apiErrorResponse(500, "User was created but profile could not be updated", {
+        cause: profileError,
+        logLabel: "Admin profile update after create",
+      })
     }
     const { data: updatedProfile } = await admin
       .from("profiles")
@@ -104,7 +106,6 @@ export async function POST(request: NextRequest) {
       .single()
     return NextResponse.json(updatedProfile ?? { id: newUser.user.id, email: newUser.user.email, role: appRole, active: true }, { status: 201 })
   } catch (err) {
-    console.error("Admin profiles POST error:", err)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    return apiErrorResponse(500, "Internal server error", { cause: err, logLabel: "Admin profiles POST" })
   }
 }

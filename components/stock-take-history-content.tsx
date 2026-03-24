@@ -17,6 +17,7 @@ import { History, Loader2, ChevronRight, ClipboardList } from "lucide-react"
 import type { StockTakeRecord } from "@/lib/data"
 import { formatDateDDMMYYYY } from "@/lib/utils"
 import { toast } from "sonner"
+import { toastFromApiErrorBody, toastFromCaughtError } from "@/lib/toast-reportable-error"
 
 export function StockTakeHistoryContent() {
   const [list, setList] = useState<StockTakeRecord[]>([])
@@ -26,11 +27,15 @@ export function StockTakeHistoryContent() {
     setLoading(true)
     try {
       const res = await fetch("/api/stock-takes")
-      if (!res.ok) throw new Error("Failed to load")
-      const data = await res.json()
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        toastFromApiErrorBody(data, "Failed to load stock take history")
+        setList([])
+        return
+      }
       setList(Array.isArray(data) ? data : [])
-    } catch {
-      toast.error("Failed to load stock take history")
+    } catch (e) {
+      toastFromCaughtError(e, "Failed to load stock take history")
       setList([])
     } finally {
       setLoading(false)

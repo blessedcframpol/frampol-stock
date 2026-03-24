@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from "next/server"
+import { apiClientError, apiErrorResponse } from "@/lib/api-error-response"
 import { createServerSupabaseClient } from "@/lib/supabase/server"
 import { createAdminClient, isAdminApiConfigured } from "@/lib/supabase/admin"
 
-const adminConfigError = NextResponse.json(
-  {
-    error:
-      "Admin features need SUPABASE_SERVICE_ROLE_KEY in .env.local (Supabase Dashboard → Settings → API → service_role). Restart next dev after adding it.",
-  },
-  { status: 503 }
-)
+function adminConfigError() {
+  return apiClientError(
+    503,
+    "Admin features need SUPABASE_SERVICE_ROLE_KEY in .env.local (Supabase Dashboard → Settings → API → service_role). Restart next dev after adding it."
+  )
+}
 
 export async function PATCH(
   _request: NextRequest,
@@ -17,12 +17,12 @@ export async function PATCH(
   try {
     const { id } = await params
     if (!id) {
-      return NextResponse.json({ error: "id required" }, { status: 400 })
+      return apiClientError(400, "id required")
     }
     const supabase = await createServerSupabaseClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+      return apiClientError(401, "Unauthorized", { log: "warn" })
     }
     const { data: profile } = await supabase
       .from("profiles")
@@ -30,10 +30,10 @@ export async function PATCH(
       .eq("id", user.id)
       .single()
     if (profile?.role !== "admin") {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+      return apiClientError(403, "Forbidden", { log: "warn" })
     }
     if (!isAdminApiConfigured()) {
-      return adminConfigError
+      return adminConfigError()
     }
     const body = await _request.json() as { role?: string; active?: boolean; display_name?: string }
     const updates: {
@@ -64,12 +64,10 @@ export async function PATCH(
       .select("id, email, display_name, role, active, updated_at")
       .single()
     if (error) {
-      console.error("Admin profile update error:", error)
-      return NextResponse.json({ error: error.message }, { status: 400 })
+      return apiClientError(400, error.message, { log: "warn", logLabel: "Admin profile update" })
     }
     return NextResponse.json(data)
   } catch (err) {
-    console.error("Admin profile PATCH error:", err)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    return apiErrorResponse(500, "Internal server error", { cause: err, logLabel: "Admin profile PATCH" })
   }
 }

@@ -19,6 +19,7 @@ import { ArrowLeft, CheckCircle2, AlertTriangle, Loader2 } from "lucide-react"
 import type { StockTakeRecord, StockTakeSnapshotItem } from "@/lib/data"
 import { formatDateDDMMYYYY } from "@/lib/utils"
 import { toast } from "sonner"
+import { toastFromApiErrorBody, toastFromCaughtError } from "@/lib/toast-reportable-error"
 import { cn } from "@/lib/utils"
 
 const statusStyles: Record<string, string> = {
@@ -39,14 +40,15 @@ export function StockTakeHistoryDetailContent({ id }: { id: string }) {
     async function load() {
       try {
         const res = await fetch(`/api/stock-takes/${id}`)
+        const data = await res.json().catch(() => ({}))
         if (!res.ok) {
           if (res.status === 404) setRecord(null)
+          else if (!cancelled) toastFromApiErrorBody(data, "Failed to load stock take")
           return
         }
-        const data = await res.json()
-        if (!cancelled) setRecord(data)
-      } catch {
-        if (!cancelled) toast.error("Failed to load stock take")
+        if (!cancelled) setRecord(data as StockTakeRecord)
+      } catch (e) {
+        if (!cancelled) toastFromCaughtError(e, "Failed to load stock take")
       } finally {
         if (!cancelled) setLoading(false)
       }

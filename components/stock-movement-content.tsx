@@ -58,6 +58,7 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
+import { toastFromCaughtError } from "@/lib/toast-reportable-error"
 import { getSupabaseClient } from "@/lib/supabase/client"
 
 const OUTBOUND_LIKE_MOVEMENTS: TransactionType[] = ["Sale", "POC Out", "Transfer", "Dispose", "Rentals"]
@@ -198,7 +199,7 @@ export function StockMovementContent() {
       setNewClientPhone("")
       setSites([{ address: "" }])
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to add items to inventory")
+      toastFromCaughtError(e, "Failed to add items to inventory")
     } finally {
       setAddingToInventory(false)
     }
@@ -258,10 +259,19 @@ export function StockMovementContent() {
     setLastDuplicateMessage(null)
     setIsSubmitting(true)
     const list = pendingOutbound ? pendingOutbound.serials : uniqueSerials
+    const effectiveClientId = (outboundDetails?.clientId ?? clientId) || undefined
+    const clientRow = effectiveClientId ? clients.find((c) => c.id === effectiveClientId) : undefined
+    const clientDisplayOverride =
+      clientRow
+        ? `${clientRow.name} - ${clientRow.company}`
+        : effectiveClientId && outboundDetails?.clientName && outboundDetails?.clientCompany
+          ? `${outboundDetails.clientName} - ${outboundDetails.clientCompany}`
+          : undefined
     const result = applyMovement({
       type: selectedType as "Inbound" | "Sale" | "POC Out" | "POC Return" | "Rental Return" | "Rentals" | "Transfer" | "Dispose",
       serialNumbers: list,
-      clientId: (outboundDetails?.clientId ?? clientId) || undefined,
+      clientId: effectiveClientId,
+      clientDisplayOverride,
       fromLocation: selectedType === "Transfer" ? fromLocation : undefined,
       toLocation: (selectedType === "Transfer" || selectedType === "POC Return" || selectedType === "Rental Return") ? toLocation || undefined : undefined,
       assignedTo: (outboundDetails?.clientName ?? outboundDetails?.clientCompany) ?? (clientId ? clients.find((c) => c.id === clientId)?.company : undefined),
@@ -289,7 +299,9 @@ export function StockMovementContent() {
       }
       if (selectedType === "Inbound") setDeliveryNoteFile(null)
       setPendingOutbound(null)
-      recordQuickScan(result.success, outboundDetails).catch(() => {})
+      recordQuickScan(result.success, outboundDetails).catch((e) =>
+        toastFromCaughtError(e, "Could not sync scans to history")
+      )
     }
     if (result.notFound.length > 0) {
       toast.warning(`Serial number(s) not found: ${result.notFound.join(", ")}`)
@@ -349,7 +361,7 @@ export function StockMovementContent() {
         outboundDetails.clientPhone = newClient.phone
         await refetchClients()
       } catch (e) {
-        toast.error(e instanceof Error ? e.message : "Failed to save client")
+        toastFromCaughtError(e, "Failed to save client")
         return
       }
     }
@@ -413,7 +425,10 @@ export function StockMovementContent() {
           const url = await uploadDeliveryNote(deliveryNoteFile)
           doSubmit(undefined, url)
         } catch (e) {
-          toast.error("Failed to upload delivery note. Ensure Supabase is configured and the uploads bucket exists.")
+          toastFromCaughtError(
+            e,
+            "Failed to upload delivery note. Ensure Supabase is configured and the uploads bucket exists."
+          )
           setIsSubmitting(false)
         }
       } else {
@@ -480,7 +495,14 @@ export function StockMovementContent() {
                       <div className={cn("flex items-center justify-center w-7 sm:w-8 h-7 sm:h-8 rounded-md", type.bg)}>
                         <Icon className={cn("w-3.5 sm:w-4 h-3.5 sm:h-4", type.color)} />
                       </div>
-                      <span className={cn("text-[11px] sm:text-xs font-medium", isActive ? "text-primary" : "text-foreground")}>{type.label}</span>
+                      <span
+                        className={cn(
+                          "text-[11px] sm:text-xs font-medium",
+                          isActive ? "text-foreground font-semibold" : "text-foreground"
+                        )}
+                      >
+                        {type.label}
+                      </span>
                       <span className="text-[9px] text-muted-foreground leading-tight hidden sm:block">{type.desc}</span>
                     </button>
                   )

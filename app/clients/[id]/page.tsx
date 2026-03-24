@@ -38,6 +38,7 @@ import { useClients, updateClient } from "@/lib/supabase/clients-db"
 import { cn, formatDateDDMMYYYY } from "@/lib/utils"
 import { FileText, ArrowLeft, Mail, Phone, Building2, MapPin, Package, ChevronRight, Pencil, Plus, Trash2 } from "lucide-react"
 import { toast } from "sonner"
+import { toastFromCaughtError } from "@/lib/toast-reportable-error"
 import {
   getTransactionOrderGroupKey,
   groupClientOrderTransactions,
@@ -213,7 +214,7 @@ export default function ClientDetailPage() {
       setEditOpen(false)
       toast.success("Client updated")
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to update client")
+      toastFromCaughtError(e, "Failed to update client")
     } finally {
       setIsSavingClient(false)
     }

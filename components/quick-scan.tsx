@@ -37,6 +37,7 @@ import type { ItemType, TransactionType, ClientSite } from "@/lib/data"
 import { useClients, insertClient } from "@/lib/supabase/clients-db"
 import { useInventoryStore } from "@/lib/inventory-store"
 import { toast } from "sonner"
+import { toastFromApiErrorBody, toastFromCaughtError } from "@/lib/toast-reportable-error"
 import { cn } from "@/lib/utils"
 
 const OUTBOUND_LIKE_MOVEMENTS: TransactionType[] = ["Sale", "POC Out", "Transfer", "Dispose", "Rentals"]
@@ -231,7 +232,7 @@ export function QuickScan() {
       const data = await res.json().catch(() => ({}))
 
       if (!res.ok) {
-        toast.error(data.error ?? "Failed to record scan")
+        toastFromApiErrorBody(data, "Failed to record scan")
         return
       }
 
@@ -256,8 +257,8 @@ export function QuickScan() {
       } else if (duplicates.length > 0) {
         toast.info(`All ${duplicates.length} serial(s) were already scanned`)
       }
-    } catch {
-      toast.error("Failed to record scan")
+    } catch (e) {
+      toastFromCaughtError(e, "Failed to record scan")
     } finally {
       setIsSubmitting(false)
     }
@@ -348,7 +349,7 @@ export function QuickScan() {
         outboundDetails.clientPhone = newClient.phone
         await refetchClients()
       } catch (e) {
-        toast.error(e instanceof Error ? e.message : "Failed to save client")
+        toastFromCaughtError(e, "Failed to save client")
         setIsSubmitting(false)
         return
       }
@@ -359,10 +360,18 @@ export function QuickScan() {
     try {
       const assignedTo = outboundDetails.clientName ?? outboundDetails.clientCompany ?? (outboundDetails.clientId ? clients.find((c) => c.id === outboundDetails.clientId)?.company : undefined)
       const returnDate = (pendingOutbound.movementType === "POC Out" || pendingOutbound.movementType === "Rentals") && outboundReturnDate.trim() ? outboundReturnDate.trim() : undefined
+      const clientRow = outboundDetails.clientId ? clients.find((c) => c.id === outboundDetails.clientId) : undefined
+      const clientDisplayOverride =
+        clientRow
+          ? `${clientRow.name} - ${clientRow.company}`
+          : outboundDetails.clientName && outboundDetails.clientCompany
+            ? `${outboundDetails.clientName} - ${outboundDetails.clientCompany}`
+            : undefined
       const result = applyMovement({
         type: pendingOutbound.movementType,
         serialNumbers: pendingOutbound.serials,
         clientId: outboundDetails.clientId,
+        clientDisplayOverride,
         assignedTo,
         returnDate,
       })
@@ -371,7 +380,9 @@ export function QuickScan() {
         setSerialInput("")
         setPendingOutbound(null)
         setOutboundReturnDate("")
-        recordQuickScan(result.success, pendingOutbound.productName, pendingOutbound.movementType, outboundDetails).catch(() => {})
+        recordQuickScan(result.success, pendingOutbound.productName, pendingOutbound.movementType, outboundDetails).catch((e) =>
+          toastFromCaughtError(e, "Could not sync scans to history")
+        )
       }
       if (result.notFound.length > 0) {
         toast.warning(`Serial number(s) not found: ${result.notFound.join(", ")}`)
@@ -427,7 +438,7 @@ export function QuickScan() {
       setNewClientPhone("")
       setSites([{ address: "" }])
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to add items to inventory")
+      toastFromCaughtError(e, "Failed to add items to inventory")
     } finally {
       setAddingToInventory(false)
     }

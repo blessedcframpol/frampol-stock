@@ -22,6 +22,7 @@ import { History, Undo2, Loader2, Search } from "lucide-react"
 import type { QuickScanRecord } from "@/lib/data"
 import { formatDateDDMMYYYY } from "@/lib/utils"
 import { toast } from "sonner"
+import { toastFromApiErrorBody, toastFromCaughtError } from "@/lib/toast-reportable-error"
 
 /** One row in scan history: a single submission (bulk or one item). */
 type ScanBatchEntry = {
@@ -96,11 +97,15 @@ export function ScanHistoryContent() {
     setLoading(true)
     try {
       const res = await fetch("/api/quick-scan")
-      if (!res.ok) throw new Error("Failed to load scans")
-      const data = await res.json()
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        toastFromApiErrorBody(data, "Failed to load scan history")
+        setScans([])
+        return
+      }
       setScans(Array.isArray(data) ? data : [])
-    } catch {
-      toast.error("Failed to load scan history")
+    } catch (e) {
+      toastFromCaughtError(e, "Failed to load scan history")
       setScans([])
     } finally {
       setLoading(false)
@@ -120,7 +125,8 @@ export function ScanHistoryContent() {
       )
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
-        throw new Error(data.error ?? "Failed to undo")
+        toastFromApiErrorBody(data, "Failed to undo scan")
+        return
       }
       setScans((prev) =>
         prev.filter((s) => (s.batchId ?? s.id) !== entry.batchKey)
@@ -131,7 +137,7 @@ export function ScanHistoryContent() {
           : `Removed ${entry.count} items (${entry.scanType})`
       )
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to undo scan")
+      toastFromCaughtError(e, "Failed to undo scan")
     } finally {
       setUndoingBatchKey(null)
     }
