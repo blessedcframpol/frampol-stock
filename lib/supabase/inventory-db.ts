@@ -28,6 +28,7 @@ export function rowToInventoryItem(row: InventoryRow): InventoryItem {
     pocOutDate: row.poc_out_date ?? undefined,
     returnDate: row.return_date ?? undefined,
     assignmentHistory: assignmentHistory ?? undefined,
+    reservedForRequestLineId: row.reserved_for_request_line_id ?? undefined,
   }
 }
 
@@ -54,6 +55,7 @@ export function inventoryItemToRow(item: InventoryItem): Database["public"]["Tab
     poc_out_date: item.pocOutDate ?? null,
     return_date: item.returnDate ?? null,
     assignment_history: history ?? null,
+    reserved_for_request_line_id: item.reservedForRequestLineId ?? null,
   }
 }
 

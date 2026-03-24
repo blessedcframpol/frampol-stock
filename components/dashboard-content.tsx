@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 import { Package, ShoppingCart, Radio, AlertTriangle } from "lucide-react"
 import { StatCard } from "@/components/stat-card"
 import { StockByCategoryChart, CategoryDistributionChart, MonthlySalesChart } from "@/components/dashboard-charts"
-import { RecentActivity } from "@/components/recent-activity"
+import { LatestRequests } from "@/components/latest-requests"
 import { QuickScan } from "@/components/quick-scan"
 import { TransactionsTable } from "@/components/transactions-table"
 import { useInventoryStore } from "@/lib/inventory-store"
@@ -81,10 +81,10 @@ export function DashboardContent() {
         </div>
       </div>
 
-      {/* Recent Activity + Recent Transactions (same row, same height) */}
+      {/* Latest requests + Recent Transactions (same row, same height) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 md:gap-4 items-stretch">
         <div className="min-h-[300px] sm:min-h-[340px]">
-          <RecentActivity />
+          <LatestRequests />
         </div>
         <div className="lg:col-span-2 min-h-[300px] sm:min-h-[340px]">
           <TransactionsTable />

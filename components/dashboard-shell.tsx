@@ -50,6 +50,7 @@ import { useState, useMemo, useEffect } from "react"
 import { appUsers } from "@/lib/data"
 import { useAuth } from "@/lib/auth-context"
 import { canAccessReports, canAccessRequests } from "@/lib/permissions"
+import { useInboxNotifications } from "@/hooks/use-inbox-notifications"
 import { useClients } from "@/lib/supabase/clients-db"
 import { runSearch } from "@/lib/search"
 import { SearchSuggestions } from "@/components/search-suggestions"
@@ -75,7 +76,7 @@ const allNavItems: NavItem[] = [
   { href: "/scan-history", label: "Scan history", icon: History },
   { href: "/alerts", label: "Alerts", icon: Bell },
   { href: "/clients", label: "Clients", icon: Users },
-  { href: "/requests", label: "Requests", icon: MessageSquare, badge: 3 },
+  { href: "/requests", label: "Requests", icon: MessageSquare },
   { href: "/reports", label: "Reports", icon: BarChart3 },
 ]
 
@@ -291,6 +292,14 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
     () => filterNavByRole(allNavItems, role),
     [role]
   )
+  const { unread: inboxUnread, count: inboxCount, markRead: markInboxRead } = useInboxNotifications()
+  const navWithBadges = useMemo(
+    () =>
+      filteredNavItems.map((item) =>
+        item.href === "/requests" && inboxCount > 0 ? { ...item, badge: inboxCount } : item
+      ),
+    [filteredNavItems, inboxCount]
+  )
   const displayName = profile?.display_name || user?.email?.split("@")[0] || "User"
   const initials = (displayName.slice(0, 2) || "?").toUpperCase()
   const roleLabel = role ? role.charAt(0).toUpperCase() + role.slice(1) : ""
@@ -320,6 +329,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
     alerts.rentalApproaching.length
   // Use alert count only after mount to avoid hydration mismatch (store may differ server vs client)
   const alertCount = mounted ? totalAlertCount : 0
+  const headerBellCount = mounted ? alertCount + inboxCount : 0
 
   const authGateSpinner = (
     <div className="flex h-screen items-center justify-center bg-background">
@@ -427,7 +437,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
             </>
           ) : (
             <>
-              <SidebarNav alertCount={alertCount} navItems={filteredNavItems} />
+              <SidebarNav alertCount={alertCount} navItems={navWithBadges} />
               <div className="px-4 pb-3">
                 <button
                   type="button"
@@ -454,7 +464,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
               Fram-Stock
             </SheetTitle>
           </SheetHeader>
-          <SidebarNav onNavigate={() => setMobileOpen(false)} alertCount={alertCount} navItems={filteredNavItems} />
+          <SidebarNav onNavigate={() => setMobileOpen(false)} alertCount={alertCount} navItems={navWithBadges} />
         </SheetContent>
       </Sheet>
 
@@ -564,9 +574,9 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
               <PopoverTrigger asChild>
                 <Button variant="ghost" size="icon" className="relative text-muted-foreground hover:text-foreground">
                   <Bell className="w-[18px] h-[18px]" />
-                  {alertCount > 0 && (
+                  {headerBellCount > 0 && (
                     <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] px-1 rounded-full bg-amber-500 text-amber-950 text-[9px] font-semibold flex items-center justify-center ring-2 ring-background">
-                      {alertCount > 99 ? "99+" : alertCount}
+                      {headerBellCount > 99 ? "99+" : headerBellCount}
                     </span>
                   )}
                   <span className="sr-only">Notifications</span>
@@ -576,19 +586,49 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                 <div className="flex flex-col max-h-[min(400px,80vh)] min-w-0">
                   <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
                     <h3 className="text-sm font-semibold text-foreground">Notifications</h3>
-                    {alertCount > 0 && (
-                      <span className="text-xs text-muted-foreground">{alertCount} alert{alertCount !== 1 ? "s" : ""}</span>
+                    {(alertCount > 0 || inboxCount > 0) && (
+                      <span className="text-xs text-muted-foreground">
+                        {inboxCount > 0 && `${inboxCount} message${inboxCount !== 1 ? "s" : ""}`}
+                        {inboxCount > 0 && alertCount > 0 && " · "}
+                        {alertCount > 0 && `${alertCount} alert${alertCount !== 1 ? "s" : ""}`}
+                      </span>
                     )}
                   </div>
+                  {inboxUnread.length > 0 && (
+                    <div className="border-b border-border px-2 py-2 space-y-1 shrink-0 max-h-[140px] overflow-y-auto">
+                      <p className="px-2 text-[11px] font-medium text-muted-foreground uppercase tracking-wide">Requests</p>
+                      {inboxUnread.slice(0, 6).map((n) => {
+                        const rid = (n.metadata as { request_id?: string })?.request_id
+                        return (
+                          <Link
+                            key={n.id}
+                            href={rid ? `/requests/${rid}` : "/requests"}
+                            className="block rounded-md px-2 py-2 text-sm hover:bg-muted/80"
+                            onClick={() => void markInboxRead([n.id])}
+                          >
+                            <span className="font-medium text-foreground">{n.title}</span>
+                            {n.body && <span className="block text-xs text-muted-foreground mt-0.5">{n.body}</span>}
+                          </Link>
+                        )
+                      })}
+                    </div>
+                  )}
                   {alertCount === 0 ? (
                     <>
                       <div className="px-4 py-8 text-center text-sm text-muted-foreground flex-1">
-                        No alerts. You're all set.
+                        {inboxCount > 0
+                          ? "No inventory alerts. See request messages above."
+                          : "No alerts or messages. You're all set."}
                       </div>
-                      <div className="border-t border-border px-4 py-2 shrink-0">
+                      <div className="border-t border-border px-4 py-2 shrink-0 flex flex-col gap-1">
                         <Button variant="ghost" size="sm" className="w-full justify-center text-foreground" asChild>
                           <Link href="/alerts">View all alerts</Link>
                         </Button>
+                        {inboxCount > 0 && (
+                          <Button variant="ghost" size="sm" className="w-full justify-center text-foreground" asChild>
+                            <Link href="/requests">View requests</Link>
+                          </Button>
+                        )}
                       </div>
                     </>
                   ) : (

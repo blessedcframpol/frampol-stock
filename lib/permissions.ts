@@ -32,7 +32,15 @@ export function canAccessReports(role: AppRole | null | undefined): boolean {
 }
 
 export function canAccessRequests(role: AppRole | null | undefined): boolean {
-  return role === ADMIN || role === SALES || role === TECHNICIANS
+  return role === ADMIN || role === SALES || role === TECHNICIANS || role === ACCOUNTS
+}
+
+export function canFulfillStockRequests(role: AppRole | null | undefined): boolean {
+  return role === ADMIN || role === TECHNICIANS
+}
+
+export function canInvoiceStockRequests(role: AppRole | null | undefined): boolean {
+  return role === ADMIN || role === ACCOUNTS
 }
 
 export function isValidRole(value: string): value is AppRole {

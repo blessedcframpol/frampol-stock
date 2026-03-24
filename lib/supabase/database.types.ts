@@ -21,6 +21,7 @@ export interface Database {
           poc_out_date: string | null
           return_date: string | null
           assignment_history: Json | null
+          reserved_for_request_line_id: string | null
         }
         Insert: {
           id: string
@@ -39,6 +40,7 @@ export interface Database {
           poc_out_date?: string | null
           return_date?: string | null
           assignment_history?: Json | null
+          reserved_for_request_line_id?: string | null
         }
         Update: {
           id?: string
@@ -57,6 +59,112 @@ export interface Database {
           poc_out_date?: string | null
           return_date?: string | null
           assignment_history?: Json | null
+          reserved_for_request_line_id?: string | null
+        }
+      }
+      stock_requests: {
+        Row: {
+          id: string
+          client_id: string
+          created_by: string
+          status: string
+          quotation_url: string | null
+          notes: string | null
+          serviced_at: string | null
+          invoice_number: string | null
+          invoice_document_url: string | null
+          invoiced_at: string | null
+          invoiced_by: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          client_id: string
+          created_by: string
+          status?: string
+          quotation_url?: string | null
+          notes?: string | null
+          serviced_at?: string | null
+          invoice_number?: string | null
+          invoice_document_url?: string | null
+          invoiced_at?: string | null
+          invoiced_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          client_id?: string
+          created_by?: string
+          status?: string
+          quotation_url?: string | null
+          notes?: string | null
+          serviced_at?: string | null
+          invoice_number?: string | null
+          invoice_document_url?: string | null
+          invoiced_at?: string | null
+          invoiced_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+      }
+      stock_request_lines: {
+        Row: {
+          id: string
+          request_id: string
+          product_name: string
+          item_type: string | null
+          quantity_requested: number
+          sort_order: number
+        }
+        Insert: {
+          id?: string
+          request_id: string
+          product_name: string
+          item_type?: string | null
+          quantity_requested: number
+          sort_order?: number
+        }
+        Update: {
+          id?: string
+          request_id?: string
+          product_name?: string
+          item_type?: string | null
+          quantity_requested?: number
+          sort_order?: number
+        }
+      }
+      notifications: {
+        Row: {
+          id: string
+          user_id: string
+          type: string
+          title: string
+          body: string | null
+          read_at: string | null
+          metadata: Json
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          type: string
+          title: string
+          body?: string | null
+          read_at?: string | null
+          metadata?: Json
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          type?: string
+          title?: string
+          body?: string | null
+          read_at?: string | null
+          metadata?: Json
+          created_at?: string
         }
       }
       transactions: {
@@ -277,6 +385,20 @@ export interface Database {
           created_at?: string
           updated_at?: string
         }
+      }
+    }
+    Functions: {
+      assign_serial_to_request_line: {
+        Args: { p_line_id: string; p_inventory_item_id: string }
+        Returns: undefined
+      }
+      release_serial_from_request_line: {
+        Args: { p_inventory_item_id: string }
+        Returns: undefined
+      }
+      create_request_serviced_notification: {
+        Args: { p_request_id: string }
+        Returns: undefined
       }
     }
   }

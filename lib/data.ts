@@ -62,6 +62,8 @@ export interface InventoryItem {
   /** When this item is due to be returned (for rental alerts; past = overdue) */
   returnDate?: string
   assignmentHistory?: AssignmentEntry[]
+  /** Set when allocated to a stock request line (Supabase). */
+  reservedForRequestLineId?: string
 }
 
 export interface Transaction {
