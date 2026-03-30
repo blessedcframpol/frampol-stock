@@ -115,3 +115,19 @@ export function deleteQuickScansByBatchId(batchId: string): number {
   if (removed > 0) writeScans(next)
   return removed
 }
+
+/** Soft-reverse all rows in a batch (local JSON store). Returns count updated. */
+export function reverseQuickScansByBatchId(batchId: string, reason: string, reversedBy: string): number {
+  const scans = readScans()
+  const now = new Date().toISOString()
+  let n = 0
+  const next = scans.map((s) => {
+    const key = s.batchId ?? s.id
+    const matches = key === batchId || s.id === batchId
+    if (!matches || s.reversedAt) return s
+    n++
+    return { ...s, reversedAt: now, reversalReason: reason, reversedBy }
+  })
+  if (n > 0) writeScans(next)
+  return n
+}

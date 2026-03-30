@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS public.inventory_items (
   id TEXT PRIMARY KEY,
   serial_number TEXT NOT NULL,
   item_type TEXT NOT NULL,
+  product_type_id TEXT,
   name TEXT NOT NULL,
   category TEXT,
   status TEXT NOT NULL DEFAULT 'In Stock',
@@ -40,6 +41,14 @@ DO $$ BEGIN
 END $$;
 
 COMMENT ON TABLE public.inventory_items IS 'Physical inventory items; one row per serialised unit.';
+
+CREATE TABLE IF NOT EXISTS public.product_types (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
 -- Movement / transaction log (audit trail)
 CREATE TABLE IF NOT EXISTS public.transactions (
@@ -117,6 +126,15 @@ DO $$ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'quick_scans' AND column_name = 'sites') THEN
     ALTER TABLE public.quick_scans ADD COLUMN sites JSONB;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'quick_scans' AND column_name = 'reversed_at') THEN
+    ALTER TABLE public.quick_scans ADD COLUMN reversed_at TIMESTAMPTZ;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'quick_scans' AND column_name = 'reversal_reason') THEN
+    ALTER TABLE public.quick_scans ADD COLUMN reversal_reason TEXT;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'quick_scans' AND column_name = 'reversed_by') THEN
+    ALTER TABLE public.quick_scans ADD COLUMN reversed_by UUID REFERENCES auth.users (id);
   END IF;
 END $$;
 

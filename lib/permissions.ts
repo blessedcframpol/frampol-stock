@@ -15,6 +15,11 @@ export function canManageUsers(role: AppRole | null | undefined): boolean {
   return role === ADMIN
 }
 
+/** Reverse a quick-scan batch on Transaction history (audit trail + reason). Admin only. */
+export function canReverseQuickScanBatches(role: AppRole | null | undefined): boolean {
+  return role === ADMIN
+}
+
 export function canEditInventory(role: AppRole | null | undefined): boolean {
   return role === ADMIN
 }

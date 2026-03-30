@@ -1,7 +1,7 @@
 "use client"
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react"
-import type { InventoryItem, Transaction, TransactionType } from "./data"
+import type { InventoryItem, ProductType, Transaction, TransactionType } from "./data"
 import { inventoryItems as initialInventory, recentTransactions as initialTransactions, clients } from "./data"
 import { getReorderLevelForProduct, getReorderLevelOverrides } from "./settings"
 import { getSupabaseClient } from "./supabase/client"
@@ -217,9 +217,18 @@ function getRevertUpdatesForTransaction(txn: Transaction): Partial<InventoryItem
 interface InventoryStoreValue {
   inventory: InventoryItem[]
   transactions: Transaction[]
+  productTypes: ProductType[]
   applyMovement: (params: MovementParams) => { success: string[]; notFound: string[] }
   updateItem: (id: string, updates: Partial<InventoryItem>) => void
   addItem: (item: Omit<InventoryItem, "id">) => InventoryItem
+  addProductType: (name: string) => Promise<{ ok: boolean; error?: string }>
+  archiveProductType: (id: string) => Promise<{ ok: boolean; error?: string }>
+  reassignInventoryGroup: (params: {
+    sourceGroupName: string
+    targetGroupName?: string
+    targetProductTypeId?: string
+    targetCategory?: string
+  }) => Promise<{ ok: boolean; updated: number; error?: string }>
   undoTransaction: (txnId: string) => Promise<{ ok: boolean; error?: string }>
   reassignTransaction: (txnId: string, newItemName: string, newItemType?: InventoryItem["itemType"]) => Promise<{ ok: boolean; error?: string }>
   getAlerts: () => AlertsResult
@@ -235,6 +244,16 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
   const [transactions, setTransactions] = useState<Transaction[]>(() =>
     supabase ? [] : deepClone(initialTransactions)
   )
+  const [productTypes, setProductTypes] = useState<ProductType[]>(() => {
+    if (supabase) return []
+    const names = [...new Set(initialInventory.map((i) => i.itemType).filter(Boolean))].sort()
+    return [
+      { id: "ptype-general", name: "General", active: true },
+      ...names
+        .filter((n) => n.toLowerCase() !== "general")
+        .map((n) => ({ id: `legacy-${n.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`, name: n, active: true })),
+    ]
+  })
 
   useEffect(() => {
     if (!supabase) return
@@ -242,12 +261,27 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
     async function load() {
       const { data: invRows } = await supabase.from("inventory_items").select("*").order("date_added", { ascending: true })
       const { data: txnRows } = await supabase.from("transactions").select("*").order("date", { ascending: false })
+      const { data: typeRows } = await supabase
+        .from("product_types")
+        .select("id, name, active")
+        .order("name", { ascending: true })
       if (cancelled) return
       if (invRows?.length) {
         setInventory(invRows.map(rowToInventoryItem))
       }
       if (txnRows?.length) {
         setTransactions(txnRows.map(rowToTransaction))
+      }
+      if (typeRows?.length) {
+        setProductTypes(typeRows.map((r) => ({ id: r.id, name: r.name, active: r.active })))
+      } else if (invRows) {
+        const names = [...new Set(invRows.map((r) => r.item_type).filter(Boolean))].sort()
+        setProductTypes([
+          { id: "ptype-general", name: "General", active: true },
+          ...names
+            .filter((n) => n.toLowerCase() !== "general")
+            .map((n) => ({ id: `legacy-${n.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`, name: n, active: true })),
+        ])
       }
       // When DB is empty, do not seed dummy data — use actual data only
     }
@@ -386,8 +420,15 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
 
   const addItem = useCallback(
     (item: Omit<InventoryItem, "id">): InventoryItem => {
+      const fallbackTypeId =
+        item.productTypeId ??
+        productTypes.find((pt) => pt.name.toLowerCase() === item.itemType.toLowerCase())?.id ??
+        productTypes.find((pt) => pt.name === "General")?.id ??
+        "ptype-general"
       const newItem: InventoryItem = {
         ...item,
+        category: item.category?.trim() ? item.category : "General",
+        productTypeId: fallbackTypeId,
         id: generateId("INV"),
       }
       setInventory((prev) => [...prev, newItem])
@@ -401,7 +442,84 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
       }
       return newItem
     },
-    [supabase]
+    [supabase, productTypes]
+  )
+
+  const addProductType = useCallback(
+    async (name: string): Promise<{ ok: boolean; error?: string }> => {
+      const trimmed = name.trim()
+      if (!trimmed) return { ok: false, error: "Type name is required" }
+      if (productTypes.some((pt) => pt.name.toLowerCase() === trimmed.toLowerCase() && pt.active)) {
+        return { ok: false, error: "Type already exists" }
+      }
+      const id = `ptype-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      const next: ProductType = { id, name: trimmed, active: true }
+      setProductTypes((prev) => [...prev, next].sort((a, b) => a.name.localeCompare(b.name)))
+      if (supabase) {
+        const { error } = await supabase.from("product_types").insert({ id, name: trimmed, active: true })
+        if (error) return { ok: false, error: error.message || "Failed to add product type" }
+      }
+      return { ok: true }
+    },
+    [productTypes, supabase]
+  )
+
+  const archiveProductType = useCallback(
+    async (id: string): Promise<{ ok: boolean; error?: string }> => {
+      const hasInventory = inventory.some((item) => item.productTypeId === id)
+      if (hasInventory) {
+        return { ok: false, error: "Cannot archive a type that is still used by inventory items" }
+      }
+      setProductTypes((prev) => prev.map((pt) => (pt.id === id ? { ...pt, active: false } : pt)))
+      if (supabase) {
+        const { error } = await supabase.from("product_types").update({ active: false }).eq("id", id)
+        if (error) return { ok: false, error: error.message || "Failed to archive product type" }
+      }
+      return { ok: true }
+    },
+    [inventory, supabase]
+  )
+
+  const reassignInventoryGroup = useCallback(
+    async (params: {
+      sourceGroupName: string
+      targetGroupName?: string
+      targetProductTypeId?: string
+      targetCategory?: string
+    }): Promise<{ ok: boolean; updated: number; error?: string }> => {
+      const source = params.sourceGroupName.trim()
+      if (!source) return { ok: false, updated: 0, error: "Source group is required" }
+      const targetName = params.targetGroupName?.trim() || source
+      const targetTypeId =
+        params.targetProductTypeId ??
+        productTypes.find((pt) => pt.name.toLowerCase() === "general")?.id ??
+        "ptype-general"
+      const targetTypeName = productTypes.find((pt) => pt.id === targetTypeId)?.name ?? "General"
+      const targetCategory = params.targetCategory?.trim() || "General"
+      const affected = inventory.filter((item) => item.name === source)
+      if (affected.length === 0) return { ok: true, updated: 0 }
+
+      const updatedItems = affected.map((item) => ({
+        ...item,
+        name: targetName,
+        itemType: targetTypeName,
+        productTypeId: targetTypeId,
+        category: targetCategory,
+      }))
+      const updatedMap = new Map(updatedItems.map((i) => [i.id, i]))
+      setInventory((prev) => prev.map((item) => updatedMap.get(item.id) ?? item))
+
+      if (supabase) {
+        for (const item of updatedItems) {
+          const { error } = await supabase.from("inventory_items").update(inventoryItemToRow(item)).eq("id", item.id)
+          if (error) {
+            return { ok: false, updated: 0, error: error.message || "Failed to update inventory group" }
+          }
+        }
+      }
+      return { ok: true, updated: updatedItems.length }
+    },
+    [inventory, productTypes, supabase]
   )
 
   const getAlerts = useCallback(
@@ -497,14 +615,31 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
     () => ({
       inventory,
       transactions,
+      productTypes,
       applyMovement,
       updateItem,
       addItem,
+      addProductType,
+      archiveProductType,
+      reassignInventoryGroup,
       undoTransaction,
       reassignTransaction,
       getAlerts,
     }),
-    [inventory, transactions, applyMovement, updateItem, addItem, undoTransaction, reassignTransaction, getAlerts]
+    [
+      inventory,
+      transactions,
+      productTypes,
+      applyMovement,
+      updateItem,
+      addItem,
+      addProductType,
+      archiveProductType,
+      reassignInventoryGroup,
+      undoTransaction,
+      reassignTransaction,
+      getAlerts,
+    ]
   )
 
   return (

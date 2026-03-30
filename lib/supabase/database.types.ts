@@ -8,6 +8,7 @@ export interface Database {
           id: string
           serial_number: string
           item_type: string
+          product_type_id: string | null
           name: string
           category: string | null
           status: string
@@ -27,6 +28,7 @@ export interface Database {
           id: string
           serial_number: string
           item_type: string
+          product_type_id?: string | null
           name: string
           category?: string | null
           status: string
@@ -46,6 +48,7 @@ export interface Database {
           id?: string
           serial_number?: string
           item_type?: string
+          product_type_id?: string | null
           name?: string
           category?: string | null
           status?: string
@@ -60,6 +63,29 @@ export interface Database {
           return_date?: string | null
           assignment_history?: Json | null
           reserved_for_request_line_id?: string | null
+        }
+      }
+      product_types: {
+        Row: {
+          id: string
+          name: string
+          active: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          name: string
+          active?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          name?: string
+          active?: boolean
+          created_at?: string
+          updated_at?: string
         }
       }
       stock_requests: {
@@ -310,6 +336,9 @@ export interface Database {
           client_email: string | null
           client_phone: string | null
           sites: { name?: string; address: string }[] | null
+          reversed_at: string | null
+          reversal_reason: string | null
+          reversed_by: string | null
         }
         Insert: {
           id: string
@@ -324,6 +353,9 @@ export interface Database {
           client_email?: string | null
           client_phone?: string | null
           sites?: { name?: string; address: string }[] | null
+          reversed_at?: string | null
+          reversal_reason?: string | null
+          reversed_by?: string | null
         }
         Update: {
           id?: string
@@ -338,6 +370,9 @@ export interface Database {
           client_email?: string | null
           client_phone?: string | null
           sites?: { name?: string; address: string }[] | null
+          reversed_at?: string | null
+          reversal_reason?: string | null
+          reversed_by?: string | null
         }
       }
       stock_takes: {

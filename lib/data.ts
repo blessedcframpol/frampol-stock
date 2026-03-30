@@ -1,9 +1,17 @@
-export type ItemType = "Starlink Kit" | "Laptop" | "Desktop" | "Router" | "Switch" | "Access Point" | "UPS" | "Monitor"
+export type ItemType = string
 export type ItemStatus = "In Stock" | "Sold" | "POC" | "Rented" | "Maintenance" | "Disposed"
 export type TransactionType = "Inbound" | "Sale" | "POC Out" | "POC Return" | "Rental Return" | "Transfer" | "Dispose" | "Rentals"
 
 export const LOCATIONS = ["Warehouse A", "Warehouse B", "Service Center", "Client Site", "Delivered"] as const
 export type Location = (typeof LOCATIONS)[number]
+
+/** Warehouses / service only — used when returning stock from outbound quick scans. */
+export const INTERNAL_LOCATIONS = ["Warehouse A", "Warehouse B", "Service Center"] as const
+export type InternalLocation = (typeof INTERNAL_LOCATIONS)[number]
+
+export function isInternalLocation(value: string): value is InternalLocation {
+  return (INTERNAL_LOCATIONS as readonly string[]).includes(value)
+}
 
 /** One site/address for a client (e.g. delivery or POC location). */
 export interface ClientSite {
@@ -28,6 +36,10 @@ export interface QuickScanRecord {
   clientEmail?: string
   clientPhone?: string
   sites?: ClientSite[]
+  /** Set when an admin reverses the batch (row kept for audit). */
+  reversedAt?: string
+  reversalReason?: string
+  reversedBy?: string
 }
 
 export interface AssignmentEntry {
@@ -43,6 +55,7 @@ export interface InventoryItem {
   id: string
   serialNumber: string
   itemType: ItemType
+  productTypeId?: string
   name: string
   /** Family/category for hierarchy (e.g. Starlink, Fortinet). Optional for backward compat. */
   category?: InventoryCategory | string
@@ -64,6 +77,12 @@ export interface InventoryItem {
   assignmentHistory?: AssignmentEntry[]
   /** Set when allocated to a stock request line (Supabase). */
   reservedForRequestLineId?: string
+}
+
+export interface ProductType {
+  id: string
+  name: string
+  active: boolean
 }
 
 export interface Transaction {

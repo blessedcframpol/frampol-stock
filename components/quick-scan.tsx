@@ -321,6 +321,7 @@ export function QuickScan() {
       const phone = newClientPhone.trim()
       if (!name || !company || !email || !phone) {
         toast.error("All client details are required: name, company, email, and phone")
+        setIsSubmitting(false)
         return
       }
       const validSitesForNew = sites

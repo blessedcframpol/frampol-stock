@@ -1,10 +1,5 @@
-import { DashboardShell } from "@/components/dashboard-shell"
-import { ScanHistoryContent } from "@/components/scan-history-content"
+import { redirect } from "next/navigation"
 
-export default function ScanHistoryPage() {
-  return (
-    <DashboardShell>
-      <ScanHistoryContent />
-    </DashboardShell>
-  )
+export default function ScanHistoryRedirectPage() {
+  redirect("/transaction-history")
 }

@@ -73,7 +73,7 @@ const allNavItems: NavItem[] = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/search", label: "Search", icon: Search },
   { href: "/inventory", label: "Inventory", icon: Package, children: inventoryChildren },
-  { href: "/scan-history", label: "Scan history", icon: History },
+  { href: "/transaction-history", label: "Transaction history", icon: History },
   { href: "/alerts", label: "Alerts", icon: Bell },
   { href: "/clients", label: "Clients", icon: Users },
   { href: "/requests", label: "Requests", icon: MessageSquare },

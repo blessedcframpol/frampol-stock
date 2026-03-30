@@ -41,6 +41,9 @@ export async function getAllQuickScansFromSupabase(serverClient?: SupabaseClient
       clientEmail: row.client_email ?? undefined,
       clientPhone: row.client_phone ?? undefined,
       sites: row.sites ?? undefined,
+      reversedAt: row.reversed_at ?? undefined,
+      reversalReason: row.reversal_reason ?? undefined,
+      reversedBy: row.reversed_by ?? undefined,
     }))
   } catch {
     return null
@@ -162,6 +165,35 @@ export async function deleteQuickScanFromSupabase(id: string, serverClient?: Sup
     return true
   } catch {
     return false
+  }
+}
+
+/** Mark all quick_scans rows in a batch as reversed (audit trail). Returns rows updated. */
+export async function reverseQuickScanBatchInSupabase(
+  batchId: string,
+  reason: string,
+  reversedByUserId: string,
+  serverClient: SupabaseClient<Database>
+): Promise<number> {
+  try {
+    const now = new Date().toISOString()
+    const { data, error } = await serverClient
+      .from("quick_scans")
+      .update({
+        reversed_at: now,
+        reversal_reason: reason,
+        reversed_by: reversedByUserId,
+      })
+      .or(`batch_id.eq.${batchId},id.eq.${batchId}`)
+      .is("reversed_at", null)
+      .select("id")
+    if (error) {
+      console.error("Supabase quick_scans reverse batch error:", error)
+      return 0
+    }
+    return data?.length ?? 0
+  } catch {
+    return 0
   }
 }
 

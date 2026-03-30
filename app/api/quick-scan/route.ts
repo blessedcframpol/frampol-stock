@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import { apiClientError, apiErrorResponse } from "@/lib/api-error-response"
-import { addQuickScan, addBulkQuickScans, getAllQuickScans, deleteQuickScansByBatchId } from "@/lib/quick-scans-db"
+import { addQuickScan, addBulkQuickScans, getAllQuickScans } from "@/lib/quick-scans-db"
 import {
   getAllQuickScansFromSupabase,
   addQuickScanToSupabase,
   addBulkQuickScansToSupabase,
-  deleteQuickScansByBatchIdFromSupabase,
 } from "@/lib/supabase/quick-scans-db"
 import { createServerSupabaseClient } from "@/lib/supabase/server"
 
@@ -126,23 +125,8 @@ export async function POST(request: NextRequest) {
   }
 }
 
-export async function DELETE(request: NextRequest) {
-  try {
-    const batchId = request.nextUrl.searchParams.get("batchId")
-    if (!batchId?.trim()) {
-      return apiClientError(400, "batchId query parameter is required")
-    }
-    const supabase = await createServerSupabaseClient()
-    const fromDb = await deleteQuickScansByBatchIdFromSupabase(batchId, supabase)
-    const deleted = fromDb > 0 ? fromDb : deleteQuickScansByBatchId(batchId)
-    if (deleted === 0) {
-      return apiClientError(404, "No scan(s) found for this batch", { log: "warn" })
-    }
-    return NextResponse.json({ ok: true, deleted })
-  } catch (error) {
-    return apiErrorResponse(500, "Failed to delete scan batch", {
-      cause: error,
-      logLabel: "Quick scan DELETE by batch",
-    })
-  }
+export async function DELETE() {
+  return apiClientError(405, "Removing scan batches is no longer supported via DELETE. Admins must POST /api/quick-scan/reverse with a reason.", {
+    log: "warn",
+  })
 }

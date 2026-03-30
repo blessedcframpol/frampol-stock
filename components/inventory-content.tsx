@@ -31,6 +31,8 @@ import {
 import { Label } from "@/components/ui/label"
 import { LOCATIONS, type InventoryItem, type ItemStatus, type ItemType } from "@/lib/data"
 import { useInventoryStore } from "@/lib/inventory-store"
+import { useAuth } from "@/lib/auth-context"
+import { canEditInventory } from "@/lib/permissions"
 import {
   Search,
   Plus,
@@ -91,7 +93,9 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 export function InventoryContent() {
   const searchParams = useSearchParams()
-  const { inventory, transactions, addItem } = useInventoryStore()
+  const { inventory, transactions, addItem, productTypes, addProductType, archiveProductType, reassignInventoryGroup } = useInventoryStore()
+  const { role } = useAuth()
+  const isAdmin = canEditInventory(role)
   const [search, setSearch] = useState("")
 
   const serialFromUrl = searchParams.get("serial")
@@ -116,9 +120,15 @@ export function InventoryContent() {
   const [addPurchaseDate, setAddPurchaseDate] = useState("")
   const [addWarrantyEnd, setAddWarrantyEnd] = useState("")
   const [addDialogOpen, setAddDialogOpen] = useState(false)
+  const [manageTypesOpen, setManageTypesOpen] = useState(false)
+  const [newProductTypeName, setNewProductTypeName] = useState("")
+  const [moveGroupOpen, setMoveGroupOpen] = useState(false)
+  const [moveTargetGroupName, setMoveTargetGroupName] = useState("")
+  const [moveTargetTypeId, setMoveTargetTypeId] = useState("")
+  const [moveTargetCategory, setMoveTargetCategory] = useState("General")
 
   const categoriesFromInventory = useMemo(
-    () => [...new Set(inventory.map((i) => i.category).filter(Boolean))].sort() as string[],
+    () => [...new Set(inventory.map((i) => (i.category?.trim() ? i.category : "General")))].sort() as string[],
     [inventory]
   )
   const categories = useMemo(
@@ -127,7 +137,10 @@ export function InventoryContent() {
   )
   const groups = useMemo(() => groupInventoryItems(inventory), [inventory])
   const groupsInCategory = useMemo(
-    () => (selectedCategory ? groupInventoryItems(inventory.filter((i) => i.category === selectedCategory)) : []),
+    () =>
+      selectedCategory
+        ? groupInventoryItems(inventory.filter((i) => (i.category?.trim() ? i.category : "General") === selectedCategory))
+        : [],
     [inventory, selectedCategory]
   )
 
@@ -160,7 +173,9 @@ export function InventoryContent() {
 
   const itemsInGroup = useMemo(() => {
     if (!selectedGroup) return []
-    return selectedGroup.items.filter((i) => !selectedCategory || i.category === selectedCategory)
+    return selectedGroup.items.filter(
+      (i) => !selectedCategory || (i.category?.trim() ? i.category : "General") === selectedCategory
+    )
   }, [selectedGroup, selectedCategory])
 
   const inStockCount = useMemo(
@@ -177,7 +192,12 @@ export function InventoryContent() {
     })
   }, [itemsInGroup, search])
 
-  const itemTypes: ItemType[] = ["Starlink Kit", "Laptop", "Desktop", "Router", "Switch", "Access Point", "UPS", "Monitor"]
+  const itemTypes: ItemType[] = useMemo(() => {
+    const activeTypes = productTypes.filter((pt) => pt.active).map((pt) => pt.name)
+    const fromInventory = inventory.map((i) => i.itemType).filter(Boolean)
+    const combined = [...new Set(["General", ...activeTypes, ...fromInventory])]
+    return combined.sort()
+  }, [inventory, productTypes])
 
   const showCategoriesView = categories.length > 0 && selectedCategory === null && selectedGroupName === null
   const showProductTypesView = (categories.length === 0 || selectedCategory !== null) && selectedGroupName === null
@@ -230,6 +250,42 @@ export function InventoryContent() {
       </CardContent>
     </Card>
   )
+
+  async function handleAddProductType() {
+    const result = await addProductType(newProductTypeName)
+    if (!result.ok) {
+      toast.error(result.error ?? "Failed to add product type")
+      return
+    }
+    toast.success("Product type added")
+    setNewProductTypeName("")
+  }
+
+  async function handleArchiveProductType(id: string) {
+    const result = await archiveProductType(id)
+    if (!result.ok) {
+      toast.error(result.error ?? "Failed to archive product type")
+      return
+    }
+    toast.success("Product type archived")
+  }
+
+  async function handleMoveGroup() {
+    if (!selectedGroup?.name) return
+    const result = await reassignInventoryGroup({
+      sourceGroupName: selectedGroup.name,
+      targetGroupName: moveTargetGroupName.trim() || selectedGroup.name,
+      targetProductTypeId: moveTargetTypeId || undefined,
+      targetCategory: moveTargetCategory.trim() || "General",
+    })
+    if (!result.ok) {
+      toast.error(result.error ?? "Failed to move group")
+      return
+    }
+    toast.success(`Moved ${result.updated} item(s)`)
+    setMoveGroupOpen(false)
+    setMoveTargetGroupName("")
+  }
 
   // —— Level 1: Categories (Starlink, Fortinet)
   if (showCategoriesView) {
@@ -384,7 +440,7 @@ export function InventoryContent() {
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
           {categories.map((cat) => {
-            const count = inventory.filter((i) => i.category === cat).length
+            const count = inventory.filter((i) => (i.category?.trim() ? i.category : "General") === cat).length
             return (
               <Card
                 key={cat}
@@ -466,6 +522,44 @@ export function InventoryContent() {
               <Download className="w-4 h-4 mr-1.5" />
               <span className="hidden sm:inline">Export</span>
             </Button>
+            {isAdmin && (
+              <Dialog open={manageTypesOpen} onOpenChange={setManageTypesOpen}>
+                <DialogTrigger asChild>
+                  <Button variant="outline" size="sm" className="text-foreground">
+                    Manage types
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="bg-card text-card-foreground max-w-[calc(100vw-2rem)] sm:max-w-lg">
+                  <DialogHeader>
+                    <DialogTitle className="text-foreground">Product Types (Admin)</DialogTitle>
+                  </DialogHeader>
+                  <div className="flex flex-col gap-3 py-2">
+                    <div className="flex gap-2">
+                      <Input
+                        placeholder="Add product type..."
+                        value={newProductTypeName}
+                        onChange={(e) => setNewProductTypeName(e.target.value)}
+                      />
+                      <Button onClick={handleAddProductType}>Add</Button>
+                    </div>
+                    <div className="max-h-72 overflow-y-auto border border-border rounded-md divide-y divide-border">
+                      {productTypes
+                        .filter((pt) => pt.active)
+                        .map((pt) => (
+                          <div key={pt.id} className="flex items-center justify-between px-3 py-2">
+                            <span className="text-sm">{pt.name}</span>
+                            {pt.name !== "General" && (
+                              <Button variant="ghost" size="sm" onClick={() => void handleArchiveProductType(pt.id)}>
+                                Archive
+                              </Button>
+                            )}
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
+            )}
             <Dialog open={addDialogOpen} onOpenChange={(open) => { setAddDialogOpen(open); if (!open) { setAddNewCategoryName(""); setAddCategory(""); } }}>
               <DialogTrigger asChild>
                 <Button size="sm" className="bg-primary text-primary-foreground hover:bg-primary/90">
@@ -676,6 +770,67 @@ export function InventoryContent() {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            {isAdmin && selectedGroup && (
+              <Dialog
+                open={moveGroupOpen}
+                onOpenChange={(open) => {
+                  setMoveGroupOpen(open)
+                  if (open) {
+                    setMoveTargetGroupName(selectedGroup.name)
+                    setMoveTargetTypeId(
+                      productTypes.find((pt) => pt.name.toLowerCase() === selectedGroup.itemType.toLowerCase())?.id ??
+                        productTypes.find((pt) => pt.name === "General")?.id ??
+                        ""
+                    )
+                    setMoveTargetCategory(selectedCategory && selectedCategory !== "__flat__" ? selectedCategory : "General")
+                  }
+                }}
+              >
+                <DialogTrigger asChild>
+                  <Button variant="outline" size="sm" className="text-foreground">
+                    Move group
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="bg-card text-card-foreground max-w-[calc(100vw-2rem)] sm:max-w-lg">
+                  <DialogHeader>
+                    <DialogTitle className="text-foreground">Move Group (Admin)</DialogTitle>
+                  </DialogHeader>
+                  <div className="flex flex-col gap-3 py-2">
+                    <div className="text-xs text-muted-foreground">
+                      Moving all items in <strong>{selectedGroup.name}</strong>.
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <Label>Group name</Label>
+                      <Input value={moveTargetGroupName} onChange={(e) => setMoveTargetGroupName(e.target.value)} />
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <Label>Product type</Label>
+                      <Select value={moveTargetTypeId} onValueChange={setMoveTargetTypeId}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select type" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {productTypes
+                            .filter((pt) => pt.active)
+                            .map((pt) => (
+                              <SelectItem key={pt.id} value={pt.id}>
+                                {pt.name}
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <Label>Category</Label>
+                      <Input value={moveTargetCategory} onChange={(e) => setMoveTargetCategory(e.target.value)} />
+                    </div>
+                    <div className="flex justify-end">
+                      <Button onClick={() => void handleMoveGroup()}>Apply move</Button>
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
+            )}
             <div className="flex rounded-md border border-border overflow-hidden">
               <Button
                 variant={itemView === "list" ? "secondary" : "ghost"}
