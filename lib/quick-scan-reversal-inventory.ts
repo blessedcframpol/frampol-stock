@@ -18,20 +18,28 @@ export type QuickScanBatchRow = {
   movement_type: string | null
 }
 
-export async function fetchActiveQuickScanBatchRows(
+/** Load serials + movement types for an active (not reversed) transaction batch. */
+export async function fetchActiveMovementBatchRows(
   supabase: SupabaseClient<Database>,
   batchId: string
 ): Promise<QuickScanBatchRow[] | null> {
+  const { data: rev } = await supabase.from("batch_reversals").select("batch_id").eq("batch_id", batchId).maybeSingle()
+  if (rev?.batch_id) {
+    return []
+  }
+
   const { data, error } = await supabase
-    .from("quick_scans")
-    .select("serial_number, movement_type")
-    .or(`batch_id.eq.${batchId},id.eq.${batchId}`)
-    .is("reversed_at", null)
+    .from("transactions")
+    .select("serial_number, type")
+    .eq("batch_id", batchId)
   if (error) {
-    console.error("fetchActiveQuickScanBatchRows:", error)
+    console.error("fetchActiveMovementBatchRows:", error)
     return null
   }
-  return (data ?? []) as QuickScanBatchRow[]
+  return (data ?? []).map((r) => ({
+    serial_number: r.serial_number,
+    movement_type: r.type,
+  }))
 }
 
 export type RevertInventoryResult =

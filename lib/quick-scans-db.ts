@@ -46,17 +46,19 @@ export function addQuickScan(
   serialNumber: string,
   scanType: QuickScanRecord["scanType"],
   movementType?: QuickScanRecord["movementType"],
-  outbound?: QuickScanOutboundDetails
+  outbound?: QuickScanOutboundDetails,
+  existingBatchId?: string
 ): QuickScanRecord {
   const scans = readScans()
   const id = `QSCAN-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+  const batchId = existingBatchId?.trim() || id
   const record: QuickScanRecord = {
     id,
     serialNumber: serialNumber.trim(),
     scanType,
     scannedAt: new Date().toISOString(),
     movementType,
-    batchId: id,
+    batchId,
     clientId: outbound?.clientId,
     clientName: outbound?.clientName,
     clientCompany: outbound?.clientCompany,
@@ -73,12 +75,13 @@ export function addBulkQuickScans(
   serialNumbers: string[],
   scanType: QuickScanRecord["scanType"],
   movementType?: QuickScanRecord["movementType"],
-  outbound?: QuickScanOutboundDetails
+  outbound?: QuickScanOutboundDetails,
+  existingBatchId?: string
 ): QuickScanRecord[] {
   const scans = readScans()
   const now = new Date().toISOString()
   const base = Date.now()
-  const batchId = `BATCH-${base}-${Math.random().toString(36).slice(2, 7)}`
+  const batchId = existingBatchId?.trim() || `BATCH-${base}-${Math.random().toString(36).slice(2, 7)}`
   const records: QuickScanRecord[] = serialNumbers.map((serial, i) => ({
     id: `QSCAN-${base}-${i}-${Math.random().toString(36).slice(2, 7)}`,
     serialNumber: serial.trim(),

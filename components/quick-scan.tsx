@@ -34,13 +34,17 @@ import {
 } from "@/components/ui/dialog"
 import { ScanBarcode, Camera, Loader2, ChevronsUpDown, Plus, MapPin, Trash2 } from "lucide-react"
 import type { ItemType, TransactionType, ClientSite } from "@/lib/data"
+import { INTERNAL_LOCATIONS } from "@/lib/data"
 import { useClients, insertClient } from "@/lib/supabase/clients-db"
 import { useInventoryStore } from "@/lib/inventory-store"
 import { toast } from "sonner"
-import { toastFromApiErrorBody, toastFromCaughtError } from "@/lib/toast-reportable-error"
+import { toastFromCaughtError } from "@/lib/toast-reportable-error"
 import { cn } from "@/lib/utils"
+import { isFortigateProductName, splitDelimitedValues, cloudKeysMapForSerials } from "@/lib/fortigate"
 
 const OUTBOUND_LIKE_MOVEMENTS: TransactionType[] = ["Sale", "POC Out", "Transfer", "Dispose", "Rentals"]
+
+const RETURN_LIKE_MOVEMENTS: TransactionType[] = ["POC Return", "Rental Return"]
 
 const ITEM_TYPE_OPTIONS: { value: ItemType; label: string }[] = [
   { value: "Starlink Kit", label: "Starlink Kit" },
@@ -79,7 +83,7 @@ type MissingSerialsState = {
 }
 
 export function QuickScan() {
-  const { inventory, addItem, applyMovement } = useInventoryStore()
+  const { inventory, addItem, applyMovement, refetchLedger, productTypes } = useInventoryStore()
   const { clients, refetch: refetchClients } = useClients()
   const [serialInput, setSerialInput] = useState("")
   const [productName, setProductName] = useState("")
@@ -88,6 +92,8 @@ export function QuickScan() {
   const [comboboxSearch, setComboboxSearch] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const outboundCloudKeysRef = useRef<Record<string, string> | undefined>(undefined)
+  const [cloudKeysInput, setCloudKeysInput] = useState("")
 
   // Client/site details modal (for Sale, POC Out, Rentals, Transfer, Dispose)
   const [pendingOutbound, setPendingOutbound] = useState<PendingOutboundScan | null>(null)
@@ -104,6 +110,17 @@ export function QuickScan() {
   // When some serials are not in inventory for outbound: offer to add them first
   const [missingSerialsState, setMissingSerialsState] = useState<MissingSerialsState | null>(null)
   const [addingToInventory, setAddingToInventory] = useState(false)
+
+  const [inboundReceiveLocation, setInboundReceiveLocation] = useState<string>("Warehouse A")
+  const [inboundCategory, setInboundCategory] = useState<string>("General")
+  const [returnLocation, setReturnLocation] = useState<string>("Warehouse A")
+
+  const categoryOptions = useMemo(() => {
+    const fromInv = inventory
+      .map((i) => (i.category?.trim() ? i.category.trim() : null))
+      .filter((c): c is string => Boolean(c))
+    return [...new Set(["General", ...fromInv])].sort()
+  }, [inventory])
 
   const serialList = useMemo(() => {
     return serialInput
@@ -180,6 +197,18 @@ export function QuickScan() {
         })
         return
       }
+      outboundCloudKeysRef.current = undefined
+      if (isFortigateProductName(product)) {
+        const keys = splitDelimitedValues(cloudKeysInput)
+        const map = cloudKeysMapForSerials(uniqueSerials, keys)
+        if (!map) {
+          toast.error(
+            `Cloud keys (FortiGate): enter exactly ${uniqueSerials.length} non-empty key(s) in the same order as the serials.`
+          )
+          return
+        }
+        outboundCloudKeysRef.current = map
+      }
       setPendingOutbound({ productName: product, movementType, serials: uniqueSerials })
       setOutboundClientId("")
       setOutboundClientSearch("")
@@ -192,108 +221,80 @@ export function QuickScan() {
       return
     }
 
-    await submitScan(product, movementType, uniqueSerials, undefined)
-  }
-
-  async function submitScan(
-    product: string,
-    movType: TransactionType,
-    serials: string[],
-    outboundDetails?: {
-      clientId?: string
-      clientName?: string
-      clientCompany?: string
-      clientEmail?: string
-      clientPhone?: string
-      sites?: ClientSite[]
-    }
-  ) {
-    setLastDuplicateMessage(null)
-    setIsSubmitting(true)
-    try {
-      const body: Record<string, unknown> =
-        serials.length === 1
-          ? { serialNumber: serials[0], scanType: product, movementType: movType }
-          : { serialNumbers: serials, scanType: product, movementType: movType }
-      if (outboundDetails) {
-        if (outboundDetails.clientId) body.clientId = outboundDetails.clientId
-        if (outboundDetails.clientName) body.clientName = outboundDetails.clientName
-        if (outboundDetails.clientCompany) body.clientCompany = outboundDetails.clientCompany
-        if (outboundDetails.clientEmail) body.clientEmail = outboundDetails.clientEmail
-        if (outboundDetails.clientPhone) body.clientPhone = outboundDetails.clientPhone
-        if (outboundDetails.sites?.length) body.sites = outboundDetails.sites.filter((s) => s.address.trim())
-      }
-      const res = await fetch("/api/quick-scan", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      })
-
-      const data = await res.json().catch(() => ({}))
-
-      if (!res.ok) {
-        toastFromApiErrorBody(data, "Failed to record scan")
+    if (RETURN_LIKE_MOVEMENTS.includes(movementType)) {
+      if (!returnLocation.trim()) {
+        toast.error("Select return location")
         return
       }
-
-      if (data.duplicate === true) {
-        toast.warning(`${data.serialNumber ?? "Serial"} already scanned`)
-        return
+      setLastDuplicateMessage(null)
+      setIsSubmitting(true)
+      try {
+        const result = applyMovement({
+          type: movementType,
+          serialNumbers: uniqueSerials,
+          toLocation: returnLocation.trim(),
+        })
+        if (result.success.length > 0) {
+          toast.success(
+            result.success.length === 1
+              ? `Recorded: ${result.success[0]} (${product})`
+              : `Recorded ${result.success.length} item(s) (${product})`
+          )
+          setSerialInput("")
+          textareaRef.current?.focus()
+          void refetchLedger()
+        }
+        if (result.notFound.length > 0) {
+          setLastDuplicateMessage(result.notFound)
+          toast.warning(`Serial number(s) not found: ${result.notFound.slice(0, 5).join(", ")}${result.notFound.length > 5 ? "…" : ""}`)
+        }
+      } finally {
+        setIsSubmitting(false)
       }
+      return
+    }
 
-      const recorded = data.recorded ?? (data.id ? 1 : 0)
-      const duplicates: string[] = data.duplicates ?? []
-      if (duplicates.length > 0) setLastDuplicateMessage(duplicates)
-
-      if (recorded > 0) {
-        toast.success(
-          recorded === 1
-            ? `Recorded: ${serials[0]} (${product})`
-            : `Recorded ${recorded} scan${recorded !== 1 ? "s" : ""} (${product})`
-        )
-        setSerialInput("")
-        setPendingOutbound(null)
-        textareaRef.current?.focus()
-      } else if (duplicates.length > 0) {
-        toast.info(`All ${duplicates.length} serial(s) were already scanned`)
+    if (movementType === "Inbound") {
+      setLastDuplicateMessage(null)
+      setIsSubmitting(true)
+      try {
+        const itemType = inferItemType(product)
+        const productTypeId =
+          productTypes.find((pt) => pt.name.toLowerCase() === itemType.toLowerCase())?.id ??
+          productTypes.find((pt) => pt.name === "General")?.id
+        const result = applyMovement({
+          type: "Inbound",
+          serialNumbers: uniqueSerials,
+          deliveryNoteUrl: undefined,
+          inboundCreateDefaults: {
+            name: product,
+            itemType,
+            category: inboundCategory.trim() || "General",
+            location: inboundReceiveLocation.trim() || "Warehouse A",
+            productTypeId,
+          },
+        })
+        if (result.success.length > 0) {
+          toast.success(
+            result.success.length === 1
+              ? `Recorded: ${result.success[0]} (${product})`
+              : `Recorded ${result.success.length} item(s) (${product})`
+          )
+          setSerialInput("")
+          textareaRef.current?.focus()
+          void refetchLedger()
+        }
+        if (result.notFound.length > 0) {
+          setLastDuplicateMessage(result.notFound)
+          toast.warning(`Serial number(s) not found: ${result.notFound.slice(0, 5).join(", ")}${result.notFound.length > 5 ? "…" : ""}`)
+        }
+      } finally {
+        setIsSubmitting(false)
       }
-    } catch (e) {
-      toastFromCaughtError(e, "Failed to record scan")
-    } finally {
-      setIsSubmitting(false)
+      return
     }
-  }
 
-  async function recordQuickScan(
-    serials: string[],
-    product: string,
-    movType: TransactionType,
-    outboundDetails?: {
-      clientId?: string
-      clientName?: string
-      clientCompany?: string
-      clientEmail?: string
-      clientPhone?: string
-      sites?: ClientSite[]
-    }
-  ) {
-    const body: Record<string, unknown> =
-      serials.length === 1
-        ? { serialNumber: serials[0], scanType: product, movementType: movType }
-        : { serialNumbers: serials, scanType: product, movementType: movType }
-    if (outboundDetails) {
-      if (outboundDetails.clientId) body.clientId = outboundDetails.clientId
-      if (outboundDetails.clientName) body.clientName = outboundDetails.clientName
-      if (outboundDetails.clientCompany) body.clientCompany = outboundDetails.clientCompany
-      if (outboundDetails.clientEmail) body.clientEmail = outboundDetails.clientEmail
-      if (outboundDetails.clientPhone) body.clientPhone = outboundDetails.clientPhone
-      if (outboundDetails.sites?.length) body.sites = outboundDetails.sites.filter((s) => s.address.trim())
-    }
-    await fetch("/api/quick-scan", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    })
+    toast.error("This movement type is not supported from Quick Scan")
   }
 
   async function handleOutboundModalSubmit() {
@@ -358,6 +359,9 @@ export function QuickScan() {
     const validSites = sites.filter((s) => s.address.trim())
     if (validSites.length > 0) outboundDetails.sites = validSites.map((s) => ({ name: s.name?.trim(), address: s.address.trim() }))
 
+    const cloudKeysBySerial = outboundCloudKeysRef.current
+    outboundCloudKeysRef.current = undefined
+
     try {
       const assignedTo = outboundDetails.clientName ?? outboundDetails.clientCompany ?? (outboundDetails.clientId ? clients.find((c) => c.id === outboundDetails.clientId)?.company : undefined)
       const returnDate = (pendingOutbound.movementType === "POC Out" || pendingOutbound.movementType === "Rentals") && outboundReturnDate.trim() ? outboundReturnDate.trim() : undefined
@@ -375,15 +379,15 @@ export function QuickScan() {
         clientDisplayOverride,
         assignedTo,
         returnDate,
+        cloudKeysBySerial,
       })
       if (result.success.length > 0) {
         toast.success(`Recorded ${result.success.length} item(s) — inventory updated`)
         setSerialInput("")
+        setCloudKeysInput("")
         setPendingOutbound(null)
         setOutboundReturnDate("")
-        recordQuickScan(result.success, pendingOutbound.productName, pendingOutbound.movementType, outboundDetails).catch((e) =>
-          toastFromCaughtError(e, "Could not sync scans to history")
-        )
+        void refetchLedger()
       }
       if (result.notFound.length > 0) {
         toast.warning(`Serial number(s) not found: ${result.notFound.join(", ")}`)
@@ -405,9 +409,12 @@ export function QuickScan() {
     setSites((prev) => prev.map((s, i) => (i === index ? { ...s, [field]: value } : s)))
   }
 
-  function inferItemType(productName: string): ItemType {
-    const match = inventory.find((i) => i.name === productName)
-    return (match?.itemType ?? "Starlink Kit") as ItemType
+  function inferItemType(name: string): ItemType {
+    const matchInv = inventory.find((i) => i.name === name)
+    if (matchInv?.itemType) return matchInv.itemType as ItemType
+    const opt = ITEM_TYPE_OPTIONS.find((o) => o.label === name)
+    if (opt) return opt.value
+    return "Starlink Kit"
   }
 
   async function handleAddMissingAndContinue() {
@@ -549,6 +556,57 @@ export function QuickScan() {
             </PopoverContent>
           </Popover>
         </div>
+        {movementType === "Inbound" && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs text-muted-foreground">Receive location</Label>
+              <Select value={inboundReceiveLocation} onValueChange={setInboundReceiveLocation}>
+                <SelectTrigger className="h-10 bg-card border-border text-foreground">
+                  <SelectValue placeholder="Location" />
+                </SelectTrigger>
+                <SelectContent>
+                  {INTERNAL_LOCATIONS.map((loc) => (
+                    <SelectItem key={loc} value={loc}>
+                      {loc}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs text-muted-foreground">Category</Label>
+              <Select value={inboundCategory} onValueChange={setInboundCategory}>
+                <SelectTrigger className="h-10 bg-card border-border text-foreground">
+                  <SelectValue placeholder="Category" />
+                </SelectTrigger>
+                <SelectContent>
+                  {categoryOptions.map((cat) => (
+                    <SelectItem key={cat} value={cat}>
+                      {cat}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        )}
+        {RETURN_LIKE_MOVEMENTS.includes(movementType) && (
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-xs text-muted-foreground">Return location</Label>
+            <Select value={returnLocation} onValueChange={setReturnLocation}>
+              <SelectTrigger className="h-10 bg-card border-border text-foreground">
+                <SelectValue placeholder="Where stock is received" />
+              </SelectTrigger>
+              <SelectContent>
+                {INTERNAL_LOCATIONS.map((loc) => (
+                  <SelectItem key={loc} value={loc}>
+                    {loc}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
         <div className="flex flex-col gap-2">
           <Label className="text-xs text-muted-foreground">
             Serial numbers (comma or newline separated; paste a list to add commas)
@@ -581,6 +639,21 @@ export function QuickScan() {
             </p>
           )}
         </div>
+        {OUTBOUND_LIKE_MOVEMENTS.includes(movementType) && isFortigateProductName(productName.trim()) && (
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-xs text-muted-foreground">Cloud keys (required for FortiGate)</Label>
+            <Textarea
+              value={cloudKeysInput}
+              onChange={(e) => setCloudKeysInput(e.target.value)}
+              placeholder="One key per serial, same order as above (comma or newline)…"
+              className="font-mono text-sm min-h-[72px] bg-card border-border resize-y"
+              disabled={isSubmitting}
+            />
+            <p className="text-[11px] text-muted-foreground">
+              {uniqueSerials.length} unique serial(s) — {uniqueSerials.length} key(s) required when you record.
+            </p>
+          </div>
+        )}
         <div className="flex gap-2">
           <Button
             size="icon"
@@ -607,7 +680,11 @@ export function QuickScan() {
         <p className="text-[11px] text-muted-foreground">
           {requiresOutboundDetails
             ? "For Sale, POC Out, Rentals, Transfer and Dispose, serials must exist in inventory. You’ll enter client and site details next."
-            : "Choose a product, then paste or type serial numbers (e.g. 400 Starlink kits). Use commas or new lines; pasted lines are auto-separated."}
+            : RETURN_LIKE_MOVEMENTS.includes(movementType)
+              ? "POC Return and Rental Return update inventory and require a return location. Serials must already exist (e.g. out on POC or rental)."
+              : movementType === "Inbound"
+                ? "Inbound creates or updates inventory rows and logs one transaction batch. Serials already In Stock are blocked."
+                : "Choose a product, then paste or type serial numbers. Use commas or new lines; pasted lines are auto-separated."}
         </p>
       </CardContent>
 

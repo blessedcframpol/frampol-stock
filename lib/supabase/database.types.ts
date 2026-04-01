@@ -23,6 +23,7 @@ export interface Database {
           return_date: string | null
           assignment_history: Json | null
           reserved_for_request_line_id: string | null
+          cloud_key: string | null
         }
         Insert: {
           id: string
@@ -36,6 +37,7 @@ export interface Database {
           location: string
           client?: string | null
           notes?: string | null
+          cloud_key?: string | null
           assigned_to?: string | null
           purchase_date?: string | null
           warranty_end_date?: string | null
@@ -63,6 +65,7 @@ export interface Database {
           return_date?: string | null
           assignment_history?: Json | null
           reserved_for_request_line_id?: string | null
+          cloud_key?: string | null
         }
       }
       product_types: {
@@ -322,55 +325,22 @@ export interface Database {
           last_order?: string | null
         }
       }
-      quick_scans: {
+      batch_reversals: {
         Row: {
-          id: string
-          serial_number: string
-          scan_type: string
-          scanned_at: string
-          movement_type: string | null
-          batch_id: string | null
-          client_id: string | null
-          client_name: string | null
-          client_company: string | null
-          client_email: string | null
-          client_phone: string | null
-          sites: { name?: string; address: string }[] | null
-          reversed_at: string | null
+          batch_id: string
+          reversed_at: string
           reversal_reason: string | null
           reversed_by: string | null
         }
         Insert: {
-          id: string
-          serial_number: string
-          scan_type: string
-          scanned_at: string
-          movement_type?: string | null
-          batch_id?: string | null
-          client_id?: string | null
-          client_name?: string | null
-          client_company?: string | null
-          client_email?: string | null
-          client_phone?: string | null
-          sites?: { name?: string; address: string }[] | null
-          reversed_at?: string | null
+          batch_id: string
+          reversed_at: string
           reversal_reason?: string | null
           reversed_by?: string | null
         }
         Update: {
-          id?: string
-          serial_number?: string
-          scan_type?: string
-          scanned_at?: string
-          movement_type?: string | null
-          batch_id?: string | null
-          client_id?: string | null
-          client_name?: string | null
-          client_company?: string | null
-          client_email?: string | null
-          client_phone?: string | null
-          sites?: { name?: string; address: string }[] | null
-          reversed_at?: string | null
+          batch_id?: string
+          reversed_at?: string
           reversal_reason?: string | null
           reversed_by?: string | null
         }

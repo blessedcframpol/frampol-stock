@@ -6,7 +6,7 @@ import { inventoryItems as initialInventory, recentTransactions as initialTransa
 import { getReorderLevelForProduct, getReorderLevelOverrides } from "./settings"
 import { getSupabaseClient } from "./supabase/client"
 import { rowToInventoryItem, inventoryItemToRow, rowToTransaction, transactionToRow } from "./supabase/inventory-db"
-import { computeMovementResult } from "./supabase/movement-utils"
+import { computeMovementResult, type InboundCreateDefaults } from "./supabase/movement-utils"
 import { toast } from "sonner"
 
 function deepClone<T>(arr: T[]): T[] {
@@ -50,10 +50,14 @@ export interface MovementParams {
   /** For Dispose: reason and authorisation */
   disposalReason?: string
   authorisedBy?: string
-  /** For POC Out / Rentals: optional batch id (created by store when supabase) */
+  /** Optional batch id; if omitted, one is generated so all rows in this submit share `batch_id`. */
   batchId?: string
   /** For Inbound: public URL of uploaded delivery note */
   deliveryNoteUrl?: string
+  /** When Inbound: create new rows for unknown serials (and require no conflicting In Stock serial) */
+  inboundCreateDefaults?: InboundCreateDefaults
+  /** FortiGate outbound: map trimmed serial → cloud key */
+  cloudKeysBySerial?: Record<string, string>
 }
 
 const APPROACHING_DAYS = 7
@@ -218,7 +222,8 @@ interface InventoryStoreValue {
   inventory: InventoryItem[]
   transactions: Transaction[]
   productTypes: ProductType[]
-  applyMovement: (params: MovementParams) => { success: string[]; notFound: string[] }
+  applyMovement: (params: MovementParams) => { success: string[]; notFound: string[]; movementBatchId?: string }
+  refetchLedger: () => Promise<void>
   updateItem: (id: string, updates: Partial<InventoryItem>) => void
   addItem: (item: Omit<InventoryItem, "id">) => InventoryItem
   addProductType: (name: string) => Promise<{ ok: boolean; error?: string }>
@@ -255,6 +260,33 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
     ]
   })
 
+  const refetchLedger = useCallback(async () => {
+    if (!supabase) return
+    const { data: invRows } = await supabase.from("inventory_items").select("*").order("date_added", { ascending: true })
+    const { data: txnRows } = await supabase.from("transactions").select("*").order("date", { ascending: false })
+    const { data: typeRows } = await supabase
+      .from("product_types")
+      .select("id, name, active")
+      .order("name", { ascending: true })
+    if (invRows?.length) {
+      setInventory(invRows.map(rowToInventoryItem))
+    }
+    if (txnRows?.length) {
+      setTransactions(txnRows.map(rowToTransaction))
+    }
+    if (typeRows?.length) {
+      setProductTypes(typeRows.map((r) => ({ id: r.id, name: r.name, active: r.active })))
+    } else if (invRows) {
+      const names = [...new Set(invRows.map((r) => r.item_type).filter(Boolean))].sort()
+      setProductTypes([
+        { id: "ptype-general", name: "General", active: true },
+        ...names
+          .filter((n) => n.toLowerCase() !== "general")
+          .map((n) => ({ id: `legacy-${n.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`, name: n, active: true })),
+      ])
+    }
+  }, [supabase])
+
   useEffect(() => {
     if (!supabase) return
     let cancelled = false
@@ -283,16 +315,15 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
             .map((n) => ({ id: `legacy-${n.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`, name: n, active: true })),
         ])
       }
-      // When DB is empty, do not seed dummy data — use actual data only
     }
-    load()
+    void load()
     return () => {
       cancelled = true
     }
   }, [supabase])
 
   const applyMovement = useCallback(
-    (params: MovementParams): { success: string[]; notFound: string[] } => {
+    (params: MovementParams): { success: string[]; notFound: string[]; movementBatchId?: string } => {
       const {
         type,
         serialNumbers,
@@ -308,13 +339,26 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
         authorisedBy,
         batchId,
         deliveryNoteUrl,
+        inboundCreateDefaults,
+        cloudKeysBySerial,
       } = params
       const clientDisplay =
         clientDisplayOverride ?? (clientId ? getClientDisplay(clientId) : "Internal")
-      const assignOutboundBatchId = type === "POC Out" || type === "Rentals" || type === "Sale"
-      const newBatchId = assignOutboundBatchId
-        ? (batchId ?? `BATCH-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`)
-        : undefined
+      const newBatchId = batchId ?? `BATCH-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+
+      if (type === "Inbound" && inboundCreateDefaults) {
+        const conflicts = serialNumbers
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .filter((s) => inventory.some((i) => i.serialNumber === s && i.status === "In Stock"))
+        if (conflicts.length > 0) {
+          const preview = conflicts.slice(0, 5).join(", ")
+          const more = conflicts.length > 5 ? ` (+${conflicts.length - 5} more)` : ""
+          toast.error(`Already in stock — cannot receive again: ${preview}${more}`)
+          return { success: [], notFound: [], movementBatchId: undefined }
+        }
+      }
+
       const result = computeMovementResult(inventory, {
         type,
         serialNumbers,
@@ -330,9 +374,11 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
         authorisedBy,
         batchId: newBatchId,
         deliveryNoteUrl,
+        inboundCreateDefaults,
+        cloudKeysBySerial,
       })
       if (result.success.length === 0) {
-        return { success: [], notFound: result.notFound }
+        return { success: [], notFound: result.notFound, movementBatchId: undefined }
       }
 
       const runPersist = async () => {
@@ -364,12 +410,18 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
             })
             if (reportFail("Outbound batch", error)) return
           }
+          const prevIds = new Set(inventory.map((i) => i.id))
           for (const item of result.updatedItems) {
-            const { error } = await supabase
-              .from("inventory_items")
-              .update(inventoryItemToRow(item))
-              .eq("id", item.id)
-            if (reportFail("Inventory update", error)) return
+            if (prevIds.has(item.id)) {
+              const { error } = await supabase
+                .from("inventory_items")
+                .update(inventoryItemToRow(item))
+                .eq("id", item.id)
+              if (reportFail("Inventory update", error)) return
+            } else {
+              const { error } = await supabase.from("inventory_items").insert(inventoryItemToRow(item))
+              if (reportFail("Inventory insert", error)) return
+            }
           }
           if (result.newTransactions.length) {
             const { error } = await supabase
@@ -385,15 +437,18 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
 
       void runPersist()
 
-      setInventory((prev) =>
-        prev.map((item) => {
+      setInventory((prev) => {
+        const prevIds = new Set(prev.map((i) => i.id))
+        const merged = prev.map((item) => {
           const u = result.updatedItems.find((x) => x.id === item.id)
           return u ?? item
         })
-      )
+        const created = result.updatedItems.filter((u) => !prevIds.has(u.id))
+        return [...merged, ...created]
+      })
       setTransactions((prev) => [...result.newTransactions, ...prev])
 
-      return { success: result.success, notFound: result.notFound }
+      return { success: result.success, notFound: result.notFound, movementBatchId: newBatchId }
     },
     [inventory, supabase]
   )
@@ -625,6 +680,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
       undoTransaction,
       reassignTransaction,
       getAlerts,
+      refetchLedger,
     }),
     [
       inventory,
@@ -639,6 +695,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
       undoTransaction,
       reassignTransaction,
       getAlerts,
+      refetchLedger,
     ]
   )
 

@@ -31,6 +31,7 @@ import {
 import { Label } from "@/components/ui/label"
 import { LOCATIONS, type InventoryItem, type ItemStatus, type ItemType } from "@/lib/data"
 import { useInventoryStore } from "@/lib/inventory-store"
+import { filterOnHandInventory } from "@/lib/inventory-visibility"
 import { useAuth } from "@/lib/auth-context"
 import { canEditInventory } from "@/lib/permissions"
 import {
@@ -94,6 +95,7 @@ const CATEGORY_LABELS: Record<string, string> = {
 export function InventoryContent() {
   const searchParams = useSearchParams()
   const { inventory, transactions, addItem, productTypes, addProductType, archiveProductType, reassignInventoryGroup } = useInventoryStore()
+  const onHandInventory = useMemo(() => filterOnHandInventory(inventory), [inventory])
   const { role } = useAuth()
   const isAdmin = canEditInventory(role)
   const [search, setSearch] = useState("")
@@ -128,20 +130,22 @@ export function InventoryContent() {
   const [moveTargetCategory, setMoveTargetCategory] = useState("General")
 
   const categoriesFromInventory = useMemo(
-    () => [...new Set(inventory.map((i) => (i.category?.trim() ? i.category : "General")))].sort() as string[],
-    [inventory]
+    () => [...new Set(onHandInventory.map((i) => (i.category?.trim() ? i.category : "General")))].sort() as string[],
+    [onHandInventory]
   )
   const categories = useMemo(
     () => [...new Set([...Object.keys(CATEGORY_LABELS), ...categoriesFromInventory])].sort(),
     [categoriesFromInventory]
   )
-  const groups = useMemo(() => groupInventoryItems(inventory), [inventory])
+  const groups = useMemo(() => groupInventoryItems(onHandInventory), [onHandInventory])
   const groupsInCategory = useMemo(
     () =>
       selectedCategory
-        ? groupInventoryItems(inventory.filter((i) => (i.category?.trim() ? i.category : "General") === selectedCategory))
+        ? groupInventoryItems(
+            onHandInventory.filter((i) => (i.category?.trim() ? i.category : "General") === selectedCategory)
+          )
         : [],
-    [inventory, selectedCategory]
+    [onHandInventory, selectedCategory]
   )
 
   const addCategoryOptions = useMemo(
@@ -178,11 +182,6 @@ export function InventoryContent() {
     )
   }, [selectedGroup, selectedCategory])
 
-  const inStockCount = useMemo(
-    () => itemsInGroup.filter((i) => i.status === "In Stock").length,
-    [itemsInGroup]
-  )
-
   const filteredItems = useMemo(() => {
     return itemsInGroup.filter((item) => {
       const matchesSearch =
@@ -194,10 +193,10 @@ export function InventoryContent() {
 
   const itemTypes: ItemType[] = useMemo(() => {
     const activeTypes = productTypes.filter((pt) => pt.active).map((pt) => pt.name)
-    const fromInventory = inventory.map((i) => i.itemType).filter(Boolean)
+    const fromInventory = onHandInventory.map((i) => i.itemType).filter(Boolean)
     const combined = [...new Set(["General", ...activeTypes, ...fromInventory])]
     return combined.sort()
-  }, [inventory, productTypes])
+  }, [onHandInventory, productTypes])
 
   const showCategoriesView = categories.length > 0 && selectedCategory === null && selectedGroupName === null
   const showProductTypesView = (categories.length === 0 || selectedCategory !== null) && selectedGroupName === null
@@ -440,7 +439,7 @@ export function InventoryContent() {
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
           {categories.map((cat) => {
-            const count = inventory.filter((i) => (i.category?.trim() ? i.category : "General") === cat).length
+            const count = onHandInventory.filter((i) => (i.category?.trim() ? i.category : "General") === cat).length
             return (
               <Card
                 key={cat}
@@ -766,7 +765,7 @@ export function InventoryContent() {
               {selectedGroup?.name}
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
-              {selectedGroup?.itemType} · {inStockCount} in stock, {itemsInGroup.length} total
+              {selectedGroup?.itemType} · {itemsInGroup.length} in stock
             </p>
           </div>
           <div className="flex items-center gap-2">

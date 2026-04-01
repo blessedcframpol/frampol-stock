@@ -1,6 +1,7 @@
 import type { InventoryItem } from "./data"
 import type { Client } from "./data"
 import type { AppUser } from "./data"
+import { filterOnHandInventory } from "./inventory-visibility"
 
 function normalizeQuery(q: string): string {
   return q.trim().toLowerCase()
@@ -12,9 +13,10 @@ function matchQuery(text: string | undefined | null, q: string): boolean {
 }
 
 export function searchInventory(items: InventoryItem[], query: string): InventoryItem[] {
+  const onHand = filterOnHandInventory(items)
   const q = normalizeQuery(query)
-  if (!q) return items
-  return items.filter(
+  if (!q) return onHand
+  return onHand.filter(
     (item) =>
       matchQuery(item.serialNumber, q) ||
       matchQuery(item.name, q) ||

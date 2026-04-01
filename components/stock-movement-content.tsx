@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useRef } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -33,7 +33,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
-import { LOCATIONS } from "@/lib/data"
+import { LOCATIONS, INTERNAL_LOCATIONS } from "@/lib/data"
 import type { ItemType, TransactionType, ClientSite } from "@/lib/data"
 import { useClients, insertClient } from "@/lib/supabase/clients-db"
 import { useInventoryStore } from "@/lib/inventory-store"
@@ -60,8 +60,11 @@ import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import { toastFromCaughtError } from "@/lib/toast-reportable-error"
 import { getSupabaseClient } from "@/lib/supabase/client"
+import type { InboundCreateDefaults } from "@/lib/supabase/movement-utils"
+import { isFortigateProductName, splitDelimitedValues, cloudKeysMapForSerials } from "@/lib/fortigate"
 
 const OUTBOUND_LIKE_MOVEMENTS: TransactionType[] = ["Sale", "POC Out", "Transfer", "Dispose", "Rentals"]
+const NEW_CLIENT_SELECT = "__new__"
 const ITEM_TYPE_OPTIONS: { value: ItemType; label: string }[] = [
   { value: "Starlink Kit", label: "Starlink Kit" },
   { value: "Laptop", label: "Laptop" },
@@ -88,7 +91,7 @@ const transactionTypes = [
 ]
 
 export function StockMovementContent() {
-  const { inventory, applyMovement, addItem } = useInventoryStore()
+  const { inventory, applyMovement, addItem, productTypes, refetchLedger } = useInventoryStore()
   const { clients, refetch: refetchClients } = useClients()
   const [selectedType, setSelectedType] = useState<string>("Inbound")
   const [serialNumbers, setSerialNumbers] = useState("")
@@ -118,6 +121,15 @@ export function StockMovementContent() {
   const [sites, setSites] = useState<ClientSite[]>([{ address: "" }])
   const [addingToInventory, setAddingToInventory] = useState(false)
   const [deliveryNoteFile, setDeliveryNoteFile] = useState<File | null>(null)
+  const [inboundReceiveLocation, setInboundReceiveLocation] = useState<string>("Warehouse A")
+  const [inboundCategory, setInboundCategory] = useState<string>("General")
+  const outboundCloudKeysRef = useRef<Record<string, string> | undefined>(undefined)
+  const [cloudKeysInput, setCloudKeysInput] = useState("")
+  const [mainNewClientName, setMainNewClientName] = useState("")
+  const [mainNewClientCompany, setMainNewClientCompany] = useState("")
+  const [mainNewClientEmail, setMainNewClientEmail] = useState("")
+  const [mainNewClientPhone, setMainNewClientPhone] = useState("")
+  const [mainClientSites, setMainClientSites] = useState<ClientSite[]>([{ address: "" }])
 
   const serialsList = useMemo(
     () =>
@@ -130,7 +142,12 @@ export function StockMovementContent() {
   const uniqueSerials = useMemo(() => [...new Set(serialsList)], [serialsList])
   const inListDuplicateCount = serialsList.length - uniqueSerials.length
   const scannedCount = uniqueSerials.length
-  const clientDisplay = clientId ? clients.find((c) => c.id === clientId)?.company ?? clientId : "Not selected"
+  const clientDisplay =
+    !clientId || clientId === NEW_CLIENT_SELECT
+      ? clientId === NEW_CLIENT_SELECT
+        ? "New client (unsaved)"
+        : "Not selected"
+      : clients.find((c) => c.id === clientId)?.company ?? clientId
 
   const productNames = useMemo(() => {
     const names = new Set<string>()
@@ -147,6 +164,13 @@ export function StockMovementContent() {
   }, [productNames])
   const inventorySerialSet = useMemo(() => new Set(inventory.map((i) => i.serialNumber)), [inventory])
   const requiresOutboundDetails = OUTBOUND_LIKE_MOVEMENTS.includes(selectedType as TransactionType)
+
+  const inboundCategoryOptions = useMemo(() => {
+    const fromInv = inventory
+      .map((i) => (i.category?.trim() ? i.category.trim() : null))
+      .filter((c): c is string => Boolean(c))
+    return [...new Set(["General", ...fromInv])].sort()
+  }, [inventory])
 
   function handleSerialChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
     const v = e.target.value
@@ -167,8 +191,11 @@ export function StockMovementContent() {
   }
 
   function inferItemType(name: string): ItemType {
-    const match = inventory.find((i) => i.name === name)
-    return (match?.itemType ?? "Starlink Kit") as ItemType
+    const matchInv = inventory.find((i) => i.name === name)
+    if (matchInv?.itemType) return matchInv.itemType as ItemType
+    const opt = ITEM_TYPE_OPTIONS.find((o) => o.label === name)
+    if (opt) return opt.value
+    return "Starlink Kit"
   }
 
   async function handleAddMissingAndContinue() {
@@ -215,34 +242,14 @@ export function StockMovementContent() {
     setSites((prev) => prev.map((s, i) => (i === index ? { ...s, [field]: value } : s)))
   }
 
-  async function recordQuickScan(
-    serials: string[],
-    outboundDetails?: {
-      clientId?: string
-      clientName?: string
-      clientCompany?: string
-      clientEmail?: string
-      clientPhone?: string
-      sites?: ClientSite[]
-    }
-  ) {
-    const body: Record<string, unknown> =
-      serials.length === 1
-        ? { serialNumber: serials[0], scanType: productName.trim(), movementType: selectedType }
-        : { serialNumbers: serials, scanType: productName.trim(), movementType: selectedType }
-    if (outboundDetails) {
-      if (outboundDetails.clientId) body.clientId = outboundDetails.clientId
-      if (outboundDetails.clientName) body.clientName = outboundDetails.clientName
-      if (outboundDetails.clientCompany) body.clientCompany = outboundDetails.clientCompany
-      if (outboundDetails.clientEmail) body.clientEmail = outboundDetails.clientEmail
-      if (outboundDetails.clientPhone) body.clientPhone = outboundDetails.clientPhone
-      if (outboundDetails.sites?.length) body.sites = outboundDetails.sites.filter((s) => s.address.trim())
-    }
-    await fetch("/api/quick-scan", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    })
+  function addMainClientSite() {
+    setMainClientSites((prev) => [...prev, { address: "" }])
+  }
+  function removeMainClientSite(index: number) {
+    setMainClientSites((prev) => prev.filter((_, i) => i !== index))
+  }
+  function updateMainClientSite(index: number, field: "name" | "address", value: string) {
+    setMainClientSites((prev) => prev.map((s, i) => (i === index ? { ...s, [field]: value } : s)))
   }
 
   function doSubmit(
@@ -258,6 +265,8 @@ export function StockMovementContent() {
   ) {
     setLastDuplicateMessage(null)
     setIsSubmitting(true)
+    const cloudKeysBySerial = outboundCloudKeysRef.current
+    outboundCloudKeysRef.current = undefined
     const list = pendingOutbound ? pendingOutbound.serials : uniqueSerials
     const effectiveClientId = (outboundDetails?.clientId ?? clientId) || undefined
     const clientRow = effectiveClientId ? clients.find((c) => c.id === effectiveClientId) : undefined
@@ -267,6 +276,22 @@ export function StockMovementContent() {
         : effectiveClientId && outboundDetails?.clientName && outboundDetails?.clientCompany
           ? `${outboundDetails.clientName} - ${outboundDetails.clientCompany}`
           : undefined
+    const pn = productName.trim()
+    let inboundDefaults: InboundCreateDefaults | undefined
+    if (selectedType === "Inbound") {
+      const it = inferItemType(pn)
+      inboundDefaults = {
+        name: pn,
+        itemType: it,
+        category: inboundCategory.trim() || "General",
+        location: inboundReceiveLocation.trim() || "Warehouse A",
+        productTypeId:
+          productTypes.find((pt) => pt.name.toLowerCase() === it.toLowerCase())?.id ??
+          productTypes.find((pt) => pt.name === "General")?.id,
+      }
+    } else {
+      inboundDefaults = undefined
+    }
     const result = applyMovement({
       type: selectedType as "Inbound" | "Sale" | "POC Out" | "POC Return" | "Rental Return" | "Rentals" | "Transfer" | "Dispose",
       serialNumbers: list,
@@ -286,9 +311,12 @@ export function StockMovementContent() {
       disposalReason: selectedType === "Dispose" ? disposalReason.trim() || undefined : undefined,
       authorisedBy: selectedType === "Dispose" ? authorisedBy.trim() || undefined : undefined,
       deliveryNoteUrl: selectedType === "Inbound" ? deliveryNoteUrl : undefined,
+      inboundCreateDefaults: inboundDefaults,
+      cloudKeysBySerial,
     })
     if (result.success.length > 0) {
       toast.success(`Recorded ${result.success.length} item(s)`)
+      void refetchLedger()
       setSerialNumbers("")
       setProductName("")
       setInvoiceNumber("")
@@ -298,10 +326,10 @@ export function StockMovementContent() {
         setAuthorisedBy("")
       }
       if (selectedType === "Inbound") setDeliveryNoteFile(null)
+      if (OUTBOUND_LIKE_MOVEMENTS.includes(selectedType as TransactionType)) {
+        setCloudKeysInput("")
+      }
       setPendingOutbound(null)
-      recordQuickScan(result.success, outboundDetails).catch((e) =>
-        toastFromCaughtError(e, "Could not sync scans to history")
-      )
     }
     if (result.notFound.length > 0) {
       toast.warning(`Serial number(s) not found: ${result.notFound.join(", ")}`)
@@ -418,6 +446,72 @@ export function StockMovementContent() {
         return
       }
     }
+
+    let resolvedClientId = clientId
+
+    if (requiresOutboundDetails) {
+      if (clientId === NEW_CLIENT_SELECT) {
+        const name = mainNewClientName.trim()
+        const company = mainNewClientCompany.trim()
+        const email = mainNewClientEmail.trim()
+        const phone = mainNewClientPhone.trim()
+        if (!name || !company || !email || !phone) {
+          toast.error("New client: name, company, email, and phone are all required")
+          return
+        }
+        const validSitesForNew = mainClientSites
+          .filter((s) => s.address.trim())
+          .map((s) => ({
+            ...(s.name?.trim() ? { name: s.name.trim() } : {}),
+            address: s.address.trim(),
+          }))
+        if (validSitesForNew.length === 0) {
+          toast.error("Add at least one site address for the new client")
+          return
+        }
+        setIsSubmitting(true)
+        try {
+          const nc = await insertClient({
+            name,
+            company,
+            email,
+            phone,
+            sites: validSitesForNew,
+          })
+          await refetchClients()
+          resolvedClientId = nc.id
+          setClientId(nc.id)
+        } catch (e) {
+          toastFromCaughtError(e, "Failed to save client")
+          return
+        } finally {
+          setIsSubmitting(false)
+        }
+      } else if (
+        (selectedType === "Sale" || selectedType === "POC Out" || selectedType === "Rentals") &&
+        !clientId
+      ) {
+        toast.error("Select a client or choose Add new client")
+        return
+      }
+
+      if (isFortigateProductName(productName.trim())) {
+        const keys = splitDelimitedValues(cloudKeysInput)
+        const map = cloudKeysMapForSerials(uniqueSerials, keys)
+        if (!map) {
+          toast.error(
+            `Cloud keys (FortiGate): enter exactly ${uniqueSerials.length} non-empty key(s) in the same order as the serials (comma or newline separated).`
+          )
+          return
+        }
+        outboundCloudKeysRef.current = map
+      } else {
+        outboundCloudKeysRef.current = undefined
+      }
+    } else {
+      outboundCloudKeysRef.current = undefined
+    }
+
     if (!requiresOutboundDetails) {
       if (selectedType === "Inbound" && deliveryNoteFile) {
         setIsSubmitting(true)
@@ -451,7 +545,7 @@ export function StockMovementContent() {
       movementType: selectedType,
       serials: uniqueSerials,
     })
-    setOutboundClientId(clientId || "")
+    setOutboundClientId(resolvedClientId || "")
     setOutboundClientSearch("")
     setNewClientName("")
     setNewClientCompany("")
@@ -691,26 +785,179 @@ export function StockMovementContent() {
                   <p className="text-xs text-muted-foreground">PDF or image (JPEG, PNG, WebP). Attached to this inbound delivery.</p>
                 </div>
               )}
+              {selectedType === "Inbound" && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="flex flex-col gap-2">
+                    <Label className="text-foreground">Receive location</Label>
+                    <Select value={inboundReceiveLocation} onValueChange={setInboundReceiveLocation}>
+                      <SelectTrigger className="bg-card text-foreground border-border">
+                        <SelectValue placeholder="Location" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {INTERNAL_LOCATIONS.map((loc) => (
+                          <SelectItem key={loc} value={loc}>
+                            {loc}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <Label className="text-foreground">Category</Label>
+                    <Select value={inboundCategory} onValueChange={setInboundCategory}>
+                      <SelectTrigger className="bg-card text-foreground border-border">
+                        <SelectValue placeholder="Category" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {inboundCategoryOptions.map((cat) => (
+                          <SelectItem key={cat} value={cat}>
+                            {cat}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              )}
               {(selectedType === "Sale" || selectedType === "POC Out" || selectedType === "Rentals" || selectedType === "Transfer" || selectedType === "Dispose") && (
-                <div className="flex flex-col gap-2">
-                  <Label className="text-foreground">Client / Customer (assigned to)</Label>
-                  <Select value={clientId} onValueChange={setClientId}>
-                    <SelectTrigger className="bg-card text-foreground border-border">
-                      <SelectValue placeholder="Select existing client..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {clients.map((client) => (
-                        <SelectItem key={client.id} value={client.id}>
-                          {client.name} – {client.company}
+                <div className="flex flex-col gap-3">
+                  <div className="flex flex-col gap-2">
+                    <Label className="text-foreground">Client / Customer (assigned to)</Label>
+                    <Select
+                      value={clientId === NEW_CLIENT_SELECT ? NEW_CLIENT_SELECT : clientId || undefined}
+                      onValueChange={(v) => {
+                        setClientId(v)
+                        if (v !== NEW_CLIENT_SELECT) {
+                          setMainNewClientName("")
+                          setMainNewClientCompany("")
+                          setMainNewClientEmail("")
+                          setMainNewClientPhone("")
+                          setMainClientSites([{ address: "" }])
+                        }
+                      }}
+                    >
+                      <SelectTrigger className="bg-card text-foreground border-border">
+                        <SelectValue placeholder="Select existing client or add new…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={NEW_CLIENT_SELECT} className="text-primary">
+                          <span className="flex items-center gap-2">
+                            <Plus className="h-3.5 w-3.5" />
+                            Add new client…
+                          </span>
                         </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">
-                    {clients.length === 0
-                      ? "No clients yet. Add one from the Clients page or in the confirmation step."
-                      : "Choose an existing client or add details in the confirmation step."}
-                  </p>
+                        {clients.map((client) => (
+                          <SelectItem key={client.id} value={client.id}>
+                            {client.name} – {client.company}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      {clients.length === 0
+                        ? "No clients in the directory yet — use Add new client or add one from the Clients page."
+                        : "Pick a client here or add a new one before submitting. You can confirm sites in the next step."}
+                    </p>
+                  </div>
+                  {clientId === NEW_CLIENT_SELECT && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-lg border border-border bg-muted/30">
+                      <div className="sm:col-span-2">
+                        <Label className="text-xs">Contact name (required)</Label>
+                        <Input
+                          className="mt-1 bg-card"
+                          value={mainNewClientName}
+                          onChange={(e) => setMainNewClientName(e.target.value)}
+                          placeholder="Name"
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-xs">Company (required)</Label>
+                        <Input
+                          className="mt-1 bg-card"
+                          value={mainNewClientCompany}
+                          onChange={(e) => setMainNewClientCompany(e.target.value)}
+                          placeholder="Company"
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-xs">Email (required)</Label>
+                        <Input
+                          type="email"
+                          className="mt-1 bg-card"
+                          value={mainNewClientEmail}
+                          onChange={(e) => setMainNewClientEmail(e.target.value)}
+                          placeholder="email@example.com"
+                        />
+                      </div>
+                      <div className="sm:col-span-2">
+                        <Label className="text-xs">Phone (required)</Label>
+                        <Input
+                          className="mt-1 bg-card"
+                          value={mainNewClientPhone}
+                          onChange={(e) => setMainNewClientPhone(e.target.value)}
+                          placeholder="+…"
+                        />
+                      </div>
+                      <div className="sm:col-span-2 flex flex-col gap-2">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-xs flex items-center gap-1">
+                            <MapPin className="h-3.5 w-3.5" />
+                            Sites (at least one address required)
+                          </Label>
+                          <Button type="button" variant="ghost" size="sm" className="h-7 text-xs" onClick={addMainClientSite}>
+                            <Plus className="h-3 w-3 mr-1" />
+                            Add site
+                          </Button>
+                        </div>
+                        <div className="space-y-2">
+                          {mainClientSites.map((site, i) => (
+                            <div key={i} className="flex gap-2 items-start">
+                              <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                <Input
+                                  placeholder="Site name (optional)"
+                                  value={site.name ?? ""}
+                                  onChange={(e) => updateMainClientSite(i, "name", e.target.value)}
+                                  className="h-9 bg-card"
+                                />
+                                <Input
+                                  placeholder="Full address (required)"
+                                  value={site.address}
+                                  onChange={(e) => updateMainClientSite(i, "address", e.target.value)}
+                                  className="h-9 bg-card"
+                                />
+                              </div>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="h-9 w-9 shrink-0"
+                                onClick={() => removeMainClientSite(i)}
+                                disabled={mainClientSites.length <= 1}
+                                aria-label="Remove site"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {OUTBOUND_LIKE_MOVEMENTS.includes(selectedType as TransactionType) &&
+                    isFortigateProductName(productName.trim()) && (
+                      <div className="flex flex-col gap-2">
+                        <Label className="text-foreground">Cloud keys (required for FortiGate)</Label>
+                        <Textarea
+                          value={cloudKeysInput}
+                          onChange={(e) => setCloudKeysInput(e.target.value)}
+                          placeholder="One key per serial, same order as in Scan Items (comma or newline separated)…"
+                          className="min-h-[80px] font-mono text-sm bg-card text-foreground border-border"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          {uniqueSerials.length} unique serial(s) — provide exactly {uniqueSerials.length} non-empty cloud key(s).
+                        </p>
+                      </div>
+                    )}
                 </div>
               )}
               {selectedType === "POC Out" && (

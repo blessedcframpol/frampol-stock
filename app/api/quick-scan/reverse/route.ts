@@ -4,10 +4,10 @@ import { apiClientError, apiErrorResponse } from "@/lib/api-error-response"
 import { isInternalLocation } from "@/lib/data"
 import { reverseQuickScansByBatchId } from "@/lib/quick-scans-db"
 import {
-  fetchActiveQuickScanBatchRows,
+  fetchActiveMovementBatchRows,
   revertInventoryAndTransactionsForQuickScan,
 } from "@/lib/quick-scan-reversal-inventory"
-import { reverseQuickScanBatchInSupabase } from "@/lib/supabase/quick-scans-db"
+import { insertBatchReversal } from "@/lib/supabase/batch-reversals-db"
 import { createServerSupabaseClient } from "@/lib/supabase/server"
 
 const MIN_REASON_LENGTH = 15
@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const batchRows = await fetchActiveQuickScanBatchRows(supabase, batchId)
+    const batchRows = await fetchActiveMovementBatchRows(supabase, batchId)
 
     if (batchRows === null) {
       return apiErrorResponse(500, "Could not load scan batch", { logLabel: "Quick scan reverse fetch batch" })
@@ -75,13 +75,14 @@ export async function POST(request: NextRequest) {
         )
       }
 
-      const marked = await reverseQuickScanBatchInSupabase(batchId, reason, user.id, supabase)
-      if (marked === 0) {
-        return apiErrorResponse(500, "Stock was reverted but marking the scan batch reversed failed", {
+      const marked = await insertBatchReversal(supabase, batchId, reason, user.id)
+      if (!marked.ok) {
+        return apiErrorResponse(500, "Stock was reverted but recording batch reversal failed", {
+          cause: new Error(marked.message),
           logLabel: "Quick scan reverse after inventory",
         })
       }
-      return NextResponse.json({ ok: true, updated: marked, inventoryReverted: true })
+      return NextResponse.json({ ok: true, updated: 1, inventoryReverted: true })
     }
 
     const fileUpdated = reverseQuickScansByBatchId(batchId, reason, user.id)

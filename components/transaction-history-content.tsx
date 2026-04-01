@@ -32,76 +32,22 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { History, Undo2, Loader2, Search, Copy, ChevronsUpDown } from "lucide-react"
-import type { QuickScanRecord } from "@/lib/data"
 import { INTERNAL_LOCATIONS, type InternalLocation } from "@/lib/data"
+import type { TransactionBatchSummary } from "@/lib/transaction-batches"
 import { cn } from "@/lib/utils"
 import { formatDateDDMMYYYY } from "@/lib/utils"
 import { toast } from "sonner"
 import { toastFromApiErrorBody, toastFromCaughtError } from "@/lib/toast-reportable-error"
 import { useAuth } from "@/lib/auth-context"
 import { canReverseQuickScanBatches } from "@/lib/permissions"
+import { isQuickScanStockReversibleMovement } from "@/lib/quick-scan-reversal-inventory"
 
 const MIN_REASON_LENGTH = 15
 
-/** One row: a single quick-scan submission (bulk or one item). */
-type ScanBatchEntry = {
-  batchKey: string
-  scannedAt: string
-  movementType: string | undefined
-  scanType: string
-  count: number
-  clientDisplay: string
-  records: QuickScanRecord[]
-  isReversed: boolean
-  reversalReason?: string
-  reversedAt?: string
-}
-
-function groupScansByBatch(scans: QuickScanRecord[]): ScanBatchEntry[] {
-  const byBatch = new Map<string, QuickScanRecord[]>()
-  for (const r of scans) {
-    const key = r.batchId ?? r.id
-    const list = byBatch.get(key) ?? []
-    list.push(r)
-    byBatch.set(key, list)
-  }
-  return Array.from(byBatch.entries()).map(([batchKey, records]) => {
-    const first = records[0]!
-    const clientDisplay = first.clientName
-      ? first.clientCompany
-        ? `${first.clientName} · ${first.clientCompany}`
-        : first.clientName
-      : first.clientCompany ?? "—"
-    const isReversed = records.some((x) => x.reversedAt)
-    const rev = records.find((x) => x.reversalReason || x.reversedAt)
-    return {
-      batchKey,
-      scannedAt: first.scannedAt,
-      movementType: first.movementType,
-      scanType: first.scanType,
-      count: records.length,
-      clientDisplay,
-      records,
-      isReversed,
-      reversalReason: rev?.reversalReason,
-      reversedAt: rev?.reversedAt,
-    }
-  })
-}
-
-function sortBatches(entries: ScanBatchEntry[]): ScanBatchEntry[] {
-  return [...entries].sort((a, b) => {
-    const ar = a.isReversed ? 1 : 0
-    const br = b.isReversed ? 1 : 0
-    if (ar !== br) return ar - br
-    return new Date(b.scannedAt).getTime() - new Date(a.scannedAt).getTime()
-  })
-}
-
-function filterRecordsBySearch(records: QuickScanRecord[], search: string): QuickScanRecord[] {
+function filterSerialsBySearch(serials: string[], search: string): string[] {
   const q = search.trim().toLowerCase()
-  if (!q) return records
-  return records.filter((r) => r.serialNumber.toLowerCase().includes(q))
+  if (!q) return serials
+  return serials.filter((s) => s.toLowerCase().includes(q))
 }
 
 async function copySerialLinesToClipboard(serials: string[], toastLabel: string) {
@@ -121,85 +67,83 @@ async function copySerialLinesToClipboard(serials: string[], toastLabel: string)
 export function TransactionHistoryContent() {
   const { role } = useAuth()
   const canReverse = canReverseQuickScanBatches(role)
-  const [scans, setScans] = useState<QuickScanRecord[]>([])
+  const [batches, setBatches] = useState<TransactionBatchSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [reversingBatchKey, setReversingBatchKey] = useState<string | null>(null)
-  const [viewingBatch, setViewingBatch] = useState<ScanBatchEntry | null>(null)
+  const [viewingBatch, setViewingBatch] = useState<TransactionBatchSummary | null>(null)
   const [batchSearch, setBatchSearch] = useState("")
   const [pageSearch, setPageSearch] = useState("")
-  const [reverseTarget, setReverseTarget] = useState<ScanBatchEntry | null>(null)
+  const [reverseTarget, setReverseTarget] = useState<TransactionBatchSummary | null>(null)
   const [reverseReason, setReverseReason] = useState("")
   const [returnLocation, setReturnLocation] = useState<InternalLocation>(INTERNAL_LOCATIONS[0])
   const [locationOpen, setLocationOpen] = useState(false)
   const [locationSearch, setLocationSearch] = useState("")
 
-  const batches = useMemo(() => sortBatches(groupScansByBatch(scans)), [scans])
-
-  const displayedBatchRecords = useMemo(() => {
+  const displayedSerials = useMemo(() => {
     if (!viewingBatch) return []
-    return filterRecordsBySearch(viewingBatch.records, batchSearch)
+    return filterSerialsBySearch(viewingBatch.serials, batchSearch)
   }, [viewingBatch, batchSearch])
 
   const filteredBatches = useMemo(() => {
     if (!pageSearch.trim()) return batches
     const q = pageSearch.trim().toLowerCase()
-    return sortBatches(
-      batches.filter((entry) => {
-        const dateStr = formatDateDDMMYYYY(entry.scannedAt).toLowerCase()
-        const movement = (entry.movementType ?? "").toLowerCase()
-        const product = entry.scanType.toLowerCase()
-        const client = entry.clientDisplay.toLowerCase()
-        const reason = (entry.reversalReason ?? "").toLowerCase()
-        const serialMatch = entry.records.some((r) => r.serialNumber.toLowerCase().includes(q))
-        return (
-          dateStr.includes(q) ||
-          movement.includes(q) ||
-          product.includes(q) ||
-          client.includes(q) ||
-          reason.includes(q) ||
-          serialMatch
-        )
-      })
-    )
+    return [...batches].filter((entry) => {
+      const dateStr = formatDateDDMMYYYY(entry.date).toLowerCase()
+      const movement = (entry.movementType ?? "").toLowerCase()
+      const product = entry.productLabel.toLowerCase()
+      const client = entry.clientDisplay.toLowerCase()
+      const reason = (entry.reversalReason ?? "").toLowerCase()
+      const serialMatch = entry.serials.some((s) => s.toLowerCase().includes(q))
+      const inv = (entry.invoiceNumber ?? "").toLowerCase()
+      return (
+        dateStr.includes(q) ||
+        movement.includes(q) ||
+        product.includes(q) ||
+        client.includes(q) ||
+        reason.includes(q) ||
+        serialMatch ||
+        inv.includes(q)
+      )
+    })
   }, [batches, pageSearch])
 
-  const fetchScans = useCallback(async () => {
+  const fetchBatches = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await fetch("/api/quick-scan")
+      const res = await fetch("/api/transaction-batches")
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
         toastFromApiErrorBody(data, "Failed to load transaction history")
-        setScans([])
+        setBatches([])
         return
       }
-      setScans(Array.isArray(data) ? data : [])
+      setBatches(Array.isArray(data) ? data : [])
     } catch (e) {
       toastFromCaughtError(e, "Failed to load transaction history")
-      setScans([])
+      setBatches([])
     } finally {
       setLoading(false)
     }
   }, [])
 
   useEffect(() => {
-    fetchScans()
-  }, [fetchScans])
+    fetchBatches()
+  }, [fetchBatches])
 
   async function submitReverse() {
-    if (!reverseTarget) return
+    if (!reverseTarget?.reverseBatchId) return
     const reason = reverseReason.trim()
     if (reason.length < MIN_REASON_LENGTH) {
       toast.error(`Please enter a reason (at least ${MIN_REASON_LENGTH} characters).`)
       return
     }
-    setReversingBatchKey(reverseTarget.batchKey)
+    setReversingBatchKey(reverseTarget.reverseBatchId)
     try {
       const res = await fetch("/api/quick-scan/reverse", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          batchId: reverseTarget.batchKey,
+          batchId: reverseTarget.reverseBatchId,
           reason,
           returnLocation,
         }),
@@ -211,8 +155,8 @@ export function TransactionHistoryContent() {
       }
       toast.success(
         reverseTarget.count === 1
-          ? `Reversed scan: ${reverseTarget.records[0]!.serialNumber} (${reverseTarget.scanType})`
-          : `Reversed ${reverseTarget.count} items (${reverseTarget.scanType})`,
+          ? `Reversed scan: ${reverseTarget.serials[0]!} (${reverseTarget.productLabel})`
+          : `Reversed ${reverseTarget.count} items (${reverseTarget.productLabel})`,
         typeof data.message === "string" && data.message.trim()
           ? { description: data.message.trim() }
           : undefined
@@ -222,7 +166,7 @@ export function TransactionHistoryContent() {
       setReturnLocation(INTERNAL_LOCATIONS[0])
       setLocationSearch("")
       setLocationOpen(false)
-      await fetchScans()
+      await fetchBatches()
     } catch (e) {
       toastFromCaughtError(e, "Failed to reverse batch")
     } finally {
@@ -230,7 +174,7 @@ export function TransactionHistoryContent() {
     }
   }
 
-  function openReverse(entry: ScanBatchEntry) {
+  function openReverse(entry: TransactionBatchSummary) {
     setReverseTarget(entry)
     setReverseReason("")
     setReturnLocation(INTERNAL_LOCATIONS[0])
@@ -245,8 +189,7 @@ export function TransactionHistoryContent() {
           Transaction history
         </h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Quick Scan submissions (one row per batch). Admins can reverse a batch with a reason and return location; inventory and movement rows are updated where supported (Sale, POC Out, Rentals, Dispose, Transfer).
-          Full stock movements also appear under <span className="text-foreground font-medium">Recent transactions</span> on the dashboard.
+          One row per stock movement batch (same data as <span className="text-foreground font-medium">Recent transactions</span> on the dashboard). Admins can reverse supported quick-scan batches with a reason and return location (Sale, POC Out, Rentals, Dispose, Transfer).
         </p>
       </div>
 
@@ -261,7 +204,7 @@ export function TransactionHistoryContent() {
               <History className="w-12 h-12 text-muted-foreground/50 mb-3" />
               <p className="text-sm font-medium text-foreground">No transaction history</p>
               <p className="text-sm text-muted-foreground mt-1">
-                Quick scans will appear here as one entry per submission (single or bulk).
+                Movements from Quick Scan and Stock movement appear here as one row per batch.
               </p>
             </div>
           ) : (
@@ -312,10 +255,10 @@ export function TransactionHistoryContent() {
                           }}
                         >
                           <TableCell className="text-sm text-foreground whitespace-nowrap">
-                            {formatDateDDMMYYYY(entry.scannedAt)}
+                            {formatDateDDMMYYYY(entry.date)}
                             <span className="text-muted-foreground text-xs ml-1">
-                              {entry.scannedAt.includes("T")
-                                ? new Date(entry.scannedAt).toLocaleTimeString(undefined, {
+                              {entry.date.includes("T")
+                                ? new Date(entry.date).toLocaleTimeString(undefined, {
                                     hour: "2-digit",
                                     minute: "2-digit",
                                   })
@@ -332,7 +275,7 @@ export function TransactionHistoryContent() {
                               )}
                             </div>
                           </TableCell>
-                          <TableCell className="text-sm text-foreground">{entry.scanType}</TableCell>
+                          <TableCell className="text-sm text-foreground">{entry.productLabel}</TableCell>
                           <TableCell className="text-sm text-muted-foreground max-w-[180px] truncate" title={entry.clientDisplay}>
                             {entry.clientDisplay}
                           </TableCell>
@@ -341,7 +284,10 @@ export function TransactionHistoryContent() {
                           </TableCell>
                           <TableCell onClick={(e) => e.stopPropagation()}>
                             <div className="flex items-center gap-1">
-                              {canReverse && !entry.isReversed && (
+                              {canReverse &&
+                              !entry.isReversed &&
+                              entry.reverseBatchId &&
+                              isQuickScanStockReversibleMovement(entry.movementType) ? (
                                 <Button
                                   variant="ghost"
                                   size="sm"
@@ -352,11 +298,7 @@ export function TransactionHistoryContent() {
                                   <Undo2 className="w-4 h-4 shrink-0" />
                                   <span className="hidden sm:inline">Reverse</span>
                                 </Button>
-                              )}
-                              {entry.isReversed && (
-                                <span className="text-xs text-muted-foreground px-2">—</span>
-                              )}
-                              {!canReverse && !entry.isReversed && (
+                              ) : (
                                 <span className="text-xs text-muted-foreground px-2">—</span>
                               )}
                             </div>
@@ -385,7 +327,7 @@ export function TransactionHistoryContent() {
           <DialogHeader>
             <DialogTitle>
               {viewingBatch
-                ? `${viewingBatch.scanType} — ${viewingBatch.count} item${viewingBatch.count === 1 ? "" : "s"}`
+                ? `${viewingBatch.productLabel} — ${viewingBatch.count} item${viewingBatch.count === 1 ? "" : "s"}`
                 : "Batch items"}
             </DialogTitle>
           </DialogHeader>
@@ -424,22 +366,22 @@ export function TransactionHistoryContent() {
                   className="h-8"
                   onClick={() =>
                     void copySerialLinesToClipboard(
-                      displayedBatchRecords.map((r) => r.serialNumber),
+                      displayedSerials,
                       batchSearch.trim()
-                        ? `Copied ${displayedBatchRecords.length} serial number${displayedBatchRecords.length !== 1 ? "s" : ""} (filtered)`
-                        : `Copied ${displayedBatchRecords.length} serial number${displayedBatchRecords.length !== 1 ? "s" : ""}`
+                        ? `Copied ${displayedSerials.length} serial number${displayedSerials.length !== 1 ? "s" : ""} (filtered)`
+                        : `Copied ${displayedSerials.length} serial number${displayedSerials.length !== 1 ? "s" : ""}`
                     )
                   }
                 >
                   <Copy className="w-3.5 h-3.5 mr-1.5" />
                   {batchSearch.trim()
-                    ? `Copy filtered (${displayedBatchRecords.length})`
-                    : `Copy all (${displayedBatchRecords.length})`}
+                    ? `Copy filtered (${displayedSerials.length})`
+                    : `Copy all (${displayedSerials.length})`}
                 </Button>
               </div>
               <div className="flex flex-col gap-1 min-h-0 overflow-hidden">
                 <BatchItemsList
-                  records={viewingBatch.records}
+                  serials={viewingBatch.serials}
                   search={batchSearch.trim()}
                   dimmed={viewingBatch.isReversed}
                 />
@@ -559,15 +501,15 @@ export function TransactionHistoryContent() {
 }
 
 function BatchItemsList({
-  records,
+  serials,
   search,
   dimmed,
 }: {
-  records: QuickScanRecord[]
+  serials: string[]
   search: string
   dimmed?: boolean
 }) {
-  const filtered = useMemo(() => filterRecordsBySearch(records, search), [records, search])
+  const filtered = useMemo(() => filterSerialsBySearch(serials, search), [serials, search])
 
   return (
     <div className="border border-border rounded-md overflow-hidden flex-1 min-h-0 flex flex-col">
@@ -578,19 +520,19 @@ function BatchItemsList({
           </p>
         ) : (
           <ul className="space-y-0.5">
-            {filtered.map((r) => (
+            {filtered.map((serial, idx) => (
               <li
-                key={r.id}
+                key={`${serial}-${idx}`}
                 className={`group flex items-center gap-1 font-mono text-sm py-1 px-1 rounded hover:bg-muted/50 ${dimmed ? "line-through text-muted-foreground" : ""}`}
               >
-                <span className="flex-1 min-w-0 pl-1 py-0.5 select-text break-all">{r.serialNumber}</span>
+                <span className="flex-1 min-w-0 pl-1 py-0.5 select-text break-all">{serial}</span>
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon"
                   className="h-7 w-7 shrink-0 opacity-60 group-hover:opacity-100"
                   title="Copy serial"
-                  onClick={() => void copySerialLinesToClipboard([r.serialNumber], "Copied serial")}
+                  onClick={() => void copySerialLinesToClipboard([serial], "Copied serial")}
                 >
                   <Copy className="w-3.5 h-3.5" />
                   <span className="sr-only">Copy serial</span>
@@ -602,7 +544,7 @@ function BatchItemsList({
       </div>
       {search && (
         <p className="text-xs text-muted-foreground px-2 py-1.5 border-t border-border">
-          Showing {filtered.length} of {records.length}
+          Showing {filtered.length} of {serials.length}
         </p>
       )}
     </div>

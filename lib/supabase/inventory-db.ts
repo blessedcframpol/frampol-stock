@@ -30,6 +30,7 @@ export function rowToInventoryItem(row: InventoryRow): InventoryItem {
     returnDate: row.return_date ?? undefined,
     assignmentHistory: assignmentHistory ?? undefined,
     reservedForRequestLineId: row.reserved_for_request_line_id ?? undefined,
+    cloudKey: row.cloud_key ?? undefined,
   }
 }
 
@@ -58,6 +59,7 @@ export function inventoryItemToRow(item: InventoryItem): Database["public"]["Tab
     return_date: item.returnDate ?? null,
     assignment_history: history ?? null,
     reserved_for_request_line_id: item.reservedForRequestLineId ?? null,
+    cloud_key: item.cloudKey ?? null,
   }
 }
 

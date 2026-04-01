@@ -63,6 +63,8 @@ export interface InventoryItem {
   dateAdded: string
   location: string
   client?: string
+  /** FortiGate / vendor cloud key; set on outbound scan, optional on inbound */
+  cloudKey?: string
   notes?: string
   /** Person, client, or project this item is assigned to */
   assignedTo?: string

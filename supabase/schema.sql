@@ -69,74 +69,15 @@ CREATE TABLE IF NOT EXISTS public.transactions (
 
 COMMENT ON TABLE public.transactions IS 'History of stock movements (in/out, POC, transfer, dispose).';
 
--- Quick scan log (scan-in events)
-CREATE TABLE IF NOT EXISTS public.quick_scans (
-  id TEXT PRIMARY KEY,
-  serial_number TEXT NOT NULL,
-  scan_type TEXT NOT NULL,
-  scanned_at TEXT NOT NULL,
-  movement_type TEXT,
-  batch_id TEXT,
-  client_id TEXT,
-  client_name TEXT,
-  client_company TEXT,
-  client_email TEXT,
-  client_phone TEXT,
-  sites JSONB
+-- Admin reversal audit for movement batches (replaces legacy quick_scans reversal columns)
+CREATE TABLE IF NOT EXISTS public.batch_reversals (
+  batch_id TEXT PRIMARY KEY,
+  reversed_at TIMESTAMPTZ NOT NULL,
+  reversal_reason TEXT,
+  reversed_by TEXT
 );
 
-COMMENT ON TABLE public.quick_scans IS 'Log of quick-scan (receive) events.';
-
--- Add movement_type if table already existed without it
-DO $$ BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.columns
-    WHERE table_schema = 'public' AND table_name = 'quick_scans' AND column_name = 'movement_type'
-  ) THEN
-    ALTER TABLE public.quick_scans ADD COLUMN movement_type TEXT;
-  END IF;
-END $$;
-
--- Add batch_id if table already existed without it (groups bulk/single scan into one history entry)
-DO $$ BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.columns
-    WHERE table_schema = 'public' AND table_name = 'quick_scans' AND column_name = 'batch_id'
-  ) THEN
-    ALTER TABLE public.quick_scans ADD COLUMN batch_id TEXT;
-  END IF;
-END $$;
-
--- Add client/sites columns for sale/outbound-type quick scans
-DO $$ BEGIN
-  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'quick_scans' AND column_name = 'client_id') THEN
-    ALTER TABLE public.quick_scans ADD COLUMN client_id TEXT;
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'quick_scans' AND column_name = 'client_name') THEN
-    ALTER TABLE public.quick_scans ADD COLUMN client_name TEXT;
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'quick_scans' AND column_name = 'client_company') THEN
-    ALTER TABLE public.quick_scans ADD COLUMN client_company TEXT;
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'quick_scans' AND column_name = 'client_email') THEN
-    ALTER TABLE public.quick_scans ADD COLUMN client_email TEXT;
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'quick_scans' AND column_name = 'client_phone') THEN
-    ALTER TABLE public.quick_scans ADD COLUMN client_phone TEXT;
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'quick_scans' AND column_name = 'sites') THEN
-    ALTER TABLE public.quick_scans ADD COLUMN sites JSONB;
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'quick_scans' AND column_name = 'reversed_at') THEN
-    ALTER TABLE public.quick_scans ADD COLUMN reversed_at TIMESTAMPTZ;
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'quick_scans' AND column_name = 'reversal_reason') THEN
-    ALTER TABLE public.quick_scans ADD COLUMN reversal_reason TEXT;
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'quick_scans' AND column_name = 'reversed_by') THEN
-    ALTER TABLE public.quick_scans ADD COLUMN reversed_by UUID REFERENCES auth.users (id);
-  END IF;
-END $$;
+COMMENT ON TABLE public.batch_reversals IS 'Admin reversal audit for a transaction batch_id.';
 
 -- Clients (for dropdowns and future CRM-style use)
 CREATE TABLE IF NOT EXISTS public.clients (
@@ -171,9 +112,6 @@ CREATE INDEX IF NOT EXISTS idx_transactions_serial
 CREATE INDEX IF NOT EXISTS idx_transactions_type
   ON public.transactions(type);
 
-CREATE INDEX IF NOT EXISTS idx_quick_scans_scanned_at
-  ON public.quick_scans(scanned_at DESC);
-
 CREATE INDEX IF NOT EXISTS idx_clients_company
   ON public.clients(company);
 
@@ -182,7 +120,7 @@ CREATE INDEX IF NOT EXISTS idx_clients_company
 -- =============================================================================
 ALTER TABLE public.inventory_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.transactions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.quick_scans ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.batch_reversals ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.clients ENABLE ROW LEVEL SECURITY;
 
 -- Allow anon key full access (no auth yet). Replace with auth policies later.
@@ -197,9 +135,9 @@ CREATE POLICY "Allow anon all on transactions"
   ON public.transactions FOR ALL TO anon
   USING (true) WITH CHECK (true);
 
-DROP POLICY IF EXISTS "Allow anon all on quick_scans" ON public.quick_scans;
-CREATE POLICY "Allow anon all on quick_scans"
-  ON public.quick_scans FOR ALL TO anon
+DROP POLICY IF EXISTS "Allow anon all on batch_reversals" ON public.batch_reversals;
+CREATE POLICY "Allow anon all on batch_reversals"
+  ON public.batch_reversals FOR ALL TO anon
   USING (true) WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Allow anon all on clients" ON public.clients;

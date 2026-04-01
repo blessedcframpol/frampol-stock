@@ -16,6 +16,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Input } from "@/components/ui/input"
 import { useInventoryStore } from "@/lib/inventory-store"
 import type { InventoryItem, ItemStatus, TransactionType } from "@/lib/data"
+import { isDispatchedStatus } from "@/lib/inventory-visibility"
 import { formatDateDDMMYYYY } from "@/lib/utils"
 import { ArrowUpRight, Search } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -48,9 +49,7 @@ function buildDispatchedList(
   inventory: InventoryItem[],
   transactions: { type: string; serialNumber: string; date: string }[]
 ): DispatchedRow[] {
-  const movedOut = inventory.filter(
-    (i) => i.status === "Sold" || i.status === "POC" || i.status === "Rented" || i.status === "Disposed" || i.status === "Maintenance"
-  )
+  const movedOut = inventory.filter((i) => isDispatchedStatus(i.status))
   const outboundBySerial = new Map<string, { type: TransactionType; date: string }>()
   const sortedTxns = [...transactions].filter((t) =>
     OUTBOUND_TYPES.includes(t.type as TransactionType)
