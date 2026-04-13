@@ -15,5 +15,5 @@ export function isDispatchedStatus(status: ItemStatus): boolean {
 
 /** Items that belong on main Inventory browse and in global inventory search. */
 export function filterOnHandInventory(items: InventoryItem[]): InventoryItem[] {
-  return items.filter((i) => i.status === "In Stock")
+  return items.filter((i) => i.status === "In Stock" && !i.deletedAt)
 }

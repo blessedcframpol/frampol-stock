@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import { Package, ShoppingCart, Radio, AlertTriangle } from "lucide-react"
 import { StatCard } from "@/components/stat-card"
-import { StockByCategoryChart, CategoryDistributionChart, MonthlySalesChart } from "@/components/dashboard-charts"
+import { StockByVendorChart, VendorDistributionChart, MonthlySalesChart } from "@/components/dashboard-charts"
 import { LatestRequests } from "@/components/latest-requests"
 import { QuickScan } from "@/components/quick-scan"
 import { TransactionsTable } from "@/components/transactions-table"
@@ -71,13 +71,13 @@ export function DashboardContent() {
         />
       </div>
 
-      {/* Quick Scan + Stock by Category (same row, same height) */}
+      {/* Quick Scan + Stock by vendor (same row, same height) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 md:gap-4 items-stretch">
         <div className="min-h-[300px] sm:min-h-[340px]">
           <QuickScan />
         </div>
         <div className="lg:col-span-2 min-h-[300px] sm:min-h-[340px]">
-          <StockByCategoryChart />
+          <StockByVendorChart />
         </div>
       </div>
 
@@ -91,10 +91,10 @@ export function DashboardContent() {
         </div>
       </div>
 
-      {/* Category Distribution + Monthly Revenue (same row, same height) */}
+      {/* Vendor distribution + Monthly Revenue (same row, same height) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 md:gap-4 items-stretch">
         <div className="min-h-[300px] sm:min-h-[340px]">
-          <CategoryDistributionChart />
+          <VendorDistributionChart />
         </div>
         <div className="lg:col-span-2 min-h-[300px] sm:min-h-[340px]">
           <MonthlySalesChart />

@@ -1,13 +1,20 @@
 "use client"
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react"
-import type { InventoryItem, ProductType, Transaction, TransactionType } from "./data"
+import type { InventoryItem, DeviceType, Transaction, TransactionType } from "./data"
 import { inventoryItems as initialInventory, recentTransactions as initialTransactions, clients } from "./data"
 import { getReorderLevelForProduct, getReorderLevelOverrides } from "./settings"
 import { getSupabaseClient } from "./supabase/client"
 import { rowToInventoryItem, inventoryItemToRow, rowToTransaction, transactionToRow } from "./supabase/inventory-db"
-import { computeMovementResult, type InboundCreateDefaults } from "./supabase/movement-utils"
+import {
+  computeMovementResult,
+  type InboundCreateDefaults,
+  type MovementRejection,
+} from "./supabase/movement-utils"
+import { useAuth } from "./auth-context"
 import { toast } from "sonner"
+
+const DEFAULT_DEVICE_TYPES: DeviceType[] = [{ id: "ptype-general", name: "General", active: true }]
 
 function deepClone<T>(arr: T[]): T[] {
   return JSON.parse(JSON.stringify(arr))
@@ -16,6 +23,9 @@ function deepClone<T>(arr: T[]): T[] {
 function generateId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 }
+
+/** Days before trashed inventory rows are eligible for permanent purge. */
+export const INVENTORY_TRASH_RETENTION_DAYS = 30
 
 function getClientDisplay(clientId: string): string {
   if (!clientId || clientId === "internal") return "Internal"
@@ -58,12 +68,18 @@ export interface MovementParams {
   inboundCreateDefaults?: InboundCreateDefaults
   /** FortiGate outbound: map trimmed serial → cloud key */
   cloudKeysBySerial?: Record<string, string>
+  /** TEMPORARY (admin UI, Sale only): optional ledger date; omit for “now” */
+  saleTransactionDateIso?: string
+  /** Optional: reject existing rows whose name/vendor/device type do not match (see movement-utils). */
+  expectedProductName?: string
+  expectedVendor?: string
+  expectedDeviceType?: string
 }
 
 const APPROACHING_DAYS = 7
 
 export interface AlertsResult {
-  lowStock: { groupName: string; itemType: string; inStock: number; threshold: number }[]
+  lowStock: { groupName: string; deviceType: string; inStock: number; threshold: number }[]
   warrantyExpiring: InventoryItem[]
   /** POC items past expected return date */
   pocOverdue: InventoryItem[]
@@ -106,7 +122,7 @@ function getAlertsFromInventory(
     if (inStock <= threshold) {
       lowStock.push({
         groupName: name,
-        itemType: items[0]?.itemType ?? name,
+        deviceType: items[0]?.deviceType ?? name,
         inStock,
         threshold,
       })
@@ -221,27 +237,39 @@ function getRevertUpdatesForTransaction(txn: Transaction): Partial<InventoryItem
 interface InventoryStoreValue {
   inventory: InventoryItem[]
   transactions: Transaction[]
-  productTypes: ProductType[]
-  applyMovement: (params: MovementParams) => { success: string[]; notFound: string[]; movementBatchId?: string }
+  deviceTypes: DeviceType[]
+  applyMovement: (params: MovementParams) => {
+    success: string[]
+    notFound: string[]
+    rejected: MovementRejection[]
+    movementBatchId?: string
+  }
   refetchLedger: () => Promise<void>
   updateItem: (id: string, updates: Partial<InventoryItem>) => void
+  softDeleteItem: (id: string) => Promise<{ ok: boolean; error?: string }>
+  restoreItem: (id: string) => Promise<{ ok: boolean; error?: string }>
+  permanentlyDeleteItem: (id: string) => Promise<{ ok: boolean; error?: string }>
+  purgeTrashExpired: () => Promise<{ ok: boolean; error?: string; removed?: number }>
+  trashedInventory: InventoryItem[]
+  refetchTrashed: () => Promise<void>
   addItem: (item: Omit<InventoryItem, "id">) => InventoryItem
-  addProductType: (name: string) => Promise<{ ok: boolean; error?: string }>
-  archiveProductType: (id: string) => Promise<{ ok: boolean; error?: string }>
+  addDeviceType: (name: string) => Promise<{ ok: boolean; error?: string }>
+  archiveDeviceType: (id: string) => Promise<{ ok: boolean; error?: string }>
   reassignInventoryGroup: (params: {
     sourceGroupName: string
     targetGroupName?: string
-    targetProductTypeId?: string
-    targetCategory?: string
+    targetDeviceTypeId?: string
+    targetVendor?: string
   }) => Promise<{ ok: boolean; updated: number; error?: string }>
   undoTransaction: (txnId: string) => Promise<{ ok: boolean; error?: string }>
-  reassignTransaction: (txnId: string, newItemName: string, newItemType?: InventoryItem["itemType"]) => Promise<{ ok: boolean; error?: string }>
+  reassignTransaction: (txnId: string, newItemName: string, newDeviceType?: InventoryItem["deviceType"]) => Promise<{ ok: boolean; error?: string }>
   getAlerts: () => AlertsResult
 }
 
 const InventoryStoreContext = createContext<InventoryStoreValue | null>(null)
 
 export function InventoryStoreProvider({ children }: { children: React.ReactNode }) {
+  const { user, loading: authLoading } = useAuth()
   const supabase = useMemo(() => getSupabaseIfConfigured(), [])
   const [inventory, setInventory] = useState<InventoryItem[]>(() =>
     supabase ? [] : deepClone(initialInventory)
@@ -249,9 +277,10 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
   const [transactions, setTransactions] = useState<Transaction[]>(() =>
     supabase ? [] : deepClone(initialTransactions)
   )
-  const [productTypes, setProductTypes] = useState<ProductType[]>(() => {
+  const [trashedInventory, setTrashedInventory] = useState<InventoryItem[]>([])
+  const [deviceTypes, setDeviceTypes] = useState<DeviceType[]>(() => {
     if (supabase) return []
-    const names = [...new Set(initialInventory.map((i) => i.itemType).filter(Boolean))].sort()
+    const names = [...new Set(initialInventory.map((i) => i.deviceType).filter(Boolean))].sort()
     return [
       { id: "ptype-general", name: "General", active: true },
       ...names
@@ -260,70 +289,80 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
     ]
   })
 
-  const refetchLedger = useCallback(async () => {
-    if (!supabase) return
-    const { data: invRows } = await supabase.from("inventory_items").select("*").order("date_added", { ascending: true })
-    const { data: txnRows } = await supabase.from("transactions").select("*").order("date", { ascending: false })
-    const { data: typeRows } = await supabase
-      .from("product_types")
-      .select("id, name, active")
-      .order("name", { ascending: true })
-    if (invRows?.length) {
-      setInventory(invRows.map(rowToInventoryItem))
-    }
-    if (txnRows?.length) {
-      setTransactions(txnRows.map(rowToTransaction))
-    }
-    if (typeRows?.length) {
-      setProductTypes(typeRows.map((r) => ({ id: r.id, name: r.name, active: r.active })))
-    } else if (invRows) {
-      const names = [...new Set(invRows.map((r) => r.item_type).filter(Boolean))].sort()
-      setProductTypes([
-        { id: "ptype-general", name: "General", active: true },
-        ...names
-          .filter((n) => n.toLowerCase() !== "general")
-          .map((n) => ({ id: `legacy-${n.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`, name: n, active: true })),
-      ])
-    }
-  }, [supabase])
+  const refetchLedger = useCallback(
+    async (opts?: { isStale?: () => boolean }) => {
+      const stale = () => opts?.isStale?.() ?? false
+      if (!supabase) return
+      const { data: invRows, error: invError } = await supabase
+        .from("inventory_items")
+        .select("*")
+        .is("deleted_at", null)
+        .order("date_added", { ascending: true })
+      if (invError) {
+        console.error("refetchLedger inventory_items:", invError)
+        return
+      }
+      if (stale()) return
+      setInventory((invRows ?? []).map(rowToInventoryItem))
 
-  useEffect(() => {
-    if (!supabase) return
-    let cancelled = false
-    async function load() {
-      const { data: invRows } = await supabase.from("inventory_items").select("*").order("date_added", { ascending: true })
-      const { data: txnRows } = await supabase.from("transactions").select("*").order("date", { ascending: false })
-      const { data: typeRows } = await supabase
-        .from("product_types")
+      const { data: txnRows, error: txnError } = await supabase.from("transactions").select("*").order("date", { ascending: false })
+      if (txnError) {
+        console.error("refetchLedger transactions:", txnError)
+      } else if (!stale()) {
+        setTransactions((txnRows ?? []).map(rowToTransaction))
+      }
+
+      const { data: typeRows, error: typeError } = await supabase
+        .from("device_types")
         .select("id, name, active")
         .order("name", { ascending: true })
-      if (cancelled) return
-      if (invRows?.length) {
-        setInventory(invRows.map(rowToInventoryItem))
+      if (stale()) return
+      if (typeError) {
+        console.error("refetchLedger device_types:", typeError)
+        setDeviceTypes(DEFAULT_DEVICE_TYPES)
+        return
       }
-      if (txnRows?.length) {
-        setTransactions(txnRows.map(rowToTransaction))
+      if (typeRows && typeRows.length > 0) {
+        setDeviceTypes(typeRows.map((r) => ({ id: r.id, name: r.name, active: r.active })))
+        return
       }
-      if (typeRows?.length) {
-        setProductTypes(typeRows.map((r) => ({ id: r.id, name: r.name, active: r.active })))
-      } else if (invRows) {
-        const names = [...new Set(invRows.map((r) => r.item_type).filter(Boolean))].sort()
-        setProductTypes([
-          { id: "ptype-general", name: "General", active: true },
+      const inv = invRows ?? []
+      const names = [...new Set(inv.map((r) => r.device_type).filter(Boolean))].sort()
+      if (names.length > 0) {
+        setDeviceTypes([
+          ...DEFAULT_DEVICE_TYPES,
           ...names
             .filter((n) => n.toLowerCase() !== "general")
             .map((n) => ({ id: `legacy-${n.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`, name: n, active: true })),
         ])
+      } else {
+        setDeviceTypes(DEFAULT_DEVICE_TYPES)
       }
+    },
+    [supabase]
+  )
+
+  useEffect(() => {
+    if (!supabase) return
+    if (authLoading) return
+    if (!user) {
+      setInventory([])
+      setTransactions([])
+      setTrashedInventory([])
+      setDeviceTypes([])
+      return
     }
-    void load()
+    let cancelled = false
+    void refetchLedger({ isStale: () => cancelled })
     return () => {
       cancelled = true
     }
-  }, [supabase])
+  }, [supabase, authLoading, user?.id, refetchLedger])
 
   const applyMovement = useCallback(
-    (params: MovementParams): { success: string[]; notFound: string[]; movementBatchId?: string } => {
+    (
+      params: MovementParams
+    ): { success: string[]; notFound: string[]; rejected: MovementRejection[]; movementBatchId?: string } => {
       const {
         type,
         serialNumbers,
@@ -341,23 +380,14 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
         deliveryNoteUrl,
         inboundCreateDefaults,
         cloudKeysBySerial,
+        saleTransactionDateIso,
+        expectedProductName,
+        expectedVendor,
+        expectedDeviceType,
       } = params
       const clientDisplay =
         clientDisplayOverride ?? (clientId ? getClientDisplay(clientId) : "Internal")
       const newBatchId = batchId ?? `BATCH-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
-
-      if (type === "Inbound" && inboundCreateDefaults) {
-        const conflicts = serialNumbers
-          .map((s) => s.trim())
-          .filter(Boolean)
-          .filter((s) => inventory.some((i) => i.serialNumber === s && i.status === "In Stock"))
-        if (conflicts.length > 0) {
-          const preview = conflicts.slice(0, 5).join(", ")
-          const more = conflicts.length > 5 ? ` (+${conflicts.length - 5} more)` : ""
-          toast.error(`Already in stock — cannot receive again: ${preview}${more}`)
-          return { success: [], notFound: [], movementBatchId: undefined }
-        }
-      }
 
       const result = computeMovementResult(inventory, {
         type,
@@ -376,9 +406,27 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
         deliveryNoteUrl,
         inboundCreateDefaults,
         cloudKeysBySerial,
+        saleTransactionDateIso,
+        expectedProductName,
+        expectedVendor,
+        expectedDeviceType,
       })
+
+      if (result.rejected.length > 0) {
+        const preview = result.rejected.slice(0, 3)
+        const more =
+          result.rejected.length > 3 ? ` (+${result.rejected.length - 3} more)` : ""
+        const detail = preview.map((r) => `${r.serial}: ${r.reason}`).join("; ")
+        toast.warning(`Some serials were skipped${more}`, { description: detail, duration: 12_000 })
+      }
+
       if (result.success.length === 0) {
-        return { success: [], notFound: result.notFound, movementBatchId: undefined }
+        return {
+          success: [],
+          notFound: result.notFound,
+          rejected: result.rejected,
+          movementBatchId: undefined,
+        }
       }
 
       const runPersist = async () => {
@@ -448,7 +496,12 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
       })
       setTransactions((prev) => [...result.newTransactions, ...prev])
 
-      return { success: result.success, notFound: result.notFound, movementBatchId: newBatchId }
+      return {
+        success: result.success,
+        notFound: result.notFound,
+        rejected: result.rejected,
+        movementBatchId: newBatchId,
+      }
     },
     [inventory, supabase]
   )
@@ -473,17 +526,93 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
     [supabase]
   )
 
+  const refetchTrashed = useCallback(async () => {
+    if (!supabase) {
+      setTrashedInventory([])
+      return
+    }
+    const { data, error } = await supabase
+      .from("inventory_items")
+      .select("*")
+      .not("deleted_at", "is", null)
+      .order("deleted_at", { ascending: false })
+    if (error) {
+      console.error("refetchTrashed:", error)
+      return
+    }
+    setTrashedInventory((data ?? []).map(rowToInventoryItem))
+  }, [supabase])
+
+  const softDeleteItem = useCallback(
+    async (id: string): Promise<{ ok: boolean; error?: string }> => {
+      const ts = new Date().toISOString()
+      if (supabase) {
+        const { error } = await supabase.from("inventory_items").update({ deleted_at: ts }).eq("id", id).is("deleted_at", null)
+        if (error) return { ok: false, error: error.message || "Failed to move item to trash" }
+      }
+      setInventory((prev) => prev.filter((i) => i.id !== id))
+      return { ok: true }
+    },
+    [supabase]
+  )
+
+  const restoreItem = useCallback(
+    async (id: string): Promise<{ ok: boolean; error?: string }> => {
+      if (supabase) {
+        const { error } = await supabase.from("inventory_items").update({ deleted_at: null }).eq("id", id)
+        if (error) return { ok: false, error: error.message || "Failed to restore item" }
+      }
+      setTrashedInventory((prev) => prev.filter((i) => i.id !== id))
+      await refetchLedger()
+      return { ok: true }
+    },
+    [supabase, refetchLedger]
+  )
+
+  const permanentlyDeleteItem = useCallback(
+    async (id: string): Promise<{ ok: boolean; error?: string }> => {
+      if (supabase) {
+        const { error } = await supabase.from("inventory_items").delete().eq("id", id)
+        if (error) return { ok: false, error: error.message || "Failed to delete item" }
+      }
+      setTrashedInventory((prev) => prev.filter((i) => i.id !== id))
+      setInventory((prev) => prev.filter((i) => i.id !== id))
+      return { ok: true }
+    },
+    [supabase]
+  )
+
+  const purgeTrashExpired = useCallback(async (): Promise<{ ok: boolean; error?: string; removed?: number }> => {
+    const cutoff = new Date(Date.now() - INVENTORY_TRASH_RETENTION_DAYS * 86400000).toISOString()
+    if (!supabase) {
+      setTrashedInventory((prev) => prev.filter((i) => !i.deletedAt || i.deletedAt >= cutoff))
+      return { ok: true, removed: 0 }
+    }
+    const { data: stale, error: selErr } = await supabase
+      .from("inventory_items")
+      .select("id")
+      .not("deleted_at", "is", null)
+      .lt("deleted_at", cutoff)
+    if (selErr) return { ok: false, error: selErr.message }
+    const ids = (stale ?? []).map((r) => r.id)
+    if (ids.length === 0) return { ok: true, removed: 0 }
+    const { error } = await supabase.from("inventory_items").delete().in("id", ids)
+    if (error) return { ok: false, error: error.message }
+    await refetchTrashed()
+    return { ok: true, removed: ids.length }
+  }, [supabase, refetchTrashed])
+
   const addItem = useCallback(
     (item: Omit<InventoryItem, "id">): InventoryItem => {
       const fallbackTypeId =
-        item.productTypeId ??
-        productTypes.find((pt) => pt.name.toLowerCase() === item.itemType.toLowerCase())?.id ??
-        productTypes.find((pt) => pt.name === "General")?.id ??
+        item.deviceTypeId ??
+        deviceTypes.find((pt) => pt.name.toLowerCase() === item.deviceType.toLowerCase())?.id ??
+        deviceTypes.find((pt) => pt.name === "General")?.id ??
         "ptype-general"
       const newItem: InventoryItem = {
         ...item,
-        category: item.category?.trim() ? item.category : "General",
-        productTypeId: fallbackTypeId,
+        vendor: item.vendor?.trim() ? item.vendor : "General",
+        deviceTypeId: fallbackTypeId,
         id: generateId("INV"),
       }
       setInventory((prev) => [...prev, newItem])
@@ -497,38 +626,38 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
       }
       return newItem
     },
-    [supabase, productTypes]
+    [supabase, deviceTypes]
   )
 
-  const addProductType = useCallback(
+  const addDeviceType = useCallback(
     async (name: string): Promise<{ ok: boolean; error?: string }> => {
       const trimmed = name.trim()
       if (!trimmed) return { ok: false, error: "Type name is required" }
-      if (productTypes.some((pt) => pt.name.toLowerCase() === trimmed.toLowerCase() && pt.active)) {
+      if (deviceTypes.some((pt) => pt.name.toLowerCase() === trimmed.toLowerCase() && pt.active)) {
         return { ok: false, error: "Type already exists" }
       }
       const id = `ptype-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-      const next: ProductType = { id, name: trimmed, active: true }
-      setProductTypes((prev) => [...prev, next].sort((a, b) => a.name.localeCompare(b.name)))
+      const next: DeviceType = { id, name: trimmed, active: true }
+      setDeviceTypes((prev) => [...prev, next].sort((a, b) => a.name.localeCompare(b.name)))
       if (supabase) {
-        const { error } = await supabase.from("product_types").insert({ id, name: trimmed, active: true })
-        if (error) return { ok: false, error: error.message || "Failed to add product type" }
+        const { error } = await supabase.from("device_types").insert({ id, name: trimmed, active: true })
+        if (error) return { ok: false, error: error.message || "Failed to add device type" }
       }
       return { ok: true }
     },
-    [productTypes, supabase]
+    [deviceTypes, supabase]
   )
 
-  const archiveProductType = useCallback(
+  const archiveDeviceType = useCallback(
     async (id: string): Promise<{ ok: boolean; error?: string }> => {
-      const hasInventory = inventory.some((item) => item.productTypeId === id)
+      const hasInventory = inventory.some((item) => item.deviceTypeId === id)
       if (hasInventory) {
         return { ok: false, error: "Cannot archive a type that is still used by inventory items" }
       }
-      setProductTypes((prev) => prev.map((pt) => (pt.id === id ? { ...pt, active: false } : pt)))
+      setDeviceTypes((prev) => prev.map((pt) => (pt.id === id ? { ...pt, active: false } : pt)))
       if (supabase) {
-        const { error } = await supabase.from("product_types").update({ active: false }).eq("id", id)
-        if (error) return { ok: false, error: error.message || "Failed to archive product type" }
+        const { error } = await supabase.from("device_types").update({ active: false }).eq("id", id)
+        if (error) return { ok: false, error: error.message || "Failed to archive device type" }
       }
       return { ok: true }
     },
@@ -539,27 +668,27 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
     async (params: {
       sourceGroupName: string
       targetGroupName?: string
-      targetProductTypeId?: string
-      targetCategory?: string
+      targetDeviceTypeId?: string
+      targetVendor?: string
     }): Promise<{ ok: boolean; updated: number; error?: string }> => {
       const source = params.sourceGroupName.trim()
       if (!source) return { ok: false, updated: 0, error: "Source group is required" }
       const targetName = params.targetGroupName?.trim() || source
       const targetTypeId =
-        params.targetProductTypeId ??
-        productTypes.find((pt) => pt.name.toLowerCase() === "general")?.id ??
+        params.targetDeviceTypeId ??
+        deviceTypes.find((pt) => pt.name.toLowerCase() === "general")?.id ??
         "ptype-general"
-      const targetTypeName = productTypes.find((pt) => pt.id === targetTypeId)?.name ?? "General"
-      const targetCategory = params.targetCategory?.trim() || "General"
+      const targetTypeName = deviceTypes.find((pt) => pt.id === targetTypeId)?.name ?? "General"
+      const targetVendor = params.targetVendor?.trim() || "General"
       const affected = inventory.filter((item) => item.name === source)
       if (affected.length === 0) return { ok: true, updated: 0 }
 
       const updatedItems = affected.map((item) => ({
         ...item,
         name: targetName,
-        itemType: targetTypeName,
-        productTypeId: targetTypeId,
-        category: targetCategory,
+        deviceType: targetTypeName,
+        deviceTypeId: targetTypeId,
+        vendor: targetVendor,
       }))
       const updatedMap = new Map(updatedItems.map((i) => [i.id, i]))
       setInventory((prev) => prev.map((item) => updatedMap.get(item.id) ?? item))
@@ -574,7 +703,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
       }
       return { ok: true, updated: updatedItems.length }
     },
-    [inventory, productTypes, supabase]
+    [inventory, deviceTypes, supabase]
   )
 
   const getAlerts = useCallback(
@@ -622,7 +751,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
     async (
       txnId: string,
       newItemName: string,
-      newItemType?: InventoryItem["itemType"]
+      newDeviceType?: InventoryItem["deviceType"]
     ): Promise<{ ok: boolean; error?: string }> => {
       const txn = transactions.find((t) => t.id === txnId)
       if (!txn) return { ok: false, error: "Transaction not found" }
@@ -645,7 +774,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
       }
       if (item) {
         const itemUpdates: Partial<InventoryItem> = { name }
-        if (newItemType) itemUpdates.itemType = newItemType
+        if (newDeviceType) itemUpdates.deviceType = newDeviceType
         setInventory((prev) =>
           prev.map((i) => (i.id === item.id ? { ...i, ...itemUpdates } : i))
         )
@@ -670,12 +799,18 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
     () => ({
       inventory,
       transactions,
-      productTypes,
+      deviceTypes,
       applyMovement,
       updateItem,
+      softDeleteItem,
+      restoreItem,
+      permanentlyDeleteItem,
+      purgeTrashExpired,
+      trashedInventory,
+      refetchTrashed,
       addItem,
-      addProductType,
-      archiveProductType,
+      addDeviceType,
+      archiveDeviceType,
       reassignInventoryGroup,
       undoTransaction,
       reassignTransaction,
@@ -685,12 +820,18 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
     [
       inventory,
       transactions,
-      productTypes,
+      deviceTypes,
       applyMovement,
       updateItem,
+      softDeleteItem,
+      restoreItem,
+      permanentlyDeleteItem,
+      purgeTrashExpired,
+      trashedInventory,
+      refetchTrashed,
       addItem,
-      addProductType,
-      archiveProductType,
+      addDeviceType,
+      archiveDeviceType,
       reassignInventoryGroup,
       undoTransaction,
       reassignTransaction,

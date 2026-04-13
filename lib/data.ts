@@ -1,4 +1,5 @@
-export type ItemType = string
+/** Label for hardware kind (e.g. Starlink Kit, Router); matches device_types.name / inventory device_type. */
+export type DeviceTypeName = string
 export type ItemStatus = "In Stock" | "Sold" | "POC" | "Rented" | "Maintenance" | "Disposed"
 export type TransactionType = "Inbound" | "Sale" | "POC Out" | "POC Return" | "Rental Return" | "Transfer" | "Dispose" | "Rentals"
 
@@ -22,7 +23,7 @@ export interface ClientSite {
 export interface QuickScanRecord {
   id: string
   serialNumber: string
-  /** Product name or item type (e.g. "Cisco Catalyst 9200L-24P" or "Starlink Kit") */
+  /** Product name or device type (e.g. "Cisco Catalyst 9200L-24P" or "Starlink Kit") */
   scanType: string
   scannedAt: string
   /** Stock movement type (e.g. Inbound, Transfer) when the scan was recorded */
@@ -48,17 +49,14 @@ export interface AssignmentEntry {
   notes?: string
 }
 
-/** Category/family for drill-down (e.g. Starlink, Fortinet) */
-export type InventoryCategory = "Starlink" | "Fortinet"
-
 export interface InventoryItem {
   id: string
   serialNumber: string
-  itemType: ItemType
-  productTypeId?: string
+  deviceType: DeviceTypeName
+  deviceTypeId?: string
   name: string
-  /** Family/category for hierarchy (e.g. Starlink, Fortinet). Optional for backward compat. */
-  category?: InventoryCategory | string
+  /** Vendor or product line for grouping (e.g. Starlink, Fortinet); empty → General in app. */
+  vendor?: string
   status: ItemStatus
   dateAdded: string
   location: string
@@ -79,9 +77,11 @@ export interface InventoryItem {
   assignmentHistory?: AssignmentEntry[]
   /** Set when allocated to a stock request line (Supabase). */
   reservedForRequestLineId?: string
+  /** When set (ISO), item is in trash; omitted from normal inventory lists. */
+  deletedAt?: string
 }
 
-export interface ProductType {
+export interface DeviceType {
   id: string
   name: string
   active: boolean
@@ -161,21 +161,21 @@ export interface StockTakeRecord {
 }
 
 export const inventoryItems: InventoryItem[] = [
-  { id: "INV001", serialNumber: "SL-2024-00142", itemType: "Starlink Kit", name: "Starlink Standard Kit v3", status: "In Stock", dateAdded: "2024-11-15", location: "Warehouse A", purchaseDate: "2024-11-01", warrantyEndDate: "2027-11-01" },
-  { id: "INV002", serialNumber: "SL-2024-00143", itemType: "Starlink Kit", name: "Starlink Business Kit", status: "POC", dateAdded: "2024-11-10", location: "Client Site", client: "Kigali Mining Co.", assignedTo: "Kigali Mining Co.", purchaseDate: "2024-10-15", warrantyEndDate: "2027-10-15", pocOutDate: "2024-11-10" },
-  { id: "INV003", serialNumber: "DL-XPS-99821", itemType: "Laptop", name: "Dell XPS 15 9530", status: "Sold", dateAdded: "2024-10-22", location: "Delivered", client: "BK TechHub", assignedTo: "BK TechHub", purchaseDate: "2024-09-01", warrantyEndDate: "2025-09-01" },
-  { id: "INV004", serialNumber: "HP-ELT-44521", itemType: "Laptop", name: "HP EliteBook 840 G10", status: "In Stock", dateAdded: "2024-11-18", location: "Warehouse B", purchaseDate: "2024-11-01", warrantyEndDate: "2027-11-01" },
-  { id: "INV005", serialNumber: "LNV-THK-78432", itemType: "Laptop", name: "Lenovo ThinkPad X1 Carbon", status: "Maintenance", dateAdded: "2024-09-05", location: "Service Center", purchaseDate: "2024-06-01", warrantyEndDate: "2025-06-01" },
-  { id: "INV006", serialNumber: "CSC-MRK-10234", itemType: "Router", name: "Cisco Meraki MX68", status: "In Stock", dateAdded: "2024-11-20", location: "Warehouse A", purchaseDate: "2024-11-10", warrantyEndDate: "2026-11-10" },
-  { id: "INV007", serialNumber: "CSC-SW-29183", itemType: "Switch", name: "Cisco Catalyst 9200L-24P", status: "Sold", dateAdded: "2024-10-01", location: "Delivered", client: "RDB", assignedTo: "RDB", purchaseDate: "2024-09-15", warrantyEndDate: "2027-09-15" },
-  { id: "INV008", serialNumber: "UBQ-AP-55123", itemType: "Access Point", name: "Ubiquiti UniFi U6 Pro", status: "In Stock", dateAdded: "2024-11-12", location: "Warehouse A", purchaseDate: "2024-10-20", warrantyEndDate: "2025-10-20" },
-  { id: "INV009", serialNumber: "APC-UPS-88234", itemType: "UPS", name: "APC Smart-UPS 1500VA", status: "In Stock", dateAdded: "2024-11-08", location: "Warehouse B", purchaseDate: "2024-10-01", warrantyEndDate: "2025-04-01" },
-  { id: "INV010", serialNumber: "SL-2024-00144", itemType: "Starlink Kit", name: "Starlink Standard Kit v3", status: "In Stock", dateAdded: "2024-11-22", location: "Warehouse A", purchaseDate: "2024-11-15", warrantyEndDate: "2027-11-15" },
-  { id: "INV011", serialNumber: "DL-OPT-33214", itemType: "Desktop", name: "Dell OptiPlex 7010 SFF", status: "Sold", dateAdded: "2024-10-15", location: "Delivered", client: "MTN Rwanda", assignedTo: "MTN Rwanda", purchaseDate: "2024-09-20", warrantyEndDate: "2027-09-20" },
-  { id: "INV012", serialNumber: "LG-MON-77432", itemType: "Monitor", name: 'LG UltraWide 34"', status: "In Stock", dateAdded: "2024-11-19", location: "Warehouse A", purchaseDate: "2024-11-01", warrantyEndDate: "2026-11-01" },
-  { id: "INV013", serialNumber: "CSC-MRK-10235", itemType: "Router", name: "Cisco Meraki MX68", status: "POC", dateAdded: "2024-10-28", location: "Client Site", client: "I&M Bank", assignedTo: "I&M Bank", purchaseDate: "2024-10-01", warrantyEndDate: "2026-10-01", pocOutDate: "2024-10-28" },
-  { id: "INV014", serialNumber: "SL-2024-00145", itemType: "Starlink Kit", name: "Starlink High Performance", status: "In Stock", dateAdded: "2024-11-25", location: "Warehouse A", purchaseDate: "2024-11-20", warrantyEndDate: "2027-11-20" },
-  { id: "INV015", serialNumber: "HP-PRO-22134", itemType: "Desktop", name: "HP ProDesk 400 G9", status: "In Stock", dateAdded: "2024-11-21", location: "Warehouse B", purchaseDate: "2024-11-10", warrantyEndDate: "2027-11-10" },
+  { id: "INV001", serialNumber: "SL-2024-00142", deviceType: "Starlink Kit", name: "Starlink Standard Kit v3", status: "In Stock", dateAdded: "2024-11-15", location: "Warehouse A", purchaseDate: "2024-11-01", warrantyEndDate: "2027-11-01" },
+  { id: "INV002", serialNumber: "SL-2024-00143", deviceType: "Starlink Kit", name: "Starlink Business Kit", status: "POC", dateAdded: "2024-11-10", location: "Client Site", client: "Kigali Mining Co.", assignedTo: "Kigali Mining Co.", purchaseDate: "2024-10-15", warrantyEndDate: "2027-10-15", pocOutDate: "2024-11-10" },
+  { id: "INV003", serialNumber: "DL-XPS-99821", deviceType: "Laptop", name: "Dell XPS 15 9530", status: "Sold", dateAdded: "2024-10-22", location: "Delivered", client: "BK TechHub", assignedTo: "BK TechHub", purchaseDate: "2024-09-01", warrantyEndDate: "2025-09-01" },
+  { id: "INV004", serialNumber: "HP-ELT-44521", deviceType: "Laptop", name: "HP EliteBook 840 G10", status: "In Stock", dateAdded: "2024-11-18", location: "Warehouse B", purchaseDate: "2024-11-01", warrantyEndDate: "2027-11-01" },
+  { id: "INV005", serialNumber: "LNV-THK-78432", deviceType: "Laptop", name: "Lenovo ThinkPad X1 Carbon", status: "Maintenance", dateAdded: "2024-09-05", location: "Service Center", purchaseDate: "2024-06-01", warrantyEndDate: "2025-06-01" },
+  { id: "INV006", serialNumber: "CSC-MRK-10234", deviceType: "Router", name: "Cisco Meraki MX68", status: "In Stock", dateAdded: "2024-11-20", location: "Warehouse A", purchaseDate: "2024-11-10", warrantyEndDate: "2026-11-10" },
+  { id: "INV007", serialNumber: "CSC-SW-29183", deviceType: "Switch", name: "Cisco Catalyst 9200L-24P", status: "Sold", dateAdded: "2024-10-01", location: "Delivered", client: "RDB", assignedTo: "RDB", purchaseDate: "2024-09-15", warrantyEndDate: "2027-09-15" },
+  { id: "INV008", serialNumber: "UBQ-AP-55123", deviceType: "Access Point", name: "Ubiquiti UniFi U6 Pro", status: "In Stock", dateAdded: "2024-11-12", location: "Warehouse A", purchaseDate: "2024-10-20", warrantyEndDate: "2025-10-20" },
+  { id: "INV009", serialNumber: "APC-UPS-88234", deviceType: "UPS", name: "APC Smart-UPS 1500VA", status: "In Stock", dateAdded: "2024-11-08", location: "Warehouse B", purchaseDate: "2024-10-01", warrantyEndDate: "2025-04-01" },
+  { id: "INV010", serialNumber: "SL-2024-00144", deviceType: "Starlink Kit", name: "Starlink Standard Kit v3", status: "In Stock", dateAdded: "2024-11-22", location: "Warehouse A", purchaseDate: "2024-11-15", warrantyEndDate: "2027-11-15" },
+  { id: "INV011", serialNumber: "DL-OPT-33214", deviceType: "Desktop", name: "Dell OptiPlex 7010 SFF", status: "Sold", dateAdded: "2024-10-15", location: "Delivered", client: "MTN Rwanda", assignedTo: "MTN Rwanda", purchaseDate: "2024-09-20", warrantyEndDate: "2027-09-20" },
+  { id: "INV012", serialNumber: "LG-MON-77432", deviceType: "Monitor", name: 'LG UltraWide 34"', status: "In Stock", dateAdded: "2024-11-19", location: "Warehouse A", purchaseDate: "2024-11-01", warrantyEndDate: "2026-11-01" },
+  { id: "INV013", serialNumber: "CSC-MRK-10235", deviceType: "Router", name: "Cisco Meraki MX68", status: "POC", dateAdded: "2024-10-28", location: "Client Site", client: "I&M Bank", assignedTo: "I&M Bank", purchaseDate: "2024-10-01", warrantyEndDate: "2026-10-01", pocOutDate: "2024-10-28" },
+  { id: "INV014", serialNumber: "SL-2024-00145", deviceType: "Starlink Kit", name: "Starlink High Performance", status: "In Stock", dateAdded: "2024-11-25", location: "Warehouse A", purchaseDate: "2024-11-20", warrantyEndDate: "2027-11-20" },
+  { id: "INV015", serialNumber: "HP-PRO-22134", deviceType: "Desktop", name: "HP ProDesk 400 G9", status: "In Stock", dateAdded: "2024-11-21", location: "Warehouse B", purchaseDate: "2024-11-10", warrantyEndDate: "2027-11-10" },
 ]
 
 export const recentTransactions: Transaction[] = [
@@ -198,15 +198,15 @@ export const clients: Client[] = [
   { id: "CLT006", name: "Alice Ingabire", company: "Bank of Kigali", email: "a.ingabire@bk.rw", phone: "+250 788 678 901", totalOrders: 21, totalSpent: 38900, lastOrder: "2024-11-19" },
 ]
 
-export const stockByCategory = [
-  { category: "Starlink", inStock: 3, sold: 0, poc: 1, maintenance: 0 },
-  { category: "Laptops", inStock: 1, sold: 1, poc: 0, maintenance: 1 },
-  { category: "Desktops", inStock: 1, sold: 1, poc: 0, maintenance: 0 },
-  { category: "Routers", inStock: 1, sold: 0, poc: 1, maintenance: 0 },
-  { category: "Switches", inStock: 0, sold: 1, poc: 0, maintenance: 0 },
-  { category: "Access Points", inStock: 1, sold: 0, poc: 0, maintenance: 0 },
-  { category: "UPS", inStock: 1, sold: 0, poc: 0, maintenance: 0 },
-  { category: "Monitors", inStock: 1, sold: 0, poc: 0, maintenance: 0 },
+export const stockByVendor = [
+  { vendor: "Starlink", inStock: 3, sold: 0, poc: 1, maintenance: 0 },
+  { vendor: "Laptops", inStock: 1, sold: 1, poc: 0, maintenance: 1 },
+  { vendor: "Desktops", inStock: 1, sold: 1, poc: 0, maintenance: 0 },
+  { vendor: "Routers", inStock: 1, sold: 0, poc: 1, maintenance: 0 },
+  { vendor: "Switches", inStock: 0, sold: 1, poc: 0, maintenance: 0 },
+  { vendor: "Access Points", inStock: 1, sold: 0, poc: 0, maintenance: 0 },
+  { vendor: "UPS", inStock: 1, sold: 0, poc: 0, maintenance: 0 },
+  { vendor: "Monitors", inStock: 1, sold: 0, poc: 0, maintenance: 0 },
 ]
 
 export const monthlySales = [

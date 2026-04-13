@@ -46,7 +46,7 @@ type InvRow = Record<string, unknown>
 const DEFAULT_LOC = "Warehouse A"
 const PTYPE_GENERAL = "ptype-general"
 
-function itemTypeLabel(scanType: string): string {
+function deviceTypeLabel(scanType: string): string {
   const t = scanType.trim()
   if (!t) return "General"
   return t.length > 120 ? t.slice(0, 120) : t
@@ -112,7 +112,7 @@ async function main() {
     const dateOnly = dateIso.slice(0, 10)
     const batchId = row.batch_id?.trim() || row.id
     const scanName = row.scan_type.trim() || "Unknown"
-    const itemType = itemTypeLabel(row.scan_type)
+    const deviceType = deviceTypeLabel(row.scan_type)
 
     let inv = bySerial.get(serial)
     const client = clientLabel(row)
@@ -125,9 +125,9 @@ async function main() {
           id,
           serial_number: serial,
           name: scanName,
-          item_type: itemType,
-          product_type_id: PTYPE_GENERAL,
-          category: "General",
+          device_type: deviceType,
+          device_type_id: PTYPE_GENERAL,
+          vendor: "General",
           status: patch.status ?? "In Stock",
           date_added: (patch.date_added as string) ?? dateOnly,
           location: patch.location ?? DEFAULT_LOC,
@@ -152,10 +152,10 @@ async function main() {
           .from("inventory_items")
           .update({
             serial_number: next.serial_number,
-            item_type: next.item_type,
-            product_type_id: next.product_type_id ?? PTYPE_GENERAL,
+            device_type: next.device_type,
+            device_type_id: next.device_type_id ?? PTYPE_GENERAL,
             name: next.name,
-            category: next.category,
+            vendor: next.vendor,
             status: next.status,
             date_added: next.date_added,
             location: next.location,
@@ -187,7 +187,7 @@ async function main() {
           client: null,
           assigned_to: null,
           name: scanName,
-          item_type: itemType,
+          device_type: deviceType,
           date_added: inv?.date_added ?? dateOnly,
           poc_out_date: null,
         })
@@ -218,7 +218,7 @@ async function main() {
           client,
           assigned_to: assign,
           name: scanName,
-          item_type: itemType,
+          device_type: deviceType,
           date_added: inv?.date_added ?? dateOnly,
         })
         txn = {
@@ -249,7 +249,7 @@ async function main() {
           assigned_to: assign,
           poc_out_date: dateOnly,
           name: scanName,
-          item_type: itemType,
+          device_type: deviceType,
           date_added: inv?.date_added ?? dateOnly,
         })
         txn = {
@@ -281,7 +281,7 @@ async function main() {
           poc_out_date: null,
           return_date: null,
           name: scanName,
-          item_type: itemType,
+          device_type: deviceType,
         })
         txn = {
           id: txnId,
@@ -312,7 +312,7 @@ async function main() {
           poc_out_date: null,
           return_date: null,
           name: scanName,
-          item_type: itemType,
+          device_type: deviceType,
         })
         txn = {
           id: txnId,
@@ -343,7 +343,7 @@ async function main() {
           poc_out_date: dateOnly,
           return_date: defaultRentalReturnDate(dateIso),
           name: scanName,
-          item_type: itemType,
+          device_type: deviceType,
           date_added: inv?.date_added ?? dateOnly,
         })
         txn = {
@@ -370,7 +370,7 @@ async function main() {
         await persistInv({
           location: DEFAULT_LOC,
           name: scanName,
-          item_type: itemType,
+          device_type: deviceType,
         })
         txn = {
           id: txnId,
@@ -398,7 +398,7 @@ async function main() {
           client: null,
           assigned_to: null,
           name: scanName,
-          item_type: itemType,
+          device_type: deviceType,
         })
         txn = {
           id: txnId,
@@ -428,7 +428,7 @@ async function main() {
           client: null,
           assigned_to: null,
           name: scanName,
-          item_type: itemType,
+          device_type: deviceType,
           date_added: inv?.date_added ?? dateOnly,
           poc_out_date: null,
         })

@@ -49,7 +49,7 @@ import { useIsMobile } from "@/hooks/use-mobile"
 import { useState, useMemo, useEffect } from "react"
 import { appUsers } from "@/lib/data"
 import { useAuth } from "@/lib/auth-context"
-import { canAccessReports, canAccessRequests } from "@/lib/permissions"
+import { canAccessReports, canAccessRequests, canEditInventory, type AppRole } from "@/lib/permissions"
 import { useInboxNotifications } from "@/hooks/use-inbox-notifications"
 import { useClients } from "@/lib/supabase/clients-db"
 import { runSearch } from "@/lib/search"
@@ -59,13 +59,15 @@ const inventoryChildren = [
   { href: "/inventory/dispatched", label: "Dispatched" },
   { href: "/inventory/movement", label: "Inventory movement" },
   { href: "/inventory/stock-take", label: "Stock take" },
+  { href: "/inventory/trash", label: "Trash", adminOnly: true as const },
 ]
 
+type NavChild = { href: string; label: string; adminOnly?: boolean }
 type NavItem = {
   href: string
   label: string
   icon: React.ComponentType<{ className?: string }>
-  children?: { href: string; label: string }[]
+  children?: NavChild[]
   badge?: number
 }
 
@@ -85,11 +87,22 @@ const bottomNavItems = [
 ]
 
 function filterNavByRole(items: NavItem[], role: string | null | undefined): NavItem[] {
-  return items.filter((item) => {
-    if (item.href === "/reports") return canAccessReports(role as import("@/lib/permissions").AppRole)
-    if (item.href === "/requests") return canAccessRequests(role as import("@/lib/permissions").AppRole)
-    return true
-  })
+  const r = role as AppRole | null | undefined
+  return items
+    .filter((item) => {
+      if (item.href === "/reports") return canAccessReports(r)
+      if (item.href === "/requests") return canAccessRequests(r)
+      return true
+    })
+    .map((item) => {
+      if (item.href === "/inventory" && item.children?.length) {
+        return {
+          ...item,
+          children: item.children.filter((c) => !c.adminOnly || canEditInventory(r)),
+        }
+      }
+      return item
+    })
 }
 
 function SidebarNav({

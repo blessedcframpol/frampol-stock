@@ -1,4 +1,4 @@
-import type { InventoryItem, ItemType, Transaction, TransactionType } from "@/lib/data"
+import type { InventoryItem, DeviceTypeName, ItemStatus, Transaction, TransactionType } from "@/lib/data"
 
 /**
  * Given current inventory and movement params, compute the updated items and new transactions.
@@ -6,6 +6,18 @@ import type { InventoryItem, ItemType, Transaction, TransactionType } from "@/li
  */
 /** Default rental period (days from out date) when returnDate not provided */
 const DEFAULT_RENTAL_DAYS = 30
+
+/** YYYY-MM-DD or parseable ISO → transaction `date` string; missing/invalid → fallback */
+function resolveSaleTransactionDate(input: string | undefined, fallbackIso: string): string {
+  const raw = input?.trim()
+  if (!raw) return fallbackIso
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    const d = new Date(`${raw}T00:00:00.000Z`)
+    return Number.isNaN(d.getTime()) ? fallbackIso : d.toISOString()
+  }
+  const d = new Date(raw)
+  return Number.isNaN(d.getTime()) ? fallbackIso : d.toISOString()
+}
 
 /** Outbound types where FortiGate cloud keys are applied to inventory rows */
 const OUTBOUND_CLOUD_KEY_TYPES: ReadonlySet<TransactionType> = new Set([
@@ -18,10 +30,101 @@ const OUTBOUND_CLOUD_KEY_TYPES: ReadonlySet<TransactionType> = new Set([
 
 export type InboundCreateDefaults = {
   name: string
-  itemType: ItemType
-  category: string
+  deviceType: DeviceTypeName
+  vendor: string
   location: string
-  productTypeId?: string
+  deviceTypeId?: string
+}
+
+export type MovementRejection = { serial: string; reason: string }
+
+export type MovementValidationContext = {
+  fromLocation?: string
+  /** When set, existing row must match this product name (case-insensitive). */
+  expectedProductName?: string
+  /** When set, normalized vendor (empty → General) must match. */
+  expectedVendor?: string
+  /** When set, deviceType must match (case-insensitive). */
+  expectedDeviceType?: string
+}
+
+function normalizeInventoryVendor(value: string | undefined | null): string {
+  const t = (value ?? "").trim()
+  return t || "General"
+}
+
+function stringsMatchCi(a: string, b: string): boolean {
+  return a.trim().toLowerCase() === b.trim().toLowerCase()
+}
+
+/** When any expectation is set, existing inventory rows must match (after trash check). */
+function validateProductExpectations(item: InventoryItem, ctx: MovementValidationContext): string | null {
+  const expName = ctx.expectedProductName?.trim()
+  if (expName && !stringsMatchCi(item.name, expName)) {
+    return `Serial is registered as "${item.name}", not the selected product`
+  }
+  const expVendor = ctx.expectedVendor?.trim()
+  if (expVendor) {
+    const got = normalizeInventoryVendor(item.vendor)
+    const want = normalizeInventoryVendor(expVendor)
+    if (got.toLowerCase() !== want.toLowerCase()) {
+      return `Vendor mismatch (item is ${got}, expected ${want})`
+    }
+  }
+  const expType = ctx.expectedDeviceType?.trim()
+  if (expType && !stringsMatchCi(String(item.deviceType), expType)) {
+    return `Device type mismatch (item is ${item.deviceType}, expected ${expType})`
+  }
+  return null
+}
+
+/**
+ * State machine for stock movements (see plan: movement integrity).
+ * Returns a short reason when the movement is not allowed, or null when allowed.
+ */
+export function validateMovementForItem(
+  type: TransactionType,
+  item: InventoryItem,
+  ctx: MovementValidationContext
+): string | null {
+  if (item.deletedAt) return "Item is in Trash and cannot be moved"
+
+  const productReason = validateProductExpectations(item, ctx)
+  if (productReason) return productReason
+
+  const st = item.status as ItemStatus
+
+  switch (type) {
+    case "Sale":
+    case "POC Out":
+    case "Rentals":
+      if (st !== "In Stock") return `Not available for ${type} (status is ${st}, need In Stock)`
+      return null
+    case "Dispose":
+      if (st !== "In Stock" && st !== "Maintenance") return `Cannot dispose (status is ${st})`
+      return null
+    case "Transfer":
+      if (st !== "In Stock" && st !== "Maintenance") return `Cannot transfer (status is ${st})`
+      if (ctx.fromLocation?.trim() && item.location !== ctx.fromLocation.trim()) {
+        return `Item is at ${item.location}, not ${ctx.fromLocation.trim()}`
+      }
+      return null
+    case "Inbound":
+      if (st === "In Stock") return "Already in stock — cannot receive again"
+      if (st === "Sold" || st === "POC" || st === "Rented" || st === "Disposed") {
+        return `Use POC Return, Rental Return, or undo — not Inbound (status is ${st})`
+      }
+      if (st === "Maintenance") return null
+      return `Inbound not allowed (status is ${st})`
+    case "POC Return":
+      if (st !== "POC") return `POC Return requires status POC (current: ${st})`
+      return null
+    case "Rental Return":
+      if (st !== "Rented") return `Rental Return requires status Rented (current: ${st})`
+      return null
+    default:
+      return null
+  }
 }
 
 export function computeMovementResult(
@@ -50,10 +153,18 @@ export function computeMovementResult(
     inboundCreateDefaults?: InboundCreateDefaults
     /** When moving FortiGate units out: serial → cloud key (not used on inbound) */
     cloudKeysBySerial?: Record<string, string>
+    /**
+     * TEMPORARY (admin UI only): Sale ledger date for catch-up entry; ignored unless type === "Sale".
+     */
+    saleTransactionDateIso?: string
+    expectedProductName?: string
+    expectedVendor?: string
+    expectedDeviceType?: string
   }
 ): {
   success: string[]
   notFound: string[]
+  rejected: MovementRejection[]
   updatedItems: InventoryItem[]
   newTransactions: Transaction[]
 } {
@@ -74,14 +185,20 @@ export function computeMovementResult(
     deliveryNoteUrl,
     inboundCreateDefaults,
     cloudKeysBySerial,
+    saleTransactionDateIso,
+    expectedProductName,
+    expectedVendor,
+    expectedDeviceType,
   } = params
-  const date = new Date().toISOString()
+  const nowIso = new Date().toISOString()
+  const date = type === "Sale" ? resolveSaleTransactionDate(saleTransactionDateIso, nowIso) : nowIso
   const defaultReturnDate = (() => {
     const d = new Date()
     d.setDate(d.getDate() + DEFAULT_RENTAL_DAYS)
     return d.toISOString().slice(0, 10)
   })()
   const success: string[] = []
+  const rejected: MovementRejection[] = []
   const updatedItems: InventoryItem[] = []
   const newTransactions: Transaction[] = []
 
@@ -96,14 +213,14 @@ export function computeMovementResult(
     if (idx === -1) {
       if (type === "Inbound" && inboundCreateDefaults) {
         const d = inboundCreateDefaults
-        const cat = d.category?.trim() ? d.category.trim() : "General"
+        const v = d.vendor?.trim() ? d.vendor.trim() : "General"
         const newItem: InventoryItem = {
           id: `INV-${idBase}-${success.length}-${Math.random().toString(36).slice(2, 9)}`,
           serialNumber: trimmed,
-          itemType: d.itemType,
-          productTypeId: d.productTypeId,
+          deviceType: d.deviceType,
+          deviceTypeId: d.deviceTypeId,
           name: d.name,
-          category: cat,
+          vendor: v,
           status: "In Stock",
           dateAdded: date.slice(0, 10),
           location: d.location,
@@ -133,8 +250,19 @@ export function computeMovementResult(
       continue
     }
 
-    success.push(trimmed)
     const it = next[idx]!
+    const reason = validateMovementForItem(type, it, {
+      fromLocation,
+      expectedProductName,
+      expectedVendor,
+      expectedDeviceType,
+    })
+    if (reason) {
+      rejected.push({ serial: trimmed, reason })
+      continue
+    }
+
+    success.push(trimmed)
     const history = [...(it.assignmentHistory ?? [])]
 
     switch (type) {
@@ -221,6 +349,12 @@ export function computeMovementResult(
     })
   }
 
-  const notFound = serialNumbers.filter((s) => s.trim() && !success.includes(s.trim()))
-  return { success, notFound, updatedItems, newTransactions }
+  const rejectedSerials = new Set(rejected.map((r) => r.serial))
+  const notFound = serialNumbers.filter(
+    (s) => {
+      const t = s.trim()
+      return Boolean(t) && !success.includes(t) && !rejectedSerials.has(t)
+    }
+  )
+  return { success, notFound, rejected, updatedItems, newTransactions }
 }

@@ -72,7 +72,7 @@ function exportStockTakeCsv(
   notScanned: InventoryItem[]
 ) {
   const rows: string[][] = []
-  rows.push(["Category", "Serial", "Name", "Status", "Location"])
+  rows.push(["Result", "Serial", "Name", "Status", "Location"])
   for (const item of matched) {
     rows.push(["Matched", item.serialNumber, item.name, item.status, item.location])
   }

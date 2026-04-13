@@ -20,11 +20,11 @@ export function searchInventory(items: InventoryItem[], query: string): Inventor
     (item) =>
       matchQuery(item.serialNumber, q) ||
       matchQuery(item.name, q) ||
-      matchQuery(item.itemType, q) ||
+      matchQuery(item.deviceType, q) ||
       matchQuery(item.assignedTo, q) ||
       matchQuery(item.client, q) ||
       matchQuery(item.location, q) ||
-      matchQuery(item.category, q) ||
+      matchQuery(item.vendor, q) ||
       matchQuery(item.notes, q)
   )
 }

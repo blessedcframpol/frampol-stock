@@ -106,12 +106,14 @@ function main() {
     try {
       const rows = parseCsvFile(filePath)
       for (const row of rows) {
+        const deviceType = row.category === "Fortinet" ? "Router" : "Starlink Kit"
         allRows.push({
           id: generateId(),
           serial_number: row.serial,
-          item_type: row.category === "Fortinet" ? "Router" : "Starlink Kit",
+          device_type: deviceType,
+          device_type_id: "ptype-general",
           name: row.productType,
-          category: row.category,
+          vendor: row.category,
           status: "In Stock",
           date_added: DATE_ADDED,
           location: LOCATION,
@@ -133,9 +135,9 @@ function main() {
     "",
   ]
   for (const row of allRows) {
-    const cat = row.category ? `'${row.category.replace(/'/g, "''")}'` : "NULL"
+    const vendor = row.vendor ? `'${String(row.vendor).replace(/'/g, "''")}'` : "NULL"
     sqlLines.push(
-      `INSERT INTO public.inventory_items (id, serial_number, item_type, name, category, status, date_added, location) VALUES ('${row.id}', '${row.serial_number.replace(/'/g, "''")}', '${row.item_type}', '${row.name.replace(/'/g, "''")}', ${cat}, 'In Stock', '${row.date_added}', '${row.location}') ON CONFLICT (id) DO NOTHING;`
+      `INSERT INTO public.inventory_items (id, serial_number, device_type, device_type_id, name, vendor, status, date_added, location) VALUES ('${row.id}', '${row.serial_number.replace(/'/g, "''")}', '${row.device_type}', '${row.device_type_id}', '${row.name.replace(/'/g, "''")}', ${vendor}, 'In Stock', '${row.date_added}', '${row.location}') ON CONFLICT (id) DO NOTHING;`
     )
   }
   fs.writeFileSync(OUT_SQL, sqlLines.join("\n"), "utf-8")

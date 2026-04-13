@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo, useRef } from "react"
+import { useState, useMemo, useRef, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -34,27 +34,20 @@ import {
 } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
 import { LOCATIONS, INTERNAL_LOCATIONS } from "@/lib/data"
-import type { ItemType, TransactionType, ClientSite } from "@/lib/data"
+import type { DeviceTypeName, TransactionType, ClientSite } from "@/lib/data"
 import { useClients, insertClient } from "@/lib/supabase/clients-db"
 import { useInventoryStore } from "@/lib/inventory-store"
 import {
   ScanBarcode,
-  Camera,
-  ArrowDownLeft,
-  ArrowUpRight,
-  Send,
-  RotateCcw,
   FileText,
   Package,
-  ArrowLeftRight,
-  Trash2,
-  Calendar,
   ChevronsUpDown,
   Plus,
   MapPin,
   Loader2,
   Upload,
   X,
+  Trash2,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -62,37 +55,38 @@ import { toastFromCaughtError } from "@/lib/toast-reportable-error"
 import { getSupabaseClient } from "@/lib/supabase/client"
 import type { InboundCreateDefaults } from "@/lib/supabase/movement-utils"
 import { isFortigateProductName, splitDelimitedValues, cloudKeysMapForSerials } from "@/lib/fortigate"
+import { useAuth } from "@/lib/auth-context"
+import { canManageUsers } from "@/lib/permissions"
+import {
+  OUTBOUND_LIKE_MOVEMENTS,
+  NEW_CLIENT_SELECT,
+  DEVICE_TYPE_OPTIONS,
+  TRANSACTION_TYPE_CHOICES,
+} from "@/lib/stock-movement-form-logic"
 
-const OUTBOUND_LIKE_MOVEMENTS: TransactionType[] = ["Sale", "POC Out", "Transfer", "Dispose", "Rentals"]
-const NEW_CLIENT_SELECT = "__new__"
-const ITEM_TYPE_OPTIONS: { value: ItemType; label: string }[] = [
-  { value: "Starlink Kit", label: "Starlink Kit" },
-  { value: "Laptop", label: "Laptop" },
-  { value: "Desktop", label: "Desktop" },
-  { value: "Router", label: "Router" },
-  { value: "Switch", label: "Switch" },
-  { value: "Access Point", label: "Access Point" },
-  { value: "UPS", label: "UPS" },
-  { value: "Monitor", label: "Monitor" },
-]
+const transactionTypes = TRANSACTION_TYPE_CHOICES
 
 type PendingOutbound = { productName: string; movementType: string; serials: string[] }
 type MissingSerialsState = { missing: string[]; productName: string; movementType: string; allSerials: string[] }
 
-const transactionTypes = [
-  { value: "Inbound", label: "Inbound", icon: ArrowDownLeft, color: "text-emerald-600 dark:text-emerald-400", bg: "bg-emerald-500/10", desc: "Receive stock from supplier" },
-  { value: "Sale", label: "Sale", icon: ArrowUpRight, color: "text-red-500 dark:text-red-400", bg: "bg-red-500/10", desc: "Sell stock to client" },
-  { value: "POC Out", label: "POC Out", icon: Send, color: "text-cyan-600 dark:text-cyan-400", bg: "bg-cyan-500/10", desc: "Send for proof of concept" },
-  { value: "POC Return", label: "POC Return", icon: RotateCcw, color: "text-amber-600 dark:text-amber-400", bg: "bg-amber-500/10", desc: "Receive POC return" },
-  { value: "Rentals", label: "Rentals", icon: Calendar, color: "text-blue-600 dark:text-blue-400", bg: "bg-blue-500/10", desc: "Rent out to client" },
-  { value: "Rental Return", label: "Rental Return", icon: RotateCcw, color: "text-blue-600 dark:text-blue-400", bg: "bg-blue-500/10", desc: "Receive rental return" },
-  { value: "Transfer", label: "Transfer", icon: ArrowLeftRight, color: "text-violet-600 dark:text-violet-400", bg: "bg-violet-500/10", desc: "Move between locations" },
-  { value: "Dispose", label: "Dispose", icon: Trash2, color: "text-slate-600 dark:text-slate-400", bg: "bg-slate-500/10", desc: "Dispose of asset" },
-]
+export type StockMovementEmbedMode = {
+  fixedSerials: string[]
+  fixedProductName: string
+  /** When set, must be a non-Inbound type for inventory embed. */
+  initialMovementType?: string
+  /** From inventory row(s): guard existing serials against wrong vendor (embed). */
+  expectedVendor?: string
+  /** From inventory row(s): guard existing serials against wrong device type (embed). */
+  expectedDeviceType?: string
+  onClose?: () => void
+}
 
-export function StockMovementContent() {
-  const { inventory, applyMovement, addItem, productTypes, refetchLedger } = useInventoryStore()
+export function StockMovementContent({ embedMode }: { embedMode?: StockMovementEmbedMode }) {
+  const isEmbed = Boolean(embedMode)
+  const { inventory, applyMovement, addItem, deviceTypes, refetchLedger } = useInventoryStore()
   const { clients, refetch: refetchClients } = useClients()
+  const { role } = useAuth()
+  const isAdmin = canManageUsers(role)
   const [selectedType, setSelectedType] = useState<string>("Inbound")
   const [serialNumbers, setSerialNumbers] = useState("")
   const [productName, setProductName] = useState("")
@@ -122,7 +116,7 @@ export function StockMovementContent() {
   const [addingToInventory, setAddingToInventory] = useState(false)
   const [deliveryNoteFile, setDeliveryNoteFile] = useState<File | null>(null)
   const [inboundReceiveLocation, setInboundReceiveLocation] = useState<string>("Warehouse A")
-  const [inboundCategory, setInboundCategory] = useState<string>("General")
+  const [inboundVendor, setInboundVendor] = useState<string>("General")
   const outboundCloudKeysRef = useRef<Record<string, string> | undefined>(undefined)
   const [cloudKeysInput, setCloudKeysInput] = useState("")
   const [mainNewClientName, setMainNewClientName] = useState("")
@@ -130,6 +124,17 @@ export function StockMovementContent() {
   const [mainNewClientEmail, setMainNewClientEmail] = useState("")
   const [mainNewClientPhone, setMainNewClientPhone] = useState("")
   const [mainClientSites, setMainClientSites] = useState<ClientSite[]>([{ address: "" }])
+  /** TEMPORARY (admin): optional sale ledger date until stock-requests workflow */
+  const [adminSaleDate, setAdminSaleDate] = useState("")
+
+  useEffect(() => {
+    if (!embedMode) return
+    setSerialNumbers(embedMode.fixedSerials.join(", "))
+    setProductName(embedMode.fixedProductName)
+    const allowed = TRANSACTION_TYPE_CHOICES.filter((t) => t.value !== "Inbound").map((t) => t.value)
+    const init = embedMode.initialMovementType
+    setSelectedType(init && allowed.includes(init) ? init : "Transfer")
+  }, [embedMode])
 
   const serialsList = useMemo(
     () =>
@@ -155,7 +160,7 @@ export function StockMovementContent() {
     return Array.from(names).sort()
   }, [inventory])
   const allOptions = useMemo(() => {
-    const types = ITEM_TYPE_OPTIONS.map((o) => o.label)
+    const types = DEVICE_TYPE_OPTIONS.map((o) => o.label)
     const combined = [...productNames]
     types.forEach((t) => {
       if (!combined.includes(t)) combined.push(t)
@@ -165,9 +170,9 @@ export function StockMovementContent() {
   const inventorySerialSet = useMemo(() => new Set(inventory.map((i) => i.serialNumber)), [inventory])
   const requiresOutboundDetails = OUTBOUND_LIKE_MOVEMENTS.includes(selectedType as TransactionType)
 
-  const inboundCategoryOptions = useMemo(() => {
+  const inboundVendorOptions = useMemo(() => {
     const fromInv = inventory
-      .map((i) => (i.category?.trim() ? i.category.trim() : null))
+      .map((i) => (i.vendor?.trim() ? i.vendor.trim() : null))
       .filter((c): c is string => Boolean(c))
     return [...new Set(["General", ...fromInv])].sort()
   }, [inventory])
@@ -190,10 +195,10 @@ export function StockMovementContent() {
     }
   }
 
-  function inferItemType(name: string): ItemType {
+  function inferDeviceType(name: string): DeviceTypeName {
     const matchInv = inventory.find((i) => i.name === name)
-    if (matchInv?.itemType) return matchInv.itemType as ItemType
-    const opt = ITEM_TYPE_OPTIONS.find((o) => o.label === name)
+    if (matchInv?.deviceType) return matchInv.deviceType as DeviceTypeName
+    const opt = DEVICE_TYPE_OPTIONS.find((o) => o.label === name)
     if (opt) return opt.value
     return "Starlink Kit"
   }
@@ -203,12 +208,12 @@ export function StockMovementContent() {
     setAddingToInventory(true)
     try {
       const { missing, productName: pn, movementType, allSerials } = missingSerialsState
-      const itemType = inferItemType(pn)
+      const deviceType = inferDeviceType(pn)
       const today = new Date().toISOString().slice(0, 10)
       for (const serial of missing) {
         addItem({
           serialNumber: serial,
-          itemType,
+          deviceType,
           name: pn,
           status: "In Stock",
           dateAdded: today,
@@ -279,15 +284,15 @@ export function StockMovementContent() {
     const pn = productName.trim()
     let inboundDefaults: InboundCreateDefaults | undefined
     if (selectedType === "Inbound") {
-      const it = inferItemType(pn)
+      const it = inferDeviceType(pn)
       inboundDefaults = {
         name: pn,
-        itemType: it,
-        category: inboundCategory.trim() || "General",
+        deviceType: it,
+        vendor: inboundVendor.trim() || "General",
         location: inboundReceiveLocation.trim() || "Warehouse A",
-        productTypeId:
-          productTypes.find((pt) => pt.name.toLowerCase() === it.toLowerCase())?.id ??
-          productTypes.find((pt) => pt.name === "General")?.id,
+        deviceTypeId:
+          deviceTypes.find((pt) => pt.name.toLowerCase() === it.toLowerCase())?.id ??
+          deviceTypes.find((pt) => pt.name === "General")?.id,
       }
     } else {
       inboundDefaults = undefined
@@ -313,10 +318,30 @@ export function StockMovementContent() {
       deliveryNoteUrl: selectedType === "Inbound" ? deliveryNoteUrl : undefined,
       inboundCreateDefaults: inboundDefaults,
       cloudKeysBySerial,
+      saleTransactionDateIso:
+        selectedType === "Sale" && isAdmin && adminSaleDate.trim() ? adminSaleDate.trim() : undefined,
+      ...(pn ? { expectedProductName: pn } : {}),
+      ...(selectedType === "Inbound"
+        ? {
+            expectedVendor:
+              isEmbed && embedMode?.expectedVendor !== undefined
+                ? embedMode.expectedVendor
+                : inboundVendor.trim() || "General",
+          }
+        : {}),
+      ...(isEmbed && embedMode?.expectedDeviceType !== undefined
+        ? { expectedDeviceType: embedMode.expectedDeviceType }
+        : {}),
     })
     if (result.success.length > 0) {
       toast.success(`Recorded ${result.success.length} item(s)`)
       void refetchLedger()
+      embedMode?.onClose?.()
+      if (isEmbed) {
+        setPendingOutbound(null)
+        setIsSubmitting(false)
+        return
+      }
       setSerialNumbers("")
       setProductName("")
       setInvoiceNumber("")
@@ -329,6 +354,7 @@ export function StockMovementContent() {
       if (OUTBOUND_LIKE_MOVEMENTS.includes(selectedType as TransactionType)) {
         setCloudKeysInput("")
       }
+      if (selectedType === "Sale") setAdminSaleDate("")
       setPendingOutbound(null)
     }
     if (result.notFound.length > 0) {
@@ -413,7 +439,7 @@ export function StockMovementContent() {
 
   async function handleSubmit() {
     if (!productName.trim()) {
-      toast.error("Select or enter product / item type")
+      toast.error("Select or enter product (name or device type)")
       return
     }
     if (uniqueSerials.length === 0) {
@@ -532,6 +558,10 @@ export function StockMovementContent() {
     }
     const missing = uniqueSerials.filter((s) => !inventorySerialSet.has(s))
     if (missing.length > 0) {
+      if (isEmbed) {
+        toast.error(`Serial(s) not in inventory: ${missing.join(", ")}`)
+        return
+      }
       setMissingSerialsState({
         missing,
         productName: productName.trim(),
@@ -554,13 +584,19 @@ export function StockMovementContent() {
     setSites([{ address: "" }])
   }
 
+  const typesForUi = isEmbed ? transactionTypes.filter((t) => t.value !== "Inbound") : transactionTypes
+
   return (
     <div className="flex flex-col gap-4 md:gap-6 min-w-0">
       {/* Header */}
-      <div>
-        <h1 className="text-xl md:text-2xl font-bold text-foreground tracking-tight text-balance">Inventory Movement</h1>
-        <p className="text-sm text-muted-foreground mt-1">Record inbound and outbound (sale, POC, rental, transfer) stock transactions.</p>
-      </div>
+      {!isEmbed && (
+        <div>
+          <h1 className="text-xl md:text-2xl font-bold text-foreground tracking-tight text-balance">Inventory Movement</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Record inbound and outbound (sale, POC, rental, transfer) stock transactions.
+          </p>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
         {/* Left: Form */}
@@ -572,7 +608,7 @@ export function StockMovementContent() {
             </CardHeader>
             <CardContent className="flex-1 flex flex-col min-h-0">
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 sm:gap-2 flex-1 content-start">
-                {transactionTypes.map((type) => {
+                {typesForUi.map((type) => {
                   const Icon = type.icon
                   const isActive = selectedType === type.value
                   return (
@@ -610,12 +646,25 @@ export function StockMovementContent() {
             <CardHeader className="pb-3">
               <CardTitle className="text-base font-semibold text-foreground flex items-center gap-2">
                 <ScanBarcode className="w-4 h-4 text-primary" />
-                Scan Items
+                {isEmbed ? "Selected items" : "Scan Items"}
               </CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
+              {isEmbed ? (
+                <>
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Product</Label>
+                    <p className="text-sm font-medium text-foreground mt-1">{productName}</p>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Serial numbers ({uniqueSerials.length})</Label>
+                    <p className="text-xs font-mono text-foreground mt-1 break-words">{uniqueSerials.join(", ")}</p>
+                  </div>
+                </>
+              ) : (
+                <>
               <div className="flex flex-col gap-2">
-                <Label className="text-xs text-muted-foreground">Product / item type</Label>
+                <Label className="text-xs text-muted-foreground">Product (name or device type)</Label>
                 <Popover open={productOpen} onOpenChange={setProductOpen}>
                   <PopoverTrigger asChild>
                     <Button
@@ -736,6 +785,8 @@ export function StockMovementContent() {
                   </Button>
                 </div>
               )}
+                </>
+              )}
             </CardContent>
           </Card>
 
@@ -803,13 +854,13 @@ export function StockMovementContent() {
                     </Select>
                   </div>
                   <div className="flex flex-col gap-2">
-                    <Label className="text-foreground">Category</Label>
-                    <Select value={inboundCategory} onValueChange={setInboundCategory}>
+                    <Label className="text-foreground">Vendor</Label>
+                    <Select value={inboundVendor} onValueChange={setInboundVendor}>
                       <SelectTrigger className="bg-card text-foreground border-border">
-                        <SelectValue placeholder="Category" />
+                        <SelectValue placeholder="Vendor" />
                       </SelectTrigger>
                       <SelectContent>
-                        {inboundCategoryOptions.map((cat) => (
+                        {inboundVendorOptions.map((cat) => (
                           <SelectItem key={cat} value={cat}>
                             {cat}
                           </SelectItem>
@@ -982,6 +1033,20 @@ export function StockMovementContent() {
                     onChange={(e) => setRentalReturnDate(e.target.value)}
                   />
                   <p className="text-xs text-muted-foreground">When the kit is due back. If empty, defaults to 30 days from today.</p>
+                </div>
+              )}
+              {selectedType === "Sale" && isAdmin && (
+                <div className="flex flex-col gap-2">
+                  <Label className="text-foreground">Sale date (optional)</Label>
+                  <Input
+                    type="date"
+                    className="bg-card text-foreground border-border max-w-xs"
+                    value={adminSaleDate}
+                    onChange={(e) => setAdminSaleDate(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Leave empty to use today. Set when recording a past sale (temporary admin tool until stock requests handle this).
+                  </p>
                 </div>
               )}
               {selectedType === "Transfer" && (

@@ -7,10 +7,10 @@ export interface Database {
         Row: {
           id: string
           serial_number: string
-          item_type: string
-          product_type_id: string | null
+          device_type: string
+          device_type_id: string
           name: string
-          category: string | null
+          vendor: string | null
           status: string
           date_added: string
           location: string
@@ -24,14 +24,15 @@ export interface Database {
           assignment_history: Json | null
           reserved_for_request_line_id: string | null
           cloud_key: string | null
+          deleted_at: string | null
         }
         Insert: {
           id: string
           serial_number: string
-          item_type: string
-          product_type_id?: string | null
+          device_type: string
+          device_type_id?: string | null
           name: string
-          category?: string | null
+          vendor?: string | null
           status: string
           date_added: string
           location: string
@@ -45,14 +46,15 @@ export interface Database {
           return_date?: string | null
           assignment_history?: Json | null
           reserved_for_request_line_id?: string | null
+          deleted_at?: string | null
         }
         Update: {
           id?: string
           serial_number?: string
-          item_type?: string
-          product_type_id?: string | null
+          device_type?: string
+          device_type_id?: string | null
           name?: string
-          category?: string | null
+          vendor?: string | null
           status?: string
           date_added?: string
           location?: string
@@ -66,9 +68,10 @@ export interface Database {
           assignment_history?: Json | null
           reserved_for_request_line_id?: string | null
           cloud_key?: string | null
+          deleted_at?: string | null
         }
       }
-      product_types: {
+      device_types: {
         Row: {
           id: string
           name: string
@@ -143,7 +146,7 @@ export interface Database {
           id: string
           request_id: string
           product_name: string
-          item_type: string | null
+          device_type: string | null
           quantity_requested: number
           sort_order: number
         }
@@ -151,7 +154,7 @@ export interface Database {
           id?: string
           request_id: string
           product_name: string
-          item_type?: string | null
+          device_type?: string | null
           quantity_requested: number
           sort_order?: number
         }
@@ -159,7 +162,7 @@ export interface Database {
           id?: string
           request_id?: string
           product_name?: string
-          item_type?: string | null
+          device_type?: string | null
           quantity_requested?: number
           sort_order?: number
         }

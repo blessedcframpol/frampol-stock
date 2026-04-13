@@ -151,7 +151,7 @@ export type CreateRequestInput = {
   createdBy: string
   notes?: string | null
   quotationUrl?: string | null
-  lines: { productName: string; itemType?: string | null; quantity: number }[]
+  lines: { productName: string; deviceType?: string | null; quantity: number }[]
 }
 
 export async function createStockRequest(sb: SB, input: CreateRequestInput): Promise<StockRequestWithRelations> {
@@ -172,7 +172,7 @@ export async function createStockRequest(sb: SB, input: CreateRequestInput): Pro
   const lineRows = input.lines.map((l, i) => ({
     request_id: requestId,
     product_name: l.productName.trim(),
-    item_type: l.itemType ?? null,
+    device_type: l.deviceType ?? null,
     quantity_requested: l.quantity,
     sort_order: i,
   }))
@@ -251,14 +251,14 @@ export async function updateDraftRequest(
 export async function replaceDraftLines(
   sb: SB,
   requestId: string,
-  lines: { productName: string; itemType?: string | null; quantity: number }[]
+  lines: { productName: string; deviceType?: string | null; quantity: number }[]
 ): Promise<void> {
   const { error: delErr } = await sb.from("stock_request_lines").delete().eq("request_id", requestId)
   if (delErr) throw delErr
   const lineRows = lines.map((l, i) => ({
     request_id: requestId,
     product_name: l.productName.trim(),
-    item_type: l.itemType ?? null,
+    device_type: l.deviceType ?? null,
     quantity_requested: l.quantity,
     sort_order: i,
   }))

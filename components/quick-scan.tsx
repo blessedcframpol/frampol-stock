@@ -33,7 +33,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { ScanBarcode, Camera, Loader2, ChevronsUpDown, Plus, MapPin, Trash2 } from "lucide-react"
-import type { ItemType, TransactionType, ClientSite } from "@/lib/data"
+import type { DeviceTypeName, TransactionType, ClientSite } from "@/lib/data"
 import { INTERNAL_LOCATIONS } from "@/lib/data"
 import { useClients, insertClient } from "@/lib/supabase/clients-db"
 import { useInventoryStore } from "@/lib/inventory-store"
@@ -41,21 +41,13 @@ import { toast } from "sonner"
 import { toastFromCaughtError } from "@/lib/toast-reportable-error"
 import { cn } from "@/lib/utils"
 import { isFortigateProductName, splitDelimitedValues, cloudKeysMapForSerials } from "@/lib/fortigate"
+import { useAuth } from "@/lib/auth-context"
+import { canManageUsers } from "@/lib/permissions"
+import { DEVICE_TYPE_OPTIONS } from "@/lib/stock-movement-form-logic"
 
 const OUTBOUND_LIKE_MOVEMENTS: TransactionType[] = ["Sale", "POC Out", "Transfer", "Dispose", "Rentals"]
 
 const RETURN_LIKE_MOVEMENTS: TransactionType[] = ["POC Return", "Rental Return"]
-
-const ITEM_TYPE_OPTIONS: { value: ItemType; label: string }[] = [
-  { value: "Starlink Kit", label: "Starlink Kit" },
-  { value: "Laptop", label: "Laptop" },
-  { value: "Desktop", label: "Desktop" },
-  { value: "Router", label: "Router" },
-  { value: "Switch", label: "Switch" },
-  { value: "Access Point", label: "Access Point" },
-  { value: "UPS", label: "UPS" },
-  { value: "Monitor", label: "Monitor" },
-]
 
 const MOVEMENT_TYPE_OPTIONS: { value: TransactionType; label: string }[] = [
   { value: "Inbound", label: "Inbound" },
@@ -83,8 +75,10 @@ type MissingSerialsState = {
 }
 
 export function QuickScan() {
-  const { inventory, addItem, applyMovement, refetchLedger, productTypes } = useInventoryStore()
+  const { inventory, addItem, applyMovement, refetchLedger, deviceTypes } = useInventoryStore()
   const { clients, refetch: refetchClients } = useClients()
+  const { role } = useAuth()
+  const isAdmin = canManageUsers(role)
   const [serialInput, setSerialInput] = useState("")
   const [productName, setProductName] = useState("")
   const [movementType, setMovementType] = useState<TransactionType>("Inbound")
@@ -106,18 +100,20 @@ export function QuickScan() {
   const [newClientPhone, setNewClientPhone] = useState("")
   const [sites, setSites] = useState<ClientSite[]>([{ address: "" }])
   const [outboundReturnDate, setOutboundReturnDate] = useState("")
+  /** TEMPORARY (admin): optional sale ledger date until stock-requests workflow */
+  const [adminSaleDate, setAdminSaleDate] = useState("")
 
   // When some serials are not in inventory for outbound: offer to add them first
   const [missingSerialsState, setMissingSerialsState] = useState<MissingSerialsState | null>(null)
   const [addingToInventory, setAddingToInventory] = useState(false)
 
   const [inboundReceiveLocation, setInboundReceiveLocation] = useState<string>("Warehouse A")
-  const [inboundCategory, setInboundCategory] = useState<string>("General")
+  const [inboundVendor, setInboundVendor] = useState<string>("General")
   const [returnLocation, setReturnLocation] = useState<string>("Warehouse A")
 
-  const categoryOptions = useMemo(() => {
+  const vendorOptions = useMemo(() => {
     const fromInv = inventory
-      .map((i) => (i.category?.trim() ? i.category.trim() : null))
+      .map((i) => (i.vendor?.trim() ? i.vendor.trim() : null))
       .filter((c): c is string => Boolean(c))
     return [...new Set(["General", ...fromInv])].sort()
   }, [inventory])
@@ -160,7 +156,7 @@ export function QuickScan() {
 
   const allOptions = useMemo(() => {
     const fromInventory = productNames
-    const types = ITEM_TYPE_OPTIONS.map((o) => o.label)
+    const types = DEVICE_TYPE_OPTIONS.map((o) => o.label)
     const combined = [...fromInventory]
     types.forEach((t) => {
       if (!combined.includes(t)) combined.push(t)
@@ -174,7 +170,7 @@ export function QuickScan() {
   async function handleRecord() {
     const product = productName.trim()
     if (!product) {
-      toast.error("Select or enter what's being scanned in (product / item type)")
+      toast.error("Select or enter what's being scanned in (product name or device type)")
       return
     }
     if (!movementType) {
@@ -213,6 +209,7 @@ export function QuickScan() {
       setOutboundClientId("")
       setOutboundClientSearch("")
       setOutboundReturnDate("")
+      setAdminSaleDate("")
       setNewClientName("")
       setNewClientCompany("")
       setNewClientEmail("")
@@ -233,6 +230,7 @@ export function QuickScan() {
           type: movementType,
           serialNumbers: uniqueSerials,
           toLocation: returnLocation.trim(),
+          expectedProductName: product,
         })
         if (result.success.length > 0) {
           toast.success(
@@ -258,21 +256,23 @@ export function QuickScan() {
       setLastDuplicateMessage(null)
       setIsSubmitting(true)
       try {
-        const itemType = inferItemType(product)
-        const productTypeId =
-          productTypes.find((pt) => pt.name.toLowerCase() === itemType.toLowerCase())?.id ??
-          productTypes.find((pt) => pt.name === "General")?.id
+        const deviceType = inferDeviceType(product)
+        const deviceTypeId =
+          deviceTypes.find((pt) => pt.name.toLowerCase() === deviceType.toLowerCase())?.id ??
+          deviceTypes.find((pt) => pt.name === "General")?.id
         const result = applyMovement({
           type: "Inbound",
           serialNumbers: uniqueSerials,
           deliveryNoteUrl: undefined,
           inboundCreateDefaults: {
             name: product,
-            itemType,
-            category: inboundCategory.trim() || "General",
+            deviceType,
+            vendor: inboundVendor.trim() || "General",
             location: inboundReceiveLocation.trim() || "Warehouse A",
-            productTypeId,
+            deviceTypeId,
           },
+          expectedProductName: product,
+          expectedVendor: inboundVendor.trim() || "General",
         })
         if (result.success.length > 0) {
           toast.success(
@@ -380,6 +380,11 @@ export function QuickScan() {
         assignedTo,
         returnDate,
         cloudKeysBySerial,
+        saleTransactionDateIso:
+          pendingOutbound.movementType === "Sale" && isAdmin && adminSaleDate.trim()
+            ? adminSaleDate.trim()
+            : undefined,
+        expectedProductName: pendingOutbound.productName.trim(),
       })
       if (result.success.length > 0) {
         toast.success(`Recorded ${result.success.length} item(s) — inventory updated`)
@@ -387,6 +392,7 @@ export function QuickScan() {
         setCloudKeysInput("")
         setPendingOutbound(null)
         setOutboundReturnDate("")
+        if (pendingOutbound.movementType === "Sale") setAdminSaleDate("")
         void refetchLedger()
       }
       if (result.notFound.length > 0) {
@@ -409,10 +415,10 @@ export function QuickScan() {
     setSites((prev) => prev.map((s, i) => (i === index ? { ...s, [field]: value } : s)))
   }
 
-  function inferItemType(name: string): ItemType {
+  function inferDeviceType(name: string): DeviceTypeName {
     const matchInv = inventory.find((i) => i.name === name)
-    if (matchInv?.itemType) return matchInv.itemType as ItemType
-    const opt = ITEM_TYPE_OPTIONS.find((o) => o.label === name)
+    if (matchInv?.deviceType) return matchInv.deviceType as DeviceTypeName
+    const opt = DEVICE_TYPE_OPTIONS.find((o) => o.label === name)
     if (opt) return opt.value
     return "Starlink Kit"
   }
@@ -422,12 +428,12 @@ export function QuickScan() {
     setAddingToInventory(true)
     try {
       const { missing, productName, movementType, allSerials } = missingSerialsState
-      const itemType = inferItemType(productName)
+      const deviceType = inferDeviceType(productName)
       const today = new Date().toISOString().slice(0, 10)
       for (const serial of missing) {
         addItem({
           serialNumber: serial,
-          itemType,
+          deviceType,
           name: productName,
           status: "In Stock",
           dateAdded: today,
@@ -440,6 +446,7 @@ export function QuickScan() {
       setOutboundClientId("")
       setOutboundClientSearch("")
       setOutboundReturnDate("")
+      setAdminSaleDate("")
       setNewClientName("")
       setNewClientCompany("")
       setNewClientEmail("")
@@ -478,7 +485,7 @@ export function QuickScan() {
         </div>
         <div className="flex flex-col gap-2">
           <Label className="text-xs text-muted-foreground">
-            {requiresOutboundDetails ? "Product / item type" : "What's being scanned in"}
+            {requiresOutboundDetails ? "Product (name or device type)" : "What's being scanned in"}
           </Label>
           <Popover open={open} onOpenChange={setOpen}>
             <PopoverTrigger asChild>
@@ -574,13 +581,13 @@ export function QuickScan() {
               </Select>
             </div>
             <div className="flex flex-col gap-1.5">
-              <Label className="text-xs text-muted-foreground">Category</Label>
-              <Select value={inboundCategory} onValueChange={setInboundCategory}>
+              <Label className="text-xs text-muted-foreground">Vendor</Label>
+              <Select value={inboundVendor} onValueChange={setInboundVendor}>
                 <SelectTrigger className="h-10 bg-card border-border text-foreground">
-                  <SelectValue placeholder="Category" />
+                  <SelectValue placeholder="Vendor" />
                 </SelectTrigger>
                 <SelectContent>
-                  {categoryOptions.map((cat) => (
+                  {vendorOptions.map((cat) => (
                     <SelectItem key={cat} value={cat}>
                       {cat}
                     </SelectItem>
@@ -805,6 +812,21 @@ export function QuickScan() {
                     onChange={(e) => setOutboundReturnDate(e.target.value)}
                     className="h-9"
                   />
+                </div>
+              )}
+
+              {pendingOutbound.movementType === "Sale" && isAdmin && (
+                <div className="flex flex-col gap-2">
+                  <Label className="text-xs font-medium">Sale date (optional)</Label>
+                  <Input
+                    type="date"
+                    value={adminSaleDate}
+                    onChange={(e) => setAdminSaleDate(e.target.value)}
+                    className="h-9 max-w-xs"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Leave empty for today. Temporary admin tool until stock requests handle this.
+                  </p>
                 </div>
               )}
 

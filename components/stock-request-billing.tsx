@@ -202,7 +202,7 @@ export function StockRequestBilling({ requestId }: { requestId: string }) {
             <TableBody>
               {(row.stock_request_lines ?? []).map((l) => {
                 const g = assigned[l.id] ?? 0
-                const star = lineRequiresSerialsBeforeInvoice(l.product_name, l.item_type)
+                const star = lineRequiresSerialsBeforeInvoice(l.product_name, l.device_type)
                 return (
                   <TableRow key={l.id}>
                     <TableCell>

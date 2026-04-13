@@ -354,15 +354,15 @@ export function StockRequestDetail({ requestId }: { requestId: string }) {
             </TableHeader>
             <TableBody>
               {(row.stock_request_lines ?? []).map((l) => {
-                const needSerial = lineRequiresSerialsBeforeInvoice(l.product_name, l.item_type)
+                const needSerial = lineRequiresSerialsBeforeInvoice(l.product_name, l.device_type)
                 const a = avail[l.product_name] ?? 0
                 const g = assigned[l.id] ?? 0
                 return (
                   <TableRow key={l.id}>
                     <TableCell className="font-medium">
                       {l.product_name}
-                      {l.item_type ? (
-                        <span className="block text-xs text-muted-foreground font-normal">Type: {l.item_type}</span>
+                      {l.device_type ? (
+                        <span className="block text-xs text-muted-foreground font-normal">Device type: {l.device_type}</span>
                       ) : null}
                     </TableCell>
                     <TableCell className="text-right">{l.quantity_requested}</TableCell>

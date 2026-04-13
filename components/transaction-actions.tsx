@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react"
 import type { Transaction } from "@/lib/data"
-import type { ItemType } from "@/lib/data"
+import type { DeviceTypeName } from "@/lib/data"
 import {
   Dialog,
   DialogContent,
@@ -41,7 +41,7 @@ import { useInventoryStore } from "@/lib/inventory-store"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 
-const ITEM_TYPES: ItemType[] = [
+const DEVICE_TYPE_CHOICES: DeviceTypeName[] = [
   "Starlink Kit",
   "Laptop",
   "Desktop",
@@ -63,7 +63,7 @@ export function TransactionActions({ transaction, compact }: TransactionActionsP
   const [reassignOpen, setReassignOpen] = useState(false)
   const [productPopoverOpen, setProductPopoverOpen] = useState(false)
   const [reassignName, setReassignName] = useState(transaction.itemName)
-  const [reassignType, setReassignType] = useState<ItemType | "">("")
+  const [reassignType, setReassignType] = useState<DeviceTypeName | "">("")
   const [reassignSearch, setReassignSearch] = useState("")
   const [busy, setBusy] = useState(false)
 
@@ -75,7 +75,7 @@ export function TransactionActions({ transaction, compact }: TransactionActionsP
 
   const allProductOptions = useMemo(() => {
     const combined = [...productNames]
-    ITEM_TYPES.forEach((t) => {
+    DEVICE_TYPE_CHOICES.forEach((t) => {
       if (!combined.includes(t)) combined.push(t)
     })
     return combined.sort()
@@ -238,16 +238,16 @@ export function TransactionActions({ transaction, compact }: TransactionActionsP
               </Popover>
             </div>
             <div className="space-y-2">
-              <Label>Item type (optional)</Label>
+              <Label>Device type (optional)</Label>
               <Select
                 value={reassignType}
-                onValueChange={(v) => setReassignType(v as ItemType)}
+                onValueChange={(v) => setReassignType(v as DeviceTypeName)}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Same as before" />
                 </SelectTrigger>
                 <SelectContent>
-                  {ITEM_TYPES.map((t) => (
+                  {DEVICE_TYPE_CHOICES.map((t) => (
                     <SelectItem key={t} value={t}>
                       {t}
                     </SelectItem>

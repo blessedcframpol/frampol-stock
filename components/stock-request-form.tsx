@@ -35,7 +35,7 @@ import {
   CommandList,
 } from "@/components/ui/command"
 import { useAuth } from "@/lib/auth-context"
-import type { ItemType, ClientSite } from "@/lib/data"
+import type { DeviceTypeName, ClientSite } from "@/lib/data"
 import { useClients, insertClient } from "@/lib/supabase/clients-db"
 import { useInventoryStore } from "@/lib/inventory-store"
 import { getSupabaseClient } from "@/lib/supabase/client"
@@ -52,7 +52,7 @@ import { toast } from "sonner"
 import { toastFromCaughtError } from "@/lib/toast-reportable-error"
 import { ArrowLeft, ChevronsUpDown, Loader2, Plus, Trash2, Upload, X } from "lucide-react"
 
-const ITEM_TYPE_LABELS: { value: ItemType; label: string }[] = [
+const DEVICE_TYPE_LABELS: { value: DeviceTypeName; label: string }[] = [
   { value: "Starlink Kit", label: "Starlink Kit" },
   { value: "Laptop", label: "Laptop" },
   { value: "Desktop", label: "Desktop" },
@@ -66,7 +66,7 @@ const ITEM_TYPE_LABELS: { value: ItemType; label: string }[] = [
 export type LineDraft = {
   id: string
   productName: string
-  itemType: string | null
+  deviceType: string | null
   quantity: number
 }
 
@@ -74,7 +74,7 @@ function newLine(): LineDraft {
   return {
     id: `l-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     productName: "",
-    itemType: null,
+    deviceType: null,
     quantity: 1,
   }
 }
@@ -111,7 +111,7 @@ export function StockRequestForm({
     return Array.from(names).sort()
   }, [inventory])
   const productOptions = useMemo(() => {
-    const types = ITEM_TYPE_LABELS.map((o) => o.label)
+    const types = DEVICE_TYPE_LABELS.map((o) => o.label)
     const combined = [...productNames]
     types.forEach((t) => {
       if (!combined.includes(t)) combined.push(t)
@@ -131,7 +131,7 @@ export function StockRequestForm({
         : (initialRequest.stock_request_lines ?? []).map((l) => ({
             id: l.id,
             productName: l.product_name,
-            itemType: l.item_type,
+            deviceType: l.device_type,
             quantity: l.quantity_requested,
           }))
     )
@@ -141,7 +141,7 @@ export function StockRequestForm({
   const inferTypeForName = useCallback(
     (name: string): string | null => {
       const row = inventory.find((i) => i.name === name)
-      return row?.itemType ?? null
+      return row?.deviceType ?? null
     },
     [inventory]
   )
@@ -161,7 +161,7 @@ export function StockRequestForm({
     return cleaned.map((l) => ({
       ...l,
       productName: l.productName.trim(),
-      itemType: l.itemType ?? inferTypeForName(l.productName.trim()),
+      deviceType: l.deviceType ?? inferTypeForName(l.productName.trim()),
     }))
   }
 
@@ -179,7 +179,7 @@ export function StockRequestForm({
       rid,
       effectiveLines.map((l) => ({
         productName: l.productName.trim(),
-        itemType: l.itemType ?? inferTypeForName(l.productName.trim()),
+        deviceType: l.deviceType ?? inferTypeForName(l.productName.trim()),
         quantity: l.quantity,
       }))
     )
@@ -211,7 +211,7 @@ export function StockRequestForm({
           notes: notes.trim() || null,
           lines: okLines.map((l) => ({
             productName: l.productName,
-            itemType: l.itemType ?? inferTypeForName(l.productName),
+            deviceType: l.deviceType ?? inferTypeForName(l.productName),
             quantity: l.quantity,
           })),
         })
@@ -257,7 +257,7 @@ export function StockRequestForm({
           notes: notes.trim() || null,
           lines: okLines.map((l) => ({
             productName: l.productName,
-            itemType: l.itemType ?? inferTypeForName(l.productName),
+            deviceType: l.deviceType ?? inferTypeForName(l.productName),
             quantity: l.quantity,
           })),
         })
@@ -362,11 +362,11 @@ export function StockRequestForm({
                   inventory={inventory}
                   disabled={busy}
                   onProductChange={(name) => {
-                    const itemType = inventory.find((i) => i.name === name)?.itemType ?? null
-                    const t = ITEM_TYPE_LABELS.find((x) => x.label === name)?.value ?? null
+                    const deviceType = inventory.find((i) => i.name === name)?.deviceType ?? null
+                    const t = DEVICE_TYPE_LABELS.find((x) => x.label === name)?.value ?? null
                     setLines((prev) =>
                       prev.map((l) =>
-                        l.id === line.id ? { ...l, productName: name, itemType: itemType ?? t } : l
+                        l.id === line.id ? { ...l, productName: name, deviceType: deviceType ?? t } : l
                       )
                     )
                   }}
@@ -508,7 +508,7 @@ function LineRowEditor({
 }: {
   line: LineDraft
   productOptions: string[]
-  inventory: { name: string; itemType: string }[]
+  inventory: { name: string; deviceType: string }[]
   disabled: boolean
   onProductChange: (name: string) => void
   onQuantityChange: (q: number) => void
@@ -523,7 +523,7 @@ function LineRowEditor({
     return q ? productOptions.filter((n) => n.toLowerCase().includes(q)) : productOptions
   }, [productOptions, search])
 
-  const typeHint = inventory.find((i) => i.name === line.productName)?.itemType ?? line.itemType
+  const typeHint = inventory.find((i) => i.name === line.productName)?.deviceType ?? line.deviceType
 
   return (
     <div className="flex flex-col sm:flex-row gap-2 sm:items-end p-3 rounded-lg border border-border bg-muted/20">

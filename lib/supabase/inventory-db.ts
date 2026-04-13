@@ -14,10 +14,10 @@ export function rowToInventoryItem(row: InventoryRow): InventoryItem {
   return {
     id: row.id,
     serialNumber: row.serial_number,
-    itemType: row.item_type as InventoryItem["itemType"],
-    productTypeId: row.product_type_id ?? undefined,
+    deviceType: row.device_type as InventoryItem["deviceType"],
+    deviceTypeId: row.device_type_id ?? undefined,
     name: row.name,
-    category: row.category ?? undefined,
+    vendor: row.vendor ?? undefined,
     status: row.status as InventoryItem["status"],
     dateAdded: row.date_added,
     location: row.location,
@@ -31,6 +31,7 @@ export function rowToInventoryItem(row: InventoryRow): InventoryItem {
     assignmentHistory: assignmentHistory ?? undefined,
     reservedForRequestLineId: row.reserved_for_request_line_id ?? undefined,
     cloudKey: row.cloud_key ?? undefined,
+    deletedAt: row.deleted_at ? String(row.deleted_at) : undefined,
   }
 }
 
@@ -43,10 +44,10 @@ export function inventoryItemToRow(item: InventoryItem): Database["public"]["Tab
   return {
     id: item.id,
     serial_number: item.serialNumber,
-    item_type: item.itemType,
-    product_type_id: item.productTypeId ?? "ptype-general",
+    device_type: item.deviceType,
+    device_type_id: item.deviceTypeId ?? "ptype-general",
     name: item.name,
-    category: item.category ?? null,
+    vendor: item.vendor ?? null,
     status: item.status,
     date_added: item.dateAdded,
     location: item.location,
@@ -60,6 +61,7 @@ export function inventoryItemToRow(item: InventoryItem): Database["public"]["Tab
     assignment_history: history ?? null,
     reserved_for_request_line_id: item.reservedForRequestLineId ?? null,
     cloud_key: item.cloudKey ?? null,
+    deleted_at: item.deletedAt ?? null,
   }
 }
 

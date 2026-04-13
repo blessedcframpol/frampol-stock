@@ -12,10 +12,10 @@
 CREATE TABLE IF NOT EXISTS public.inventory_items (
   id TEXT PRIMARY KEY,
   serial_number TEXT NOT NULL,
-  item_type TEXT NOT NULL,
-  product_type_id TEXT,
+  device_type TEXT NOT NULL,
+  device_type_id TEXT,
   name TEXT NOT NULL,
-  category TEXT,
+  vendor TEXT,
   status TEXT NOT NULL DEFAULT 'In Stock',
   date_added TEXT NOT NULL,
   location TEXT NOT NULL,
@@ -30,19 +30,19 @@ CREATE TABLE IF NOT EXISTS public.inventory_items (
     CHECK (status IN ('In Stock', 'Sold', 'POC', 'Rented', 'Maintenance', 'Disposed'))
 );
 
--- Add category column if table already exists (run once if you had the table before)
+-- Add vendor column if table already exists (run once if you had the table before)
 DO $$ BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM information_schema.columns
-    WHERE table_schema = 'public' AND table_name = 'inventory_items' AND column_name = 'category'
+    WHERE table_schema = 'public' AND table_name = 'inventory_items' AND column_name = 'vendor'
   ) THEN
-    ALTER TABLE public.inventory_items ADD COLUMN category TEXT;
+    ALTER TABLE public.inventory_items ADD COLUMN vendor TEXT;
   END IF;
 END $$;
 
 COMMENT ON TABLE public.inventory_items IS 'Physical inventory items; one row per serialised unit.';
 
-CREATE TABLE IF NOT EXISTS public.product_types (
+CREATE TABLE IF NOT EXISTS public.device_types (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   active BOOLEAN NOT NULL DEFAULT true,
