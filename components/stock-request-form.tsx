@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -21,21 +21,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover"
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command"
+import { ProductNamePicker } from "@/components/product-name-picker"
 import { useAuth } from "@/lib/auth-context"
-import type { DeviceTypeName, ClientSite } from "@/lib/data"
+import type { ClientSite, InventoryItem } from "@/lib/data"
 import { useClients, insertClient } from "@/lib/supabase/clients-db"
 import { useInventoryStore } from "@/lib/inventory-store"
 import { getSupabaseClient } from "@/lib/supabase/client"
@@ -47,26 +35,13 @@ import {
   uploadQuotationForRequest,
   type StockRequestWithRelations,
 } from "@/lib/supabase/stock-requests-db"
-import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import { toastFromCaughtError } from "@/lib/toast-reportable-error"
-import { ArrowLeft, ChevronsUpDown, Loader2, Plus, Trash2, Upload, X } from "lucide-react"
-
-const DEVICE_TYPE_LABELS: { value: DeviceTypeName; label: string }[] = [
-  { value: "Starlink Kit", label: "Starlink Kit" },
-  { value: "Laptop", label: "Laptop" },
-  { value: "Desktop", label: "Desktop" },
-  { value: "Router", label: "Router" },
-  { value: "Switch", label: "Switch" },
-  { value: "Access Point", label: "Access Point" },
-  { value: "UPS", label: "UPS" },
-  { value: "Monitor", label: "Monitor" },
-]
+import { ArrowLeft, Loader2, Plus, Trash2, Upload, X } from "lucide-react"
 
 export type LineDraft = {
   id: string
   productName: string
-  deviceType: string | null
   quantity: number
 }
 
@@ -74,7 +49,6 @@ function newLine(): LineDraft {
   return {
     id: `l-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     productName: "",
-    deviceType: null,
     quantity: 1,
   }
 }
@@ -110,14 +84,7 @@ export function StockRequestForm({
     inventory.forEach((item) => names.add(item.name))
     return Array.from(names).sort()
   }, [inventory])
-  const productOptions = useMemo(() => {
-    const types = DEVICE_TYPE_LABELS.map((o) => o.label)
-    const combined = [...productNames]
-    types.forEach((t) => {
-      if (!combined.includes(t)) combined.push(t)
-    })
-    return combined.sort()
-  }, [productNames])
+  const productOptions = useMemo(() => [...productNames], [productNames])
 
   const requestId = mode === "edit" && initialRequest ? initialRequest.id : null
 
@@ -131,20 +98,11 @@ export function StockRequestForm({
         : (initialRequest.stock_request_lines ?? []).map((l) => ({
             id: l.id,
             productName: l.product_name,
-            deviceType: l.device_type,
             quantity: l.quantity_requested,
           }))
     )
     setQuoteFile(null)
   }, [mode, initialRequest])
-
-  const inferTypeForName = useCallback(
-    (name: string): string | null => {
-      const row = inventory.find((i) => i.name === name)
-      return row?.deviceType ?? null
-    },
-    [inventory]
-  )
 
   async function ensureClient(): Promise<string | null> {
     if (clientId) return clientId
@@ -161,7 +119,6 @@ export function StockRequestForm({
     return cleaned.map((l) => ({
       ...l,
       productName: l.productName.trim(),
-      deviceType: l.deviceType ?? inferTypeForName(l.productName.trim()),
     }))
   }
 
@@ -179,7 +136,6 @@ export function StockRequestForm({
       rid,
       effectiveLines.map((l) => ({
         productName: l.productName.trim(),
-        deviceType: l.deviceType ?? inferTypeForName(l.productName.trim()),
         quantity: l.quantity,
       }))
     )
@@ -211,7 +167,6 @@ export function StockRequestForm({
           notes: notes.trim() || null,
           lines: okLines.map((l) => ({
             productName: l.productName,
-            deviceType: l.deviceType ?? inferTypeForName(l.productName),
             quantity: l.quantity,
           })),
         })
@@ -257,7 +212,6 @@ export function StockRequestForm({
           notes: notes.trim() || null,
           lines: okLines.map((l) => ({
             productName: l.productName,
-            deviceType: l.deviceType ?? inferTypeForName(l.productName),
             quantity: l.quantity,
           })),
         })
@@ -362,12 +316,8 @@ export function StockRequestForm({
                   inventory={inventory}
                   disabled={busy}
                   onProductChange={(name) => {
-                    const deviceType = inventory.find((i) => i.name === name)?.deviceType ?? null
-                    const t = DEVICE_TYPE_LABELS.find((x) => x.label === name)?.value ?? null
                     setLines((prev) =>
-                      prev.map((l) =>
-                        l.id === line.id ? { ...l, productName: name, deviceType: deviceType ?? t } : l
-                      )
+                      prev.map((l) => (l.id === line.id ? { ...l, productName: name } : l))
                     )
                   }}
                   onQuantityChange={(q) =>
@@ -508,78 +458,31 @@ function LineRowEditor({
 }: {
   line: LineDraft
   productOptions: string[]
-  inventory: { name: string; deviceType: string }[]
+  inventory: Pick<InventoryItem, "name" | "vendor">[]
   disabled: boolean
   onProductChange: (name: string) => void
   onQuantityChange: (q: number) => void
   onRemove: () => void
   canRemove: boolean
 }) {
-  const [open, setOpen] = useState(false)
-  const [search, setSearch] = useState("")
-
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    return q ? productOptions.filter((n) => n.toLowerCase().includes(q)) : productOptions
-  }, [productOptions, search])
-
-  const typeHint = inventory.find((i) => i.name === line.productName)?.deviceType ?? line.deviceType
+  const vendorHint = (() => {
+    const v = inventory.find((i) => i.name === line.productName)?.vendor
+    const t = v != null && String(v).trim() ? String(v).trim() : ""
+    return t || null
+  })()
 
   return (
     <div className="flex flex-col sm:flex-row gap-2 sm:items-end p-3 rounded-lg border border-border bg-muted/20">
       <div className="flex-1 min-w-0 flex flex-col gap-1">
-        <Label className="text-xs text-muted-foreground">Product (inventory name)</Label>
-        <Popover open={open} onOpenChange={setOpen}>
-          <PopoverTrigger asChild>
-            <Button
-              variant="outline"
-              role="combobox"
-              disabled={disabled}
-              className={cn("w-full justify-between font-normal bg-card", !line.productName && "text-muted-foreground")}
-            >
-              {line.productName || "Search product…"}
-              <ChevronsUpDown className="ml-2 size-4 shrink-0 opacity-50" />
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
-            <Command shouldFilter={false}>
-              <CommandInput placeholder="Search…" value={search} onValueChange={setSearch} />
-              <CommandList>
-                <CommandEmpty>No match.</CommandEmpty>
-                <CommandGroup>
-                  {filtered.slice(0, 100).map((name) => (
-                    <CommandItem
-                      key={name}
-                      value={name}
-                      onSelect={() => {
-                        onProductChange(name)
-                        setSearch("")
-                        setOpen(false)
-                      }}
-                    >
-                      {name}
-                    </CommandItem>
-                  ))}
-                  {search.trim() &&
-                    !productOptions.some((o) => o.toLowerCase() === search.trim().toLowerCase()) && (
-                      <CommandItem
-                        value={`__add:${search.trim()}`}
-                        onSelect={() => {
-                          onProductChange(search.trim())
-                          setSearch("")
-                          setOpen(false)
-                        }}
-                        className="text-primary"
-                      >
-                        Use &quot;{search.trim()}&quot;
-                      </CommandItem>
-                    )}
-                </CommandGroup>
-              </CommandList>
-            </Command>
-          </PopoverContent>
-        </Popover>
-        {typeHint ? <p className="text-[11px] text-muted-foreground">Type: {typeHint}</p> : null}
+        <ProductNamePicker
+          label="Product (inventory name)"
+          value={line.productName}
+          onChange={onProductChange}
+          options={productOptions}
+          disabled={disabled}
+          placeholder="Select a product…"
+        />
+        {vendorHint ? <p className="text-[11px] text-muted-foreground">Vendor: {vendorHint}</p> : null}
       </div>
       <div className="w-full sm:w-24 flex flex-col gap-1">
         <Label className="text-xs text-muted-foreground">Qty</Label>

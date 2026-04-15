@@ -1,9 +1,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/database.types"
 import type { InternalLocation, InventoryItem, ItemStatus } from "@/lib/data"
-import { rowToInventoryItem, inventoryItemToRow } from "@/lib/supabase/inventory-db"
-
-type InventoryRow = Database["public"]["Tables"]["inventory_items"]["Row"]
+import {
+  rowToInventoryItem,
+  inventoryItemToRow,
+  INVENTORY_ITEM_SELECT,
+  type InventoryItemQueryRow,
+} from "@/lib/supabase/inventory-db"
 
 const SUPPORTED_STOCK_REVERSAL = ["Sale", "POC Out", "Rentals", "Dispose", "Transfer"] as const
 export type QuickScanStockReversibleType = (typeof SUPPORTED_STOCK_REVERSAL)[number]
@@ -150,14 +153,14 @@ export async function revertInventoryAndTransactionsForQuickScan(
     for (const serial of serials) {
       const { data: invRow, error: invErr } = await supabase
         .from("inventory_items")
-        .select("*")
+        .select(INVENTORY_ITEM_SELECT)
         .eq("serial_number", serial)
         .maybeSingle()
       if (invErr || !invRow) {
         errors.push(`${serial}: not found in inventory`)
         continue
       }
-      const item = rowToInventoryItem(invRow as InventoryRow)
+      const item = rowToInventoryItem(invRow as InventoryItemQueryRow)
       const { data: txn, error: txnErr } = await supabase
         .from("transactions")
         .select("id, from_location, to_location")
@@ -191,14 +194,14 @@ export async function revertInventoryAndTransactionsForQuickScan(
     for (const serial of serials) {
       const { data: invRow, error: invErr } = await supabase
         .from("inventory_items")
-        .select("*")
+        .select(INVENTORY_ITEM_SELECT)
         .eq("serial_number", serial)
         .maybeSingle()
       if (invErr || !invRow) {
         errors.push(`${serial}: not found in inventory`)
         continue
       }
-      const item = rowToInventoryItem(invRow as InventoryRow)
+      const item = rowToInventoryItem(invRow as InventoryItemQueryRow)
       if (item.status !== required) {
         errors.push(`${serial}: expected status "${required}", got "${item.status}"`)
         continue

@@ -1,4 +1,4 @@
-import type { InventoryItem, DeviceTypeName, ItemStatus, Transaction, TransactionType } from "@/lib/data"
+import type { InventoryItem, ItemStatus, Transaction, TransactionType } from "@/lib/data"
 
 /**
  * Given current inventory and movement params, compute the updated items and new transactions.
@@ -30,10 +30,8 @@ const OUTBOUND_CLOUD_KEY_TYPES: ReadonlySet<TransactionType> = new Set([
 
 export type InboundCreateDefaults = {
   name: string
-  deviceType: DeviceTypeName
   vendor: string
   location: string
-  deviceTypeId?: string
 }
 
 export type MovementRejection = { serial: string; reason: string }
@@ -44,8 +42,6 @@ export type MovementValidationContext = {
   expectedProductName?: string
   /** When set, normalized vendor (empty → General) must match. */
   expectedVendor?: string
-  /** When set, deviceType must match (case-insensitive). */
-  expectedDeviceType?: string
 }
 
 function normalizeInventoryVendor(value: string | undefined | null): string {
@@ -70,10 +66,6 @@ function validateProductExpectations(item: InventoryItem, ctx: MovementValidatio
     if (got.toLowerCase() !== want.toLowerCase()) {
       return `Vendor mismatch (item is ${got}, expected ${want})`
     }
-  }
-  const expType = ctx.expectedDeviceType?.trim()
-  if (expType && !stringsMatchCi(String(item.deviceType), expType)) {
-    return `Device type mismatch (item is ${item.deviceType}, expected ${expType})`
   }
   return null
 }
@@ -101,10 +93,14 @@ export function validateMovementForItem(
       if (st !== "In Stock") return `Not available for ${type} (status is ${st}, need In Stock)`
       return null
     case "Dispose":
-      if (st !== "In Stock" && st !== "Maintenance") return `Cannot dispose (status is ${st})`
+      if (st !== "In Stock" && st !== "Maintenance" && st !== "RMA Hold") {
+        return `Cannot dispose (status is ${st})`
+      }
       return null
     case "Transfer":
-      if (st !== "In Stock" && st !== "Maintenance") return `Cannot transfer (status is ${st})`
+      if (st !== "In Stock" && st !== "Maintenance" && st !== "RMA Hold") {
+        return `Cannot transfer (status is ${st})`
+      }
       if (ctx.fromLocation?.trim() && item.location !== ctx.fromLocation.trim()) {
         return `Item is at ${item.location}, not ${ctx.fromLocation.trim()}`
       }
@@ -112,15 +108,18 @@ export function validateMovementForItem(
     case "Inbound":
       if (st === "In Stock") return "Already in stock — cannot receive again"
       if (st === "Sold" || st === "POC" || st === "Rented" || st === "Disposed") {
-        return `Use POC Return, Rental Return, or undo — not Inbound (status is ${st})`
+        return `Use POC Return, Rental Return, Sale Return, or undo — not Inbound (status is ${st})`
       }
-      if (st === "Maintenance") return null
+      if (st === "Maintenance" || st === "RMA Hold") return null
       return `Inbound not allowed (status is ${st})`
     case "POC Return":
       if (st !== "POC") return `POC Return requires status POC (current: ${st})`
       return null
     case "Rental Return":
       if (st !== "Rented") return `Rental Return requires status Rented (current: ${st})`
+      return null
+    case "Sale Return":
+      if (st !== "Sold") return `Sale Return requires status Sold (current: ${st})`
       return null
     default:
       return null
@@ -159,7 +158,6 @@ export function computeMovementResult(
     saleTransactionDateIso?: string
     expectedProductName?: string
     expectedVendor?: string
-    expectedDeviceType?: string
   }
 ): {
   success: string[]
@@ -188,7 +186,6 @@ export function computeMovementResult(
     saleTransactionDateIso,
     expectedProductName,
     expectedVendor,
-    expectedDeviceType,
   } = params
   const nowIso = new Date().toISOString()
   const date = type === "Sale" ? resolveSaleTransactionDate(saleTransactionDateIso, nowIso) : nowIso
@@ -217,8 +214,6 @@ export function computeMovementResult(
         const newItem: InventoryItem = {
           id: `INV-${idBase}-${success.length}-${Math.random().toString(36).slice(2, 9)}`,
           serialNumber: trimmed,
-          deviceType: d.deviceType,
-          deviceTypeId: d.deviceTypeId,
           name: d.name,
           vendor: v,
           status: "In Stock",
@@ -255,7 +250,6 @@ export function computeMovementResult(
       fromLocation,
       expectedProductName,
       expectedVendor,
-      expectedDeviceType,
     })
     if (reason) {
       rejected.push({ serial: trimmed, reason })
@@ -304,6 +298,14 @@ export function computeMovementResult(
         it.pocOutDate = undefined
         it.returnDate = undefined
         break
+      case "Sale Return":
+        it.status = "RMA Hold"
+        it.location = toLocation ?? "Warehouse A"
+        it.client = undefined
+        it.assignedTo = undefined
+        it.pocOutDate = undefined
+        it.returnDate = undefined
+        break
       case "Rentals":
         it.status = "Rented"
         it.location = "Client Site"
@@ -341,7 +343,10 @@ export function computeMovementResult(
       notes,
       assignedTo: assignedTo ?? (type === "Sale" || type === "POC Out" || type === "Rentals" ? clientDisplay : undefined),
       fromLocation: type === "Transfer" ? fromLocation : undefined,
-      toLocation: type === "Transfer" || type === "POC Return" || type === "Rental Return" ? toLocation : undefined,
+      toLocation:
+        type === "Transfer" || type === "POC Return" || type === "Rental Return" || type === "Sale Return"
+          ? toLocation
+          : undefined,
       disposalReason: type === "Dispose" ? disposalReason : undefined,
       authorisedBy: type === "Dispose" ? authorisedBy : undefined,
       batchId: batchId ?? undefined,

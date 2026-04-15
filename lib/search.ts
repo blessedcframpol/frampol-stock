@@ -20,7 +20,6 @@ export function searchInventory(items: InventoryItem[], query: string): Inventor
     (item) =>
       matchQuery(item.serialNumber, q) ||
       matchQuery(item.name, q) ||
-      matchQuery(item.deviceType, q) ||
       matchQuery(item.assignedTo, q) ||
       matchQuery(item.client, q) ||
       matchQuery(item.location, q) ||

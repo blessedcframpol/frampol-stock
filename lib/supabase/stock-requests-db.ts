@@ -7,7 +7,7 @@ import { getSupabaseClient } from "./client"
 import { notifyRequestServicedByEmail } from "@/lib/notify-request-email"
 import { rowToClient } from "./clients-db"
 import type { Client } from "@/lib/data"
-import { rowToInventoryItem } from "./inventory-db"
+import { rowToInventoryItem, INVENTORY_ITEM_SELECT } from "./inventory-db"
 import type { InventoryItem } from "@/lib/data"
 
 type SB = SupabaseClient<Database>
@@ -100,18 +100,24 @@ export async function fetchAvailabilityByProductNames(
 ): Promise<Record<string, number>> {
   const unique = [...new Set(productNames.map((n) => n.trim()).filter(Boolean))]
   if (unique.length === 0) return {}
+  const norm = (s: string) => s.trim().toLowerCase()
+  const normToRequested = new Map<string, string>()
+  for (const n of unique) normToRequested.set(norm(n), n)
+
   const { data, error } = await sb
     .from("inventory_items")
-    .select("name, status, reserved_for_request_line_id")
+    .select("status, reserved_for_request_line_id, product_lines(product_name)")
     .eq("status", "In Stock")
     .is("reserved_for_request_line_id", null)
-    .in("name", unique)
   if (error) throw error
   const counts: Record<string, number> = {}
   for (const n of unique) counts[n] = 0
   for (const row of data ?? []) {
-    const n = row.name
-    counts[n] = (counts[n] ?? 0) + 1
+    const pl = row.product_lines as { product_name: string } | null
+    const pn = pl?.product_name?.trim() ?? ""
+    const key = norm(pn)
+    const requested = normToRequested.get(key)
+    if (requested) counts[requested] = (counts[requested] ?? 0) + 1
   }
   return counts
 }
@@ -136,10 +142,11 @@ export async function fetchInventoryItemsForAssignment(
   sb: SB,
   productName: string
 ): Promise<InventoryItem[]> {
+  const trimmed = productName.trim()
   const { data, error } = await sb
     .from("inventory_items")
-    .select("*")
-    .eq("name", productName.trim())
+    .select("*, product_lines!inner(product_name, vendor)")
+    .eq("product_lines.product_name", trimmed)
     .eq("status", "In Stock")
     .order("date_added", { ascending: true })
   if (error) throw error
@@ -151,7 +158,7 @@ export type CreateRequestInput = {
   createdBy: string
   notes?: string | null
   quotationUrl?: string | null
-  lines: { productName: string; deviceType?: string | null; quantity: number }[]
+  lines: { productName: string; quantity: number }[]
 }
 
 export async function createStockRequest(sb: SB, input: CreateRequestInput): Promise<StockRequestWithRelations> {
@@ -172,7 +179,6 @@ export async function createStockRequest(sb: SB, input: CreateRequestInput): Pro
   const lineRows = input.lines.map((l, i) => ({
     request_id: requestId,
     product_name: l.productName.trim(),
-    device_type: l.deviceType ?? null,
     quantity_requested: l.quantity,
     sort_order: i,
   }))
@@ -251,14 +257,13 @@ export async function updateDraftRequest(
 export async function replaceDraftLines(
   sb: SB,
   requestId: string,
-  lines: { productName: string; deviceType?: string | null; quantity: number }[]
+  lines: { productName: string; quantity: number }[]
 ): Promise<void> {
   const { error: delErr } = await sb.from("stock_request_lines").delete().eq("request_id", requestId)
   if (delErr) throw delErr
   const lineRows = lines.map((l, i) => ({
     request_id: requestId,
     product_name: l.productName.trim(),
-    device_type: l.deviceType ?? null,
     quantity_requested: l.quantity,
     sort_order: i,
   }))

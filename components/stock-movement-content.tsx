@@ -26,6 +26,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command"
+import { ProductNamePicker } from "@/components/product-name-picker"
 import {
   Dialog,
   DialogContent,
@@ -34,20 +35,20 @@ import {
 } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
 import { LOCATIONS, INTERNAL_LOCATIONS } from "@/lib/data"
-import type { DeviceTypeName, TransactionType, ClientSite } from "@/lib/data"
+import type { TransactionType, ClientSite } from "@/lib/data"
 import { useClients, insertClient } from "@/lib/supabase/clients-db"
 import { useInventoryStore } from "@/lib/inventory-store"
 import {
   ScanBarcode,
   FileText,
   Package,
-  ChevronsUpDown,
   Plus,
   MapPin,
   Loader2,
   Upload,
   X,
   Trash2,
+  ChevronsUpDown,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -60,13 +61,22 @@ import { canManageUsers } from "@/lib/permissions"
 import {
   OUTBOUND_LIKE_MOVEMENTS,
   NEW_CLIENT_SELECT,
-  DEVICE_TYPE_OPTIONS,
   TRANSACTION_TYPE_CHOICES,
 } from "@/lib/stock-movement-form-logic"
 
 const transactionTypes = TRANSACTION_TYPE_CHOICES
 
-type PendingOutbound = { productName: string; movementType: string; serials: string[] }
+/** Matches movement-utils / DB: empty vendor → General */
+function normalizeInventoryVendor(value: string | undefined | null): string {
+  const t = (value ?? "").trim()
+  return t || "General"
+}
+
+function productNamesMatch(a: string, b: string): boolean {
+  return a.trim().toLowerCase() === b.trim().toLowerCase()
+}
+
+type PendingOutbound = { productName: string; movementType: string; serials: string[]; vendor: string }
 type MissingSerialsState = { missing: string[]; productName: string; movementType: string; allSerials: string[] }
 
 export type StockMovementEmbedMode = {
@@ -76,22 +86,18 @@ export type StockMovementEmbedMode = {
   initialMovementType?: string
   /** From inventory row(s): guard existing serials against wrong vendor (embed). */
   expectedVendor?: string
-  /** From inventory row(s): guard existing serials against wrong device type (embed). */
-  expectedDeviceType?: string
   onClose?: () => void
 }
 
 export function StockMovementContent({ embedMode }: { embedMode?: StockMovementEmbedMode }) {
   const isEmbed = Boolean(embedMode)
-  const { inventory, applyMovement, addItem, deviceTypes, refetchLedger } = useInventoryStore()
+  const { inventory, applyMovement, addItem, refetchLedger } = useInventoryStore()
   const { clients, refetch: refetchClients } = useClients()
   const { role } = useAuth()
   const isAdmin = canManageUsers(role)
   const [selectedType, setSelectedType] = useState<string>("Inbound")
   const [serialNumbers, setSerialNumbers] = useState("")
   const [productName, setProductName] = useState("")
-  const [productOpen, setProductOpen] = useState(false)
-  const [comboboxSearch, setComboboxSearch] = useState("")
   const [clientId, setClientId] = useState<string>("")
   const [invoiceNumber, setInvoiceNumber] = useState("")
   const [notes, setNotes] = useState("")
@@ -116,7 +122,7 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
   const [addingToInventory, setAddingToInventory] = useState(false)
   const [deliveryNoteFile, setDeliveryNoteFile] = useState<File | null>(null)
   const [inboundReceiveLocation, setInboundReceiveLocation] = useState<string>("Warehouse A")
-  const [inboundVendor, setInboundVendor] = useState<string>("General")
+  const [scanVendor, setScanVendor] = useState<string>("General")
   const outboundCloudKeysRef = useRef<Record<string, string> | undefined>(undefined)
   const [cloudKeysInput, setCloudKeysInput] = useState("")
   const [mainNewClientName, setMainNewClientName] = useState("")
@@ -131,6 +137,9 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
     if (!embedMode) return
     setSerialNumbers(embedMode.fixedSerials.join(", "))
     setProductName(embedMode.fixedProductName)
+    if (embedMode.expectedVendor !== undefined) {
+      setScanVendor(normalizeInventoryVendor(embedMode.expectedVendor))
+    }
     const allowed = TRANSACTION_TYPE_CHOICES.filter((t) => t.value !== "Inbound").map((t) => t.value)
     const init = embedMode.initialMovementType
     setSelectedType(init && allowed.includes(init) ? init : "Transfer")
@@ -154,23 +163,38 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
         : "Not selected"
       : clients.find((c) => c.id === clientId)?.company ?? clientId
 
-  const productNames = useMemo(() => {
+  const filteredProductOptions = useMemo(() => {
+    const want = normalizeInventoryVendor(scanVendor)
     const names = new Set<string>()
-    inventory.forEach((item) => names.add(item.name))
+    for (const item of inventory) {
+      if (normalizeInventoryVendor(item.vendor).toLowerCase() === want.toLowerCase()) {
+        names.add(item.name)
+      }
+    }
     return Array.from(names).sort()
-  }, [inventory])
-  const allOptions = useMemo(() => {
-    const types = DEVICE_TYPE_OPTIONS.map((o) => o.label)
-    const combined = [...productNames]
-    types.forEach((t) => {
-      if (!combined.includes(t)) combined.push(t)
+  }, [inventory, scanVendor])
+
+  function handleScanVendorChange(next: string) {
+    setScanVendor(next)
+    const want = normalizeInventoryVendor(next)
+    setProductName((prev) => {
+      const p = prev.trim()
+      if (!p) return prev
+      const existsForVendor = inventory.some(
+        (i) =>
+          productNamesMatch(i.name, p) &&
+          normalizeInventoryVendor(i.vendor).toLowerCase() === want.toLowerCase()
+      )
+      if (existsForVendor) return prev
+      const existsInInventory = inventory.some((i) => productNamesMatch(i.name, p))
+      if (!existsInInventory) return prev
+      return ""
     })
-    return combined.sort()
-  }, [productNames])
+  }
   const inventorySerialSet = useMemo(() => new Set(inventory.map((i) => i.serialNumber)), [inventory])
   const requiresOutboundDetails = OUTBOUND_LIKE_MOVEMENTS.includes(selectedType as TransactionType)
 
-  const inboundVendorOptions = useMemo(() => {
+  const vendorOptions = useMemo(() => {
     const fromInv = inventory
       .map((i) => (i.vendor?.trim() ? i.vendor.trim() : null))
       .filter((c): c is string => Boolean(c))
@@ -195,26 +219,18 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
     }
   }
 
-  function inferDeviceType(name: string): DeviceTypeName {
-    const matchInv = inventory.find((i) => i.name === name)
-    if (matchInv?.deviceType) return matchInv.deviceType as DeviceTypeName
-    const opt = DEVICE_TYPE_OPTIONS.find((o) => o.label === name)
-    if (opt) return opt.value
-    return "Starlink Kit"
-  }
-
   async function handleAddMissingAndContinue() {
     if (!missingSerialsState) return
     setAddingToInventory(true)
     try {
       const { missing, productName: pn, movementType, allSerials } = missingSerialsState
-      const deviceType = inferDeviceType(pn)
       const today = new Date().toISOString().slice(0, 10)
+      const v = normalizeInventoryVendor(scanVendor)
       for (const serial of missing) {
-        addItem({
+        await addItem({
           serialNumber: serial,
-          deviceType,
           name: pn,
+          vendor: v,
           status: "In Stock",
           dateAdded: today,
           location: "Warehouse A",
@@ -222,7 +238,7 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
       }
       toast.success(`${missing.length} item(s) added to inventory. Continue with client details.`)
       setMissingSerialsState(null)
-      setPendingOutbound({ productName: pn, movementType, serials: allSerials })
+      setPendingOutbound({ productName: pn, movementType, serials: allSerials, vendor: v })
       setOutboundClientId("")
       setOutboundClientSearch("")
       setNewClientName("")
@@ -284,26 +300,45 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
     const pn = productName.trim()
     let inboundDefaults: InboundCreateDefaults | undefined
     if (selectedType === "Inbound") {
-      const it = inferDeviceType(pn)
       inboundDefaults = {
         name: pn,
-        deviceType: it,
-        vendor: inboundVendor.trim() || "General",
+        vendor: normalizeInventoryVendor(scanVendor),
         location: inboundReceiveLocation.trim() || "Warehouse A",
-        deviceTypeId:
-          deviceTypes.find((pt) => pt.name.toLowerCase() === it.toLowerCase())?.id ??
-          deviceTypes.find((pt) => pt.name === "General")?.id,
       }
     } else {
       inboundDefaults = undefined
     }
+
+    const expectedVendorForMovement: string | undefined = pendingOutbound
+      ? normalizeInventoryVendor(pendingOutbound.vendor)
+      : isEmbed
+        ? embedMode?.expectedVendor !== undefined
+          ? normalizeInventoryVendor(embedMode.expectedVendor)
+          : undefined
+        : normalizeInventoryVendor(scanVendor)
+
     const result = applyMovement({
-      type: selectedType as "Inbound" | "Sale" | "POC Out" | "POC Return" | "Rental Return" | "Rentals" | "Transfer" | "Dispose",
+      type: selectedType as
+        | "Inbound"
+        | "Sale"
+        | "POC Out"
+        | "POC Return"
+        | "Rental Return"
+        | "Sale Return"
+        | "Rentals"
+        | "Transfer"
+        | "Dispose",
       serialNumbers: list,
       clientId: effectiveClientId,
       clientDisplayOverride,
       fromLocation: selectedType === "Transfer" ? fromLocation : undefined,
-      toLocation: (selectedType === "Transfer" || selectedType === "POC Return" || selectedType === "Rental Return") ? toLocation || undefined : undefined,
+      toLocation:
+        selectedType === "Transfer" ||
+        selectedType === "POC Return" ||
+        selectedType === "Rental Return" ||
+        selectedType === "Sale Return"
+          ? toLocation || undefined
+          : undefined,
       assignedTo: (outboundDetails?.clientName ?? outboundDetails?.clientCompany) ?? (clientId ? clients.find((c) => c.id === clientId)?.company : undefined),
       invoiceNumber: invoiceNumber.trim() || undefined,
       notes: notes.trim() || undefined,
@@ -320,18 +355,11 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
       cloudKeysBySerial,
       saleTransactionDateIso:
         selectedType === "Sale" && isAdmin && adminSaleDate.trim() ? adminSaleDate.trim() : undefined,
-      ...(pn ? { expectedProductName: pn } : {}),
-      ...(selectedType === "Inbound"
-        ? {
-            expectedVendor:
-              isEmbed && embedMode?.expectedVendor !== undefined
-                ? embedMode.expectedVendor
-                : inboundVendor.trim() || "General",
-          }
-        : {}),
-      ...(isEmbed && embedMode?.expectedDeviceType !== undefined
-        ? { expectedDeviceType: embedMode.expectedDeviceType }
-        : {}),
+      ...(pn && expectedVendorForMovement !== undefined
+        ? { expectedProductName: pn, expectedVendor: expectedVendorForMovement }
+        : pn
+          ? { expectedProductName: pn }
+          : {}),
     })
     if (result.success.length > 0) {
       toast.success(`Recorded ${result.success.length} item(s)`)
@@ -439,7 +467,7 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
 
   async function handleSubmit() {
     if (!productName.trim()) {
-      toast.error("Select or enter product (name or device type)")
+      toast.error("Select or enter a product name")
       return
     }
     if (uniqueSerials.length === 0) {
@@ -454,7 +482,10 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
       toast.error("From and To locations must be different")
       return
     }
-    if ((selectedType === "POC Return" || selectedType === "Rental Return") && !toLocation) {
+    if (
+      (selectedType === "POC Return" || selectedType === "Rental Return" || selectedType === "Sale Return") &&
+      !toLocation
+    ) {
       toast.error("Select return location")
       return
     }
@@ -574,6 +605,7 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
       productName: productName.trim(),
       movementType: selectedType,
       serials: uniqueSerials,
+      vendor: normalizeInventoryVendor(scanVendor),
     })
     setOutboundClientId(resolvedClientId || "")
     setOutboundClientSearch("")
@@ -664,81 +696,28 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
               ) : (
                 <>
               <div className="flex flex-col gap-2">
-                <Label className="text-xs text-muted-foreground">Product (name or device type)</Label>
-                <Popover open={productOpen} onOpenChange={setProductOpen}>
-                  <PopoverTrigger asChild>
-                    <Button
-                      variant="outline"
-                      role="combobox"
-                      aria-expanded={productOpen}
-                      className="w-full justify-between h-10 bg-card border-border text-foreground font-normal"
-                    >
-                      <span className={cn("truncate", !productName && "text-muted-foreground")}>
-                        {productName || "Select or search product..."}
-                      </span>
-                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="min-w-[280px] p-0" align="start">
-                    <Command shouldFilter={false}>
-                      <CommandInput
-                        placeholder="Search products..."
-                        value={comboboxSearch}
-                        onValueChange={setComboboxSearch}
-                      />
-                      <CommandList>
-                        <CommandEmpty>
-                          <span className="py-6 text-center text-sm text-muted-foreground block">
-                            Type to search or add a new product below.
-                          </span>
-                        </CommandEmpty>
-                        {(() => {
-                          const q = comboboxSearch.trim().toLowerCase()
-                          const filtered = q ? allOptions.filter((name) => name.toLowerCase().includes(q)) : allOptions
-                          const canAdd = q && !allOptions.some((o) => o.toLowerCase() === q)
-                          return (
-                            <>
-                              {filtered.length > 0 && (
-                                <CommandGroup heading="Products & types">
-                                  {filtered.map((name) => (
-                                    <CommandItem
-                                      key={name}
-                                      value={name}
-                                      onSelect={() => {
-                                        setProductName(name)
-                                        setComboboxSearch("")
-                                        setProductOpen(false)
-                                      }}
-                                    >
-                                      {name}
-                                    </CommandItem>
-                                  ))}
-                                </CommandGroup>
-                              )}
-                              {canAdd && (
-                                <CommandGroup>
-                                  <CommandItem
-                                    value={`__add:${comboboxSearch.trim()}`}
-                                    onSelect={() => {
-                                      setProductName(comboboxSearch.trim())
-                                      setComboboxSearch("")
-                                      setProductOpen(false)
-                                    }}
-                                    className="text-primary gap-2"
-                                  >
-                                    <Plus className="h-4 w-4" />
-                                    Add &quot;{comboboxSearch.trim()}&quot; as new product
-                                  </CommandItem>
-                                </CommandGroup>
-                              )}
-                            </>
-                          )
-                        })()}
-                      </CommandList>
-                    </Command>
-                  </PopoverContent>
-                </Popover>
+                <Label className="text-xs text-muted-foreground">Vendor</Label>
+                <Select value={scanVendor} onValueChange={handleScanVendorChange} disabled={isSubmitting}>
+                  <SelectTrigger className="h-10 w-full bg-card text-foreground border-border">
+                    <SelectValue placeholder="Vendor" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {vendorOptions.map((cat) => (
+                      <SelectItem key={cat} value={cat}>
+                        {cat}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
+              <ProductNamePicker
+                label="Product name"
+                value={productName}
+                onChange={setProductName}
+                options={filteredProductOptions}
+                disabled={isSubmitting}
+                placeholder="Select a product…"
+              />
               <div className="flex flex-col gap-2">
                 <Label className="text-xs text-muted-foreground">
                   Serial numbers (comma or newline separated; paste a list to add commas)
@@ -837,37 +816,20 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
                 </div>
               )}
               {selectedType === "Inbound" && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="flex flex-col gap-2">
-                    <Label className="text-foreground">Receive location</Label>
-                    <Select value={inboundReceiveLocation} onValueChange={setInboundReceiveLocation}>
-                      <SelectTrigger className="bg-card text-foreground border-border">
-                        <SelectValue placeholder="Location" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {INTERNAL_LOCATIONS.map((loc) => (
-                          <SelectItem key={loc} value={loc}>
-                            {loc}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    <Label className="text-foreground">Vendor</Label>
-                    <Select value={inboundVendor} onValueChange={setInboundVendor}>
-                      <SelectTrigger className="bg-card text-foreground border-border">
-                        <SelectValue placeholder="Vendor" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {inboundVendorOptions.map((cat) => (
-                          <SelectItem key={cat} value={cat}>
-                            {cat}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
+                <div className="flex flex-col gap-2">
+                  <Label className="text-foreground">Receive location</Label>
+                  <Select value={inboundReceiveLocation} onValueChange={setInboundReceiveLocation}>
+                    <SelectTrigger className="bg-card text-foreground border-border">
+                      <SelectValue placeholder="Location" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {INTERNAL_LOCATIONS.map((loc) => (
+                        <SelectItem key={loc} value={loc}>
+                          {loc}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               )}
               {(selectedType === "Sale" || selectedType === "POC Out" || selectedType === "Rentals" || selectedType === "Transfer" || selectedType === "Dispose") && (
@@ -1079,9 +1041,11 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
                   </div>
                 </div>
               )}
-              {(selectedType === "POC Return" || selectedType === "Rental Return") && (
+              {(selectedType === "POC Return" || selectedType === "Rental Return" || selectedType === "Sale Return") && (
                 <div className="flex flex-col gap-2">
-                  <Label className="text-foreground">Return To Location</Label>
+                  <Label className="text-foreground">
+                    {selectedType === "Sale Return" ? "Hold location (where faulty unit is stored)" : "Return To Location"}
+                  </Label>
                   <Select value={toLocation} onValueChange={setToLocation}>
                     <SelectTrigger className="bg-card text-foreground border-border">
                       <SelectValue placeholder="Select location..." />
@@ -1092,6 +1056,11 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
                       ))}
                     </SelectContent>
                   </Select>
+                  {selectedType === "Sale Return" && (
+                    <p className="text-xs text-muted-foreground">
+                      Status becomes <strong>RMA Hold</strong>. Use notes for Starlink / vendor case IDs. When replacement arrives, inbound the new serial; use Dispose when the faulty unit is written off.
+                    </p>
+                  )}
                 </div>
               )}
               {selectedType === "Dispose" && (
@@ -1176,6 +1145,8 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
                     selectedType === "Rentals" && "bg-blue-500/10 text-blue-500 dark:text-blue-400",
                     selectedType === "POC Out" && "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400",
                     selectedType === "POC Return" && "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+                    selectedType === "Rental Return" && "bg-blue-500/10 text-blue-600 dark:text-blue-400",
+                    selectedType === "Sale Return" && "bg-orange-500/10 text-orange-600 dark:text-orange-400",
                     selectedType === "Transfer" && "bg-violet-500/10 text-violet-600 dark:text-violet-400",
                     selectedType === "Dispose" && "bg-slate-500/10 text-slate-600 dark:text-slate-400",
                   )}
@@ -1204,6 +1175,14 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
                     <span className="text-sm text-foreground">{toLocation || "—"}</span>
                   </div>
                 </>
+              )}
+              {(selectedType === "POC Return" || selectedType === "Rental Return" || selectedType === "Sale Return") && (
+                <div className="flex items-center justify-between py-2 border-b border-border">
+                  <span className="text-sm text-muted-foreground">
+                    {selectedType === "Sale Return" ? "Hold location" : "Return location"}
+                  </span>
+                  <span className="text-sm text-foreground">{toLocation || "—"}</span>
+                </div>
               )}
               {selectedType === "Inbound" && (
                 <div className="flex items-center justify-between py-2 border-b border-border">
@@ -1287,7 +1266,8 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
           {pendingOutbound && (
             <div className="flex flex-col gap-4">
               <p className="text-sm text-muted-foreground">
-                {pendingOutbound.serials.length} item(s) · {pendingOutbound.productName} · {pendingOutbound.movementType}
+                {pendingOutbound.serials.length} item(s) · {pendingOutbound.productName} ·{" "}
+                {pendingOutbound.vendor} · {pendingOutbound.movementType}
               </p>
               <div className="flex flex-col gap-2">
                 <Label className="text-xs font-medium">Client</Label>

@@ -41,7 +41,6 @@ export function RecordStockMovementDialog({ open, onOpenChange, items, initialMo
       fixedProductName: productName,
       initialMovementType,
       expectedVendor: (first.vendor ?? "").trim() || "General",
-      expectedDeviceType: first.deviceType,
       onClose: () => onOpenChangeRef.current(false),
     }
   }, [open, items, productName, initialMovementType, serialKey])

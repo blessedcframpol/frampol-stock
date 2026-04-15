@@ -132,7 +132,7 @@ export function AlertsContent() {
                         <TableHeader>
                           <TableRow className="hover:bg-transparent border-b border-border">
                             <TableHead className="text-xs text-muted-foreground font-medium">Product</TableHead>
-                            <TableHead className="text-xs text-muted-foreground font-medium">Device type</TableHead>
+                            <TableHead className="text-xs text-muted-foreground font-medium">Vendor</TableHead>
                             <TableHead className="text-xs text-muted-foreground font-medium">In stock</TableHead>
                             <TableHead className="text-xs text-muted-foreground font-medium w-20" />
                           </TableRow>
@@ -141,7 +141,7 @@ export function AlertsContent() {
                           {alerts.lowStock.map((a) => (
                             <TableRow key={a.groupName} className="border-b border-border/50">
                               <TableCell className="font-medium text-foreground">{a.groupName}</TableCell>
-                              <TableCell className="text-sm text-muted-foreground">{a.deviceType}</TableCell>
+                              <TableCell className="text-sm text-muted-foreground">{a.vendor}</TableCell>
                               <TableCell className="text-sm">{a.inStock}</TableCell>
                               <TableCell>
                                 <Button variant="ghost" size="sm" className="h-8 text-xs" asChild>
@@ -317,7 +317,7 @@ export function AlertsContent() {
                       <TableHeader>
                         <TableRow className="hover:bg-transparent border-b border-border">
                           <TableHead className="text-xs text-muted-foreground font-medium">Product</TableHead>
-                          <TableHead className="text-xs text-muted-foreground font-medium">Device type</TableHead>
+                          <TableHead className="text-xs text-muted-foreground font-medium">Vendor</TableHead>
                           <TableHead className="text-xs text-muted-foreground font-medium">In stock</TableHead>
                           <TableHead className="text-xs text-muted-foreground font-medium w-20" />
                         </TableRow>
@@ -326,7 +326,7 @@ export function AlertsContent() {
                         {alerts.lowStock.map((a) => (
                           <TableRow key={a.groupName} className="border-b border-border/50">
                             <TableCell className="font-medium text-foreground">{a.groupName}</TableCell>
-                            <TableCell className="text-sm text-muted-foreground">{a.deviceType}</TableCell>
+                            <TableCell className="text-sm text-muted-foreground">{a.vendor}</TableCell>
                             <TableCell className="text-sm">{a.inStock}</TableCell>
                             <TableCell>
                               <Button variant="ghost" size="sm" className="h-8 text-xs" asChild>

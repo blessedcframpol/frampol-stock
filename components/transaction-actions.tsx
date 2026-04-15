@@ -2,7 +2,6 @@
 
 import { useState, useMemo } from "react"
 import type { Transaction } from "@/lib/data"
-import type { DeviceTypeName } from "@/lib/data"
 import {
   Dialog,
   DialogContent,
@@ -11,47 +10,16 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
-import { Label } from "@/components/ui/label"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import {
-  Command,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command"
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover"
+import { ProductNamePicker } from "@/components/product-name-picker"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Undo2, MoreHorizontal, ArrowRightLeft, Loader2, ChevronsUpDown, Plus } from "lucide-react"
+import { Undo2, MoreHorizontal, ArrowRightLeft, Loader2 } from "lucide-react"
 import { useInventoryStore } from "@/lib/inventory-store"
 import { toast } from "sonner"
-import { cn } from "@/lib/utils"
-
-const DEVICE_TYPE_CHOICES: DeviceTypeName[] = [
-  "Starlink Kit",
-  "Laptop",
-  "Desktop",
-  "Router",
-  "Switch",
-  "Access Point",
-  "UPS",
-  "Monitor",
-]
-
 interface TransactionActionsProps {
   transaction: Transaction
   /** Compact mode: icon-only trigger for dashboard table */
@@ -61,10 +29,7 @@ interface TransactionActionsProps {
 export function TransactionActions({ transaction, compact }: TransactionActionsProps) {
   const { undoTransaction, reassignTransaction, inventory } = useInventoryStore()
   const [reassignOpen, setReassignOpen] = useState(false)
-  const [productPopoverOpen, setProductPopoverOpen] = useState(false)
   const [reassignName, setReassignName] = useState(transaction.itemName)
-  const [reassignType, setReassignType] = useState<DeviceTypeName | "">("")
-  const [reassignSearch, setReassignSearch] = useState("")
   const [busy, setBusy] = useState(false)
 
   const productNames = useMemo(() => {
@@ -72,24 +37,6 @@ export function TransactionActions({ transaction, compact }: TransactionActionsP
     inventory.forEach((item) => names.add(item.name))
     return Array.from(names).sort()
   }, [inventory])
-
-  const allProductOptions = useMemo(() => {
-    const combined = [...productNames]
-    DEVICE_TYPE_CHOICES.forEach((t) => {
-      if (!combined.includes(t)) combined.push(t)
-    })
-    return combined.sort()
-  }, [productNames])
-
-  const filteredProducts = useMemo(() => {
-    const q = reassignSearch.trim().toLowerCase()
-    if (!q) return allProductOptions
-    return allProductOptions.filter((o) => o.toLowerCase().includes(q))
-  }, [allProductOptions, reassignSearch])
-
-  const canAddCustomProduct =
-    reassignSearch.trim() &&
-    !allProductOptions.some((o) => o.toLowerCase() === reassignSearch.trim().toLowerCase())
 
   async function handleUndo() {
     setBusy(true)
@@ -116,11 +63,7 @@ export function TransactionActions({ transaction, compact }: TransactionActionsP
     }
     setBusy(true)
     try {
-      const result = await reassignTransaction(
-        transaction.id,
-        name,
-        reassignType || undefined
-      )
+      const result = await reassignTransaction(transaction.id, name)
       if (result.ok) {
         toast.success(`Reassigned to ${name}`)
         setReassignOpen(false)
@@ -137,8 +80,6 @@ export function TransactionActions({ transaction, compact }: TransactionActionsP
 
   function openReassign() {
     setReassignName(transaction.itemName)
-    setReassignType("")
-    setReassignSearch("")
     setReassignOpen(true)
   }
 
@@ -184,77 +125,14 @@ export function TransactionActions({ transaction, compact }: TransactionActionsP
             <span className="font-mono">{transaction.serialNumber}</span>
           </p>
           <div className="space-y-4 py-2">
-            <div className="space-y-2">
-              <Label>Product name</Label>
-              <Popover open={productPopoverOpen} onOpenChange={setProductPopoverOpen}>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    role="combobox"
-                    className="w-full justify-between font-normal"
-                  >
-                    <span className={cn("truncate", !reassignName && "text-muted-foreground")}>
-                      {reassignName || "Search or select product..."}
-                    </span>
-                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="min-w-[280px] p-0" align="start">
-                  <Command shouldFilter={false}>
-                    <CommandInput
-                      placeholder="Search products..."
-                      value={reassignSearch}
-                      onValueChange={setReassignSearch}
-                    />
-                    <CommandList>
-                      {filteredProducts.map((name) => (
-                        <CommandItem
-                          key={name}
-                          value={name}
-                          onSelect={() => {
-                            setReassignName(name)
-                            setProductPopoverOpen(false)
-                          }}
-                        >
-                          {name}
-                        </CommandItem>
-                      ))}
-                      {canAddCustomProduct && (
-                        <CommandItem
-                          value={`__add:${reassignSearch.trim()}`}
-                          onSelect={() => {
-                            setReassignName(reassignSearch.trim())
-                            setProductPopoverOpen(false)
-                          }}
-                          className="text-primary gap-2"
-                        >
-                          <Plus className="h-4 w-4" />
-                          Use &quot;{reassignSearch.trim()}&quot; as product name
-                        </CommandItem>
-                      )}
-                    </CommandList>
-                  </Command>
-                </PopoverContent>
-              </Popover>
-            </div>
-            <div className="space-y-2">
-              <Label>Device type (optional)</Label>
-              <Select
-                value={reassignType}
-                onValueChange={(v) => setReassignType(v as DeviceTypeName)}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Same as before" />
-                </SelectTrigger>
-                <SelectContent>
-                  {DEVICE_TYPE_CHOICES.map((t) => (
-                    <SelectItem key={t} value={t}>
-                      {t}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            <ProductNamePicker
+              label="Product name"
+              value={reassignName}
+              onChange={setReassignName}
+              options={productNames}
+              disabled={busy}
+              placeholder="Select a product…"
+            />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setReassignOpen(false)}>

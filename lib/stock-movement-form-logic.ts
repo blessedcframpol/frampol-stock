@@ -1,4 +1,4 @@
-import type { DeviceTypeName, TransactionType } from "@/lib/data"
+import type { TransactionType } from "@/lib/data"
 import type { LucideIcon } from "lucide-react"
 import {
   ArrowDownLeft,
@@ -8,23 +8,13 @@ import {
   Calendar,
   ArrowLeftRight,
   Trash2,
+  PackageX,
 } from "lucide-react"
 
 /** Movement types that use the outbound-style client / cloud-key form. */
 export const OUTBOUND_LIKE_MOVEMENTS: TransactionType[] = ["Sale", "POC Out", "Transfer", "Dispose", "Rentals"]
 
 export const NEW_CLIENT_SELECT = "__new__"
-
-export const DEVICE_TYPE_OPTIONS: { value: DeviceTypeName; label: string }[] = [
-  { value: "Starlink Kit", label: "Starlink Kit" },
-  { value: "Laptop", label: "Laptop" },
-  { value: "Desktop", label: "Desktop" },
-  { value: "Router", label: "Router" },
-  { value: "Switch", label: "Switch" },
-  { value: "Access Point", label: "Access Point" },
-  { value: "UPS", label: "UPS" },
-  { value: "Monitor", label: "Monitor" },
-]
 
 export type TransactionTypeChoice = {
   value: string
@@ -42,6 +32,14 @@ export const TRANSACTION_TYPE_CHOICES: TransactionTypeChoice[] = [
   { value: "POC Return", label: "POC Return", icon: RotateCcw, color: "text-amber-600 dark:text-amber-400", bg: "bg-amber-500/10", desc: "Receive POC return" },
   { value: "Rentals", label: "Rentals", icon: Calendar, color: "text-blue-600 dark:text-blue-400", bg: "bg-blue-500/10", desc: "Rent out to client" },
   { value: "Rental Return", label: "Rental Return", icon: RotateCcw, color: "text-blue-600 dark:text-blue-400", bg: "bg-blue-500/10", desc: "Receive rental return" },
+  {
+    value: "Sale Return",
+    label: "Sale Return",
+    icon: PackageX,
+    color: "text-orange-600 dark:text-orange-400",
+    bg: "bg-orange-500/10",
+    desc: "Faulty sold unit returned — RMA hold",
+  },
   { value: "Transfer", label: "Transfer", icon: ArrowLeftRight, color: "text-violet-600 dark:text-violet-400", bg: "bg-violet-500/10", desc: "Move between locations" },
   { value: "Dispose", label: "Dispose", icon: Trash2, color: "text-slate-600 dark:text-slate-400", bg: "bg-slate-500/10", desc: "Dispose of asset" },
 ]

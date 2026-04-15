@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState, type ReactNode } from "react"
-import type { InventoryItem, DeviceTypeName } from "@/lib/data"
+import type { InventoryItem } from "@/lib/data"
 import { LOCATIONS } from "@/lib/data"
 import { useInventoryStore, INVENTORY_TRASH_RETENTION_DAYS } from "@/lib/inventory-store"
 import { useAuth } from "@/lib/auth-context"
@@ -74,7 +74,7 @@ type Props = {
 }
 
 export function InventoryItemActionsMenu({ item, menuTrigger, onRecordMovement }: Props) {
-  const { transactions, updateItem, softDeleteItem, deviceTypes } = useInventoryStore()
+  const { transactions, updateItem, softDeleteItem } = useInventoryStore()
   const { role } = useAuth()
   const isAdmin = canEditInventory(role)
 
@@ -84,18 +84,11 @@ export function InventoryItemActionsMenu({ item, menuTrigger, onRecordMovement }
   const [deleting, setDeleting] = useState(false)
 
   const [editName, setEditName] = useState("")
-  const [editDeviceTypeId, setEditDeviceTypeId] = useState("")
   const [editVendor, setEditVendor] = useState("")
   const [editLocation, setEditLocation] = useState("")
   const [editNotes, setEditNotes] = useState("")
   const [editPurchase, setEditPurchase] = useState("")
   const [editWarranty, setEditWarranty] = useState("")
-
-  const typesForEdit = useMemo(() => {
-    const active = deviceTypes.filter((pt) => pt.active).sort((a, b) => a.name.localeCompare(b.name))
-    if (active.length > 0) return active
-    return [...deviceTypes].sort((a, b) => a.name.localeCompare(b.name))
-  }, [deviceTypes])
 
   const recentTxns = useMemo(() => {
     return transactions
@@ -107,42 +100,33 @@ export function InventoryItemActionsMenu({ item, menuTrigger, onRecordMovement }
   useEffect(() => {
     if (!editOpen) return
     setEditName(item.name)
-    const ptId =
-      item.deviceTypeId ??
-      typesForEdit.find((p) => p.name === item.deviceType)?.id ??
-      typesForEdit[0]?.id ??
-      ""
-    setEditDeviceTypeId(ptId)
     setEditVendor(item.vendor != null && String(item.vendor).trim() ? String(item.vendor) : "")
     setEditLocation(item.location)
     setEditNotes(item.notes ?? "")
     setEditPurchase(dateToInputValue(item.purchaseDate))
     setEditWarranty(dateToInputValue(item.warrantyEndDate))
-  }, [editOpen, item, typesForEdit])
+  }, [editOpen, item])
 
-  function handleSaveEdit() {
-    const pt = typesForEdit.find((p) => p.id === editDeviceTypeId)
-    if (!pt) {
-      toast.error("Select a device type")
-      return
-    }
+  async function handleSaveEdit() {
     const nameTrim = editName.trim()
     if (!nameTrim) {
       toast.error("Product name is required")
       return
     }
-    updateItem(item.id, {
-      name: nameTrim,
-      deviceType: pt.name as DeviceTypeName,
-      deviceTypeId: pt.id,
-      vendor: editVendor.trim() || "General",
-      location: editLocation,
-      notes: editNotes.trim() || undefined,
-      purchaseDate: editPurchase.trim() || undefined,
-      warrantyEndDate: editWarranty.trim() || undefined,
-    })
-    toast.success("Item updated")
-    setEditOpen(false)
+    try {
+      await updateItem(item.id, {
+        name: nameTrim,
+        vendor: editVendor.trim() || "General",
+        location: editLocation,
+        notes: editNotes.trim() || undefined,
+        purchaseDate: editPurchase.trim() || undefined,
+        warrantyEndDate: editWarranty.trim() || undefined,
+      })
+      toast.success("Item updated")
+      setEditOpen(false)
+    } catch {
+      toast.error("Could not update item")
+    }
   }
 
   async function handleConfirmDelete() {
@@ -198,7 +182,6 @@ export function InventoryItemActionsMenu({ item, menuTrigger, onRecordMovement }
           <div className="overflow-y-auto flex-1 min-h-0 space-y-1 pr-1">
             {detailRow("Serial", item.serialNumber)}
             {detailRow("Product name", item.name)}
-            {detailRow("Device type", item.deviceType)}
             {detailRow("Vendor", item.vendor != null ? String(item.vendor) : undefined)}
             {detailRow("Status", item.status)}
             {detailRow("Location", item.location)}
@@ -257,21 +240,6 @@ export function InventoryItemActionsMenu({ item, menuTrigger, onRecordMovement }
             <div className="flex flex-col gap-1.5">
               <Label className="text-foreground">Product name</Label>
               <Input className="bg-card" value={editName} onChange={(e) => setEditName(e.target.value)} />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label className="text-foreground">Device type</Label>
-              <Select value={editDeviceTypeId} onValueChange={setEditDeviceTypeId}>
-                <SelectTrigger className="bg-card">
-                  <SelectValue placeholder="Type…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {typesForEdit.map((pt) => (
-                    <SelectItem key={pt.id} value={pt.id}>
-                      {pt.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
             </div>
             <div className="flex flex-col gap-1.5">
               <Label className="text-foreground">Vendor</Label>

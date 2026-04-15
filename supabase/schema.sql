@@ -8,14 +8,25 @@
 -- TABLES
 -- =============================================================================
 
+-- Canonical product catalog (one row per product name; globally unique normalized name).
+-- Production: apply supabase/migrations in order — this file is a readable baseline.
+CREATE TABLE IF NOT EXISTS public.product_lines (
+  id TEXT PRIMARY KEY,
+  product_name TEXT NOT NULL,
+  vendor TEXT NOT NULL DEFAULT 'General',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_product_lines_product_name_lower
+  ON public.product_lines ((lower(trim(product_name))));
+
+COMMENT ON TABLE public.product_lines IS 'Product name + vendor; inventory_items.product_id references this table.';
+
 -- One row per physical asset (serialised item)
 CREATE TABLE IF NOT EXISTS public.inventory_items (
   id TEXT PRIMARY KEY,
+  product_id TEXT NOT NULL REFERENCES public.product_lines(id) ON UPDATE CASCADE ON DELETE RESTRICT,
   serial_number TEXT NOT NULL,
-  device_type TEXT NOT NULL,
-  device_type_id TEXT,
-  name TEXT NOT NULL,
-  vendor TEXT,
   status TEXT NOT NULL DEFAULT 'In Stock',
   date_added TEXT NOT NULL,
   location TEXT NOT NULL,
@@ -25,30 +36,16 @@ CREATE TABLE IF NOT EXISTS public.inventory_items (
   purchase_date TEXT,
   warranty_end_date TEXT,
   poc_out_date TEXT,
+  return_date TEXT,
   assignment_history JSONB,
+  reserved_for_request_line_id UUID,
+  cloud_key TEXT,
+  deleted_at TIMESTAMPTZ,
   CONSTRAINT inventory_items_status_check
-    CHECK (status IN ('In Stock', 'Sold', 'POC', 'Rented', 'Maintenance', 'Disposed'))
+    CHECK (status IN ('In Stock', 'Sold', 'POC', 'Rented', 'Maintenance', 'Disposed', 'RMA Hold'))
 );
 
--- Add vendor column if table already exists (run once if you had the table before)
-DO $$ BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.columns
-    WHERE table_schema = 'public' AND table_name = 'inventory_items' AND column_name = 'vendor'
-  ) THEN
-    ALTER TABLE public.inventory_items ADD COLUMN vendor TEXT;
-  END IF;
-END $$;
-
-COMMENT ON TABLE public.inventory_items IS 'Physical inventory items; one row per serialised unit.';
-
-CREATE TABLE IF NOT EXISTS public.device_types (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  active BOOLEAN NOT NULL DEFAULT true,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+COMMENT ON TABLE public.inventory_items IS 'Physical inventory; product identity is product_lines via product_id (no name/vendor columns on this table).';
 
 -- Movement / transaction log (audit trail)
 CREATE TABLE IF NOT EXISTS public.transactions (
@@ -64,10 +61,10 @@ CREATE TABLE IF NOT EXISTS public.transactions (
   to_location TEXT,
   assigned_to TEXT,
   CONSTRAINT transactions_type_check
-    CHECK (type IN ('Inbound', 'Sale', 'POC Out', 'POC Return', 'Rental Return', 'Transfer', 'Dispose', 'Rentals'))
+    CHECK (type IN ('Inbound', 'Sale', 'POC Out', 'POC Return', 'Rental Return', 'Transfer', 'Dispose', 'Rentals', 'Sale Return'))
 );
 
-COMMENT ON TABLE public.transactions IS 'History of stock movements (in/out, POC, transfer, dispose).';
+COMMENT ON TABLE public.transactions IS 'History of stock movements (in/out, POC, transfer, dispose, sale return / RMA).';
 
 -- Admin reversal audit for movement batches (replaces legacy quick_scans reversal columns)
 CREATE TABLE IF NOT EXISTS public.batch_reversals (
@@ -100,8 +97,8 @@ CREATE INDEX IF NOT EXISTS idx_inventory_items_serial
   ON public.inventory_items(serial_number);
 CREATE INDEX IF NOT EXISTS idx_inventory_items_status
   ON public.inventory_items(status);
-CREATE INDEX IF NOT EXISTS idx_inventory_items_name
-  ON public.inventory_items(name);
+CREATE INDEX IF NOT EXISTS idx_inventory_items_product_id
+  ON public.inventory_items(product_id);
 CREATE INDEX IF NOT EXISTS idx_inventory_items_date_added
   ON public.inventory_items(date_added);
 
@@ -118,6 +115,7 @@ CREATE INDEX IF NOT EXISTS idx_clients_company
 -- =============================================================================
 -- ROW LEVEL SECURITY (RLS)
 -- =============================================================================
+ALTER TABLE public.product_lines ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.inventory_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.batch_reversals ENABLE ROW LEVEL SECURITY;
@@ -125,6 +123,11 @@ ALTER TABLE public.clients ENABLE ROW LEVEL SECURITY;
 
 -- Allow anon key full access (no auth yet). Replace with auth policies later.
 -- Drop first so this script is re-runnable.
+DROP POLICY IF EXISTS "Allow anon all on product_lines" ON public.product_lines;
+CREATE POLICY "Allow anon all on product_lines"
+  ON public.product_lines FOR ALL TO anon
+  USING (true) WITH CHECK (true);
+
 DROP POLICY IF EXISTS "Allow anon all on inventory_items" ON public.inventory_items;
 CREATE POLICY "Allow anon all on inventory_items"
   ON public.inventory_items FOR ALL TO anon

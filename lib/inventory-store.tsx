@@ -1,11 +1,18 @@
 "use client"
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react"
-import type { InventoryItem, DeviceType, Transaction, TransactionType } from "./data"
+import type { InventoryItem, Transaction, TransactionType } from "./data"
 import { inventoryItems as initialInventory, recentTransactions as initialTransactions, clients } from "./data"
 import { getReorderLevelForProduct, getReorderLevelOverrides } from "./settings"
 import { getSupabaseClient } from "./supabase/client"
-import { rowToInventoryItem, inventoryItemToRow, rowToTransaction, transactionToRow } from "./supabase/inventory-db"
+import {
+  rowToInventoryItem,
+  inventoryItemToRow,
+  rowToTransaction,
+  transactionToRow,
+  INVENTORY_ITEM_SELECT,
+} from "./supabase/inventory-db"
+import { ensureProductLine } from "./supabase/product-lines"
 import {
   computeMovementResult,
   type InboundCreateDefaults,
@@ -13,8 +20,6 @@ import {
 } from "./supabase/movement-utils"
 import { useAuth } from "./auth-context"
 import { toast } from "sonner"
-
-const DEFAULT_DEVICE_TYPES: DeviceType[] = [{ id: "ptype-general", name: "General", active: true }]
 
 function deepClone<T>(arr: T[]): T[] {
   return JSON.parse(JSON.stringify(arr))
@@ -70,16 +75,15 @@ export interface MovementParams {
   cloudKeysBySerial?: Record<string, string>
   /** TEMPORARY (admin UI, Sale only): optional ledger date; omit for “now” */
   saleTransactionDateIso?: string
-  /** Optional: reject existing rows whose name/vendor/device type do not match (see movement-utils). */
+  /** Optional: reject existing rows whose name/vendor do not match (see movement-utils). */
   expectedProductName?: string
   expectedVendor?: string
-  expectedDeviceType?: string
 }
 
 const APPROACHING_DAYS = 7
 
 export interface AlertsResult {
-  lowStock: { groupName: string; deviceType: string; inStock: number; threshold: number }[]
+  lowStock: { groupName: string; vendor: string; inStock: number; threshold: number }[]
   warrantyExpiring: InventoryItem[]
   /** POC items past expected return date */
   pocOverdue: InventoryItem[]
@@ -122,7 +126,7 @@ function getAlertsFromInventory(
     if (inStock <= threshold) {
       lowStock.push({
         groupName: name,
-        deviceType: items[0]?.deviceType ?? name,
+        vendor: items[0]?.vendor?.trim() ? items[0].vendor : "General",
         inStock,
         threshold,
       })
@@ -211,6 +215,13 @@ function getRevertUpdatesForTransaction(txn: Transaction): Partial<InventoryItem
         pocOutDate: undefined,
         returnDate: undefined,
       }
+    case "Sale Return":
+      return {
+        status: "Sold",
+        location: "Delivered",
+        client: txn.client || undefined,
+        assignedTo: (txn.assignedTo ?? txn.client) || undefined,
+      }
     case "Rentals":
       return {
         status: "In Stock",
@@ -237,7 +248,6 @@ function getRevertUpdatesForTransaction(txn: Transaction): Partial<InventoryItem
 interface InventoryStoreValue {
   inventory: InventoryItem[]
   transactions: Transaction[]
-  deviceTypes: DeviceType[]
   applyMovement: (params: MovementParams) => {
     success: string[]
     notFound: string[]
@@ -245,24 +255,21 @@ interface InventoryStoreValue {
     movementBatchId?: string
   }
   refetchLedger: () => Promise<void>
-  updateItem: (id: string, updates: Partial<InventoryItem>) => void
+  updateItem: (id: string, updates: Partial<InventoryItem>) => Promise<void>
   softDeleteItem: (id: string) => Promise<{ ok: boolean; error?: string }>
   restoreItem: (id: string) => Promise<{ ok: boolean; error?: string }>
   permanentlyDeleteItem: (id: string) => Promise<{ ok: boolean; error?: string }>
   purgeTrashExpired: () => Promise<{ ok: boolean; error?: string; removed?: number }>
   trashedInventory: InventoryItem[]
   refetchTrashed: () => Promise<void>
-  addItem: (item: Omit<InventoryItem, "id">) => InventoryItem
-  addDeviceType: (name: string) => Promise<{ ok: boolean; error?: string }>
-  archiveDeviceType: (id: string) => Promise<{ ok: boolean; error?: string }>
+  addItem: (item: Omit<InventoryItem, "id">) => Promise<InventoryItem>
   reassignInventoryGroup: (params: {
     sourceGroupName: string
     targetGroupName?: string
-    targetDeviceTypeId?: string
     targetVendor?: string
   }) => Promise<{ ok: boolean; updated: number; error?: string }>
   undoTransaction: (txnId: string) => Promise<{ ok: boolean; error?: string }>
-  reassignTransaction: (txnId: string, newItemName: string, newDeviceType?: InventoryItem["deviceType"]) => Promise<{ ok: boolean; error?: string }>
+  reassignTransaction: (txnId: string, newItemName: string) => Promise<{ ok: boolean; error?: string }>
   getAlerts: () => AlertsResult
 }
 
@@ -278,16 +285,6 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
     supabase ? [] : deepClone(initialTransactions)
   )
   const [trashedInventory, setTrashedInventory] = useState<InventoryItem[]>([])
-  const [deviceTypes, setDeviceTypes] = useState<DeviceType[]>(() => {
-    if (supabase) return []
-    const names = [...new Set(initialInventory.map((i) => i.deviceType).filter(Boolean))].sort()
-    return [
-      { id: "ptype-general", name: "General", active: true },
-      ...names
-        .filter((n) => n.toLowerCase() !== "general")
-        .map((n) => ({ id: `legacy-${n.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`, name: n, active: true })),
-    ]
-  })
 
   const refetchLedger = useCallback(
     async (opts?: { isStale?: () => boolean }) => {
@@ -295,7 +292,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
       if (!supabase) return
       const { data: invRows, error: invError } = await supabase
         .from("inventory_items")
-        .select("*")
+        .select(INVENTORY_ITEM_SELECT)
         .is("deleted_at", null)
         .order("date_added", { ascending: true })
       if (invError) {
@@ -311,33 +308,6 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
       } else if (!stale()) {
         setTransactions((txnRows ?? []).map(rowToTransaction))
       }
-
-      const { data: typeRows, error: typeError } = await supabase
-        .from("device_types")
-        .select("id, name, active")
-        .order("name", { ascending: true })
-      if (stale()) return
-      if (typeError) {
-        console.error("refetchLedger device_types:", typeError)
-        setDeviceTypes(DEFAULT_DEVICE_TYPES)
-        return
-      }
-      if (typeRows && typeRows.length > 0) {
-        setDeviceTypes(typeRows.map((r) => ({ id: r.id, name: r.name, active: r.active })))
-        return
-      }
-      const inv = invRows ?? []
-      const names = [...new Set(inv.map((r) => r.device_type).filter(Boolean))].sort()
-      if (names.length > 0) {
-        setDeviceTypes([
-          ...DEFAULT_DEVICE_TYPES,
-          ...names
-            .filter((n) => n.toLowerCase() !== "general")
-            .map((n) => ({ id: `legacy-${n.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`, name: n, active: true })),
-        ])
-      } else {
-        setDeviceTypes(DEFAULT_DEVICE_TYPES)
-      }
     },
     [supabase]
   )
@@ -349,7 +319,6 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
       setInventory([])
       setTransactions([])
       setTrashedInventory([])
-      setDeviceTypes([])
       return
     }
     let cancelled = false
@@ -383,7 +352,6 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
         saleTransactionDateIso,
         expectedProductName,
         expectedVendor,
-        expectedDeviceType,
       } = params
       const clientDisplay =
         clientDisplayOverride ?? (clientId ? getClientDisplay(clientId) : "Internal")
@@ -409,7 +377,6 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
         saleTransactionDateIso,
         expectedProductName,
         expectedVendor,
-        expectedDeviceType,
       })
 
       if (result.rejected.length > 0) {
@@ -460,14 +427,32 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
           }
           const prevIds = new Set(inventory.map((i) => i.id))
           for (const item of result.updatedItems) {
+            let persistItem = item
+            if (!persistItem.productId) {
+              try {
+                const pid = await ensureProductLine(
+                  supabase,
+                  persistItem.name,
+                  persistItem.vendor ?? "General"
+                )
+                persistItem = { ...persistItem, productId: pid }
+              } catch (e) {
+                const msg = e instanceof Error ? e.message : String(e)
+                toast.error("Could not save stock movement", {
+                  description: `Product line: ${msg}`,
+                  duration: 20_000,
+                })
+                return
+              }
+            }
             if (prevIds.has(item.id)) {
               const { error } = await supabase
                 .from("inventory_items")
-                .update(inventoryItemToRow(item))
+                .update(inventoryItemToRow(persistItem))
                 .eq("id", item.id)
               if (reportFail("Inventory update", error)) return
             } else {
-              const { error } = await supabase.from("inventory_items").insert(inventoryItemToRow(item))
+              const { error } = await supabase.from("inventory_items").insert(inventoryItemToRow(persistItem))
               if (reportFail("Inventory insert", error)) return
             }
           }
@@ -477,6 +462,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
               .insert(result.newTransactions.map(transactionToRow))
             if (reportFail("Transaction log", error)) return
           }
+          await refetchLedger({ isStale: () => false })
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e)
           toast.error("Could not save stock movement", { description: msg, duration: 20_000 })
@@ -503,27 +489,30 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
         movementBatchId: newBatchId,
       }
     },
-    [inventory, supabase]
+    [inventory, supabase, refetchLedger]
   )
 
   const updateItem = useCallback(
-    (id: string, updates: Partial<InventoryItem>) => {
-      setInventory((prev) => {
-        const next = prev.map((item) => (item.id === id ? { ...item, ...updates } : item))
-        const updated = next.find((i) => i.id === id)
-        if (supabase && updated) {
-          supabase
-            .from("inventory_items")
-            .update(inventoryItemToRow(updated))
-            .eq("id", id)
-            .then(({ error }) => {
-              if (error) console.error("Supabase updateItem error:", error)
-            })
+    async (id: string, updates: Partial<InventoryItem>) => {
+      const item = inventory.find((i) => i.id === id)
+      if (!item) return
+      let next: InventoryItem = { ...item, ...updates }
+      if (supabase && (updates.name !== undefined || updates.vendor !== undefined)) {
+        try {
+          const pid = await ensureProductLine(supabase, next.name, next.vendor ?? "General")
+          next = { ...next, productId: pid }
+        } catch (e) {
+          console.error("Supabase updateItem ensureProductLine:", e)
+          return
         }
-        return next
-      })
+      }
+      setInventory((prev) => prev.map((i) => (i.id === id ? next : i)))
+      if (supabase) {
+        const { error } = await supabase.from("inventory_items").update(inventoryItemToRow(next)).eq("id", id)
+        if (error) console.error("Supabase updateItem error:", error)
+      }
     },
-    [supabase]
+    [inventory, supabase]
   )
 
   const refetchTrashed = useCallback(async () => {
@@ -533,7 +522,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
     }
     const { data, error } = await supabase
       .from("inventory_items")
-      .select("*")
+      .select(INVENTORY_ITEM_SELECT)
       .not("deleted_at", "is", null)
       .order("deleted_at", { ascending: false })
     if (error) {
@@ -603,93 +592,61 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
   }, [supabase, refetchTrashed])
 
   const addItem = useCallback(
-    (item: Omit<InventoryItem, "id">): InventoryItem => {
-      const fallbackTypeId =
-        item.deviceTypeId ??
-        deviceTypes.find((pt) => pt.name.toLowerCase() === item.deviceType.toLowerCase())?.id ??
-        deviceTypes.find((pt) => pt.name === "General")?.id ??
-        "ptype-general"
+    async (item: Omit<InventoryItem, "id">): Promise<InventoryItem> => {
+      const vendor = item.vendor?.trim() ? item.vendor : "General"
+      let productId = item.productId
+      if (supabase && !productId) {
+        try {
+          productId = await ensureProductLine(supabase, item.name, vendor)
+        } catch (e) {
+          console.error("Supabase addItem ensureProductLine:", e)
+          throw e
+        }
+      }
       const newItem: InventoryItem = {
         ...item,
-        vendor: item.vendor?.trim() ? item.vendor : "General",
-        deviceTypeId: fallbackTypeId,
+        vendor,
         id: generateId("INV"),
+        productId,
       }
       setInventory((prev) => [...prev, newItem])
       if (supabase) {
-        supabase
-          .from("inventory_items")
-          .insert(inventoryItemToRow(newItem))
-          .then(({ error }) => {
-            if (error) console.error("Supabase addItem error:", error)
-          })
+        const { error } = await supabase.from("inventory_items").insert(inventoryItemToRow(newItem))
+        if (error) console.error("Supabase addItem error:", error)
       }
       return newItem
     },
-    [supabase, deviceTypes]
-  )
-
-  const addDeviceType = useCallback(
-    async (name: string): Promise<{ ok: boolean; error?: string }> => {
-      const trimmed = name.trim()
-      if (!trimmed) return { ok: false, error: "Type name is required" }
-      if (deviceTypes.some((pt) => pt.name.toLowerCase() === trimmed.toLowerCase() && pt.active)) {
-        return { ok: false, error: "Type already exists" }
-      }
-      const id = `ptype-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-      const next: DeviceType = { id, name: trimmed, active: true }
-      setDeviceTypes((prev) => [...prev, next].sort((a, b) => a.name.localeCompare(b.name)))
-      if (supabase) {
-        const { error } = await supabase.from("device_types").insert({ id, name: trimmed, active: true })
-        if (error) return { ok: false, error: error.message || "Failed to add device type" }
-      }
-      return { ok: true }
-    },
-    [deviceTypes, supabase]
-  )
-
-  const archiveDeviceType = useCallback(
-    async (id: string): Promise<{ ok: boolean; error?: string }> => {
-      const hasInventory = inventory.some((item) => item.deviceTypeId === id)
-      if (hasInventory) {
-        return { ok: false, error: "Cannot archive a type that is still used by inventory items" }
-      }
-      setDeviceTypes((prev) => prev.map((pt) => (pt.id === id ? { ...pt, active: false } : pt)))
-      if (supabase) {
-        const { error } = await supabase.from("device_types").update({ active: false }).eq("id", id)
-        if (error) return { ok: false, error: error.message || "Failed to archive device type" }
-      }
-      return { ok: true }
-    },
-    [inventory, supabase]
+    [supabase]
   )
 
   const reassignInventoryGroup = useCallback(
     async (params: {
       sourceGroupName: string
       targetGroupName?: string
-      targetDeviceTypeId?: string
       targetVendor?: string
     }): Promise<{ ok: boolean; updated: number; error?: string }> => {
       const source = params.sourceGroupName.trim()
       if (!source) return { ok: false, updated: 0, error: "Source group is required" }
       const targetName = params.targetGroupName?.trim() || source
-      const targetTypeId =
-        params.targetDeviceTypeId ??
-        deviceTypes.find((pt) => pt.name.toLowerCase() === "general")?.id ??
-        "ptype-general"
-      const targetTypeName = deviceTypes.find((pt) => pt.id === targetTypeId)?.name ?? "General"
       const targetVendor = params.targetVendor?.trim() || "General"
       const affected = inventory.filter((item) => item.name === source)
       if (affected.length === 0) return { ok: true, updated: 0 }
 
-      const updatedItems = affected.map((item) => ({
+      let updatedItems = affected.map((item) => ({
         ...item,
         name: targetName,
-        deviceType: targetTypeName,
-        deviceTypeId: targetTypeId,
         vendor: targetVendor,
       }))
+      if (supabase) {
+        let productId: string
+        try {
+          productId = await ensureProductLine(supabase, targetName, targetVendor)
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e)
+          return { ok: false, updated: 0, error: msg || "Failed to resolve product line" }
+        }
+        updatedItems = updatedItems.map((item) => ({ ...item, productId }))
+      }
       const updatedMap = new Map(updatedItems.map((i) => [i.id, i]))
       setInventory((prev) => prev.map((item) => updatedMap.get(item.id) ?? item))
 
@@ -703,7 +660,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
       }
       return { ok: true, updated: updatedItems.length }
     },
-    [inventory, deviceTypes, supabase]
+    [inventory, supabase]
   )
 
   const getAlerts = useCallback(
@@ -748,11 +705,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
   )
 
   const reassignTransaction = useCallback(
-    async (
-      txnId: string,
-      newItemName: string,
-      newDeviceType?: InventoryItem["deviceType"]
-    ): Promise<{ ok: boolean; error?: string }> => {
+    async (txnId: string, newItemName: string): Promise<{ ok: boolean; error?: string }> => {
       const txn = transactions.find((t) => t.id === txnId)
       if (!txn) return { ok: false, error: "Transaction not found" }
       const name = newItemName.trim()
@@ -773,13 +726,18 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
         }
       }
       if (item) {
-        const itemUpdates: Partial<InventoryItem> = { name }
-        if (newDeviceType) itemUpdates.deviceType = newDeviceType
-        setInventory((prev) =>
-          prev.map((i) => (i.id === item.id ? { ...i, ...itemUpdates } : i))
-        )
+        let updated: InventoryItem = { ...item, name }
         if (supabase) {
-          const updated = { ...item, ...itemUpdates }
+          try {
+            const pid = await ensureProductLine(supabase, name, item.vendor ?? "General")
+            updated = { ...updated, productId: pid }
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e)
+            return { ok: false, error: msg || "Failed to resolve product line" }
+          }
+        }
+        setInventory((prev) => prev.map((i) => (i.id === item.id ? updated : i)))
+        if (supabase) {
           const { error } = await supabase
             .from("inventory_items")
             .update(inventoryItemToRow(updated))
@@ -799,7 +757,6 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
     () => ({
       inventory,
       transactions,
-      deviceTypes,
       applyMovement,
       updateItem,
       softDeleteItem,
@@ -809,8 +766,6 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
       trashedInventory,
       refetchTrashed,
       addItem,
-      addDeviceType,
-      archiveDeviceType,
       reassignInventoryGroup,
       undoTransaction,
       reassignTransaction,
@@ -820,7 +775,6 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
     [
       inventory,
       transactions,
-      deviceTypes,
       applyMovement,
       updateItem,
       softDeleteItem,
@@ -830,8 +784,6 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
       trashedInventory,
       refetchTrashed,
       addItem,
-      addDeviceType,
-      archiveDeviceType,
       reassignInventoryGroup,
       undoTransaction,
       reassignTransaction,

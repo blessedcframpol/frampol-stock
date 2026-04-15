@@ -15,10 +15,13 @@ import { Badge } from "@/components/ui/badge"
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { Separator } from "@/components/ui/separator"
+import Link from "next/link"
 import {
   Command,
   CommandEmpty,
@@ -39,7 +42,7 @@ import { formatDateDDMMYYYY } from "@/lib/utils"
 import { toast } from "sonner"
 import { toastFromApiErrorBody, toastFromCaughtError } from "@/lib/toast-reportable-error"
 import { useAuth } from "@/lib/auth-context"
-import { canReverseQuickScanBatches } from "@/lib/permissions"
+import { canReverseQuickScanBatches, canViewFinancials } from "@/lib/permissions"
 import { isQuickScanStockReversibleMovement } from "@/lib/quick-scan-reversal-inventory"
 
 const MIN_REASON_LENGTH = 15
@@ -67,6 +70,7 @@ async function copySerialLinesToClipboard(serials: string[], toastLabel: string)
 export function TransactionHistoryContent() {
   const { role } = useAuth()
   const canReverse = canReverseQuickScanBatches(role)
+  const showFinancials = canViewFinancials(role)
   const [batches, setBatches] = useState<TransactionBatchSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [reversingBatchKey, setReversingBatchKey] = useState<string | null>(null)
@@ -323,14 +327,108 @@ export function TransactionHistoryContent() {
           }
         }}
       >
-        <DialogContent className="max-w-md max-h-[85vh] flex flex-col gap-4">
+        <DialogContent className="max-w-xl max-h-[85vh] flex flex-col gap-4">
           <DialogHeader>
             <DialogTitle>
               {viewingBatch
-                ? `${viewingBatch.productLabel} — ${viewingBatch.count} item${viewingBatch.count === 1 ? "" : "s"}`
+                ? `${viewingBatch.movementType ?? "—"} — ${viewingBatch.productLabel}`
                 : "Batch items"}
             </DialogTitle>
+            {viewingBatch && (
+              <DialogDescription asChild>
+                <p className="text-sm text-muted-foreground">
+                  {formatDateDDMMYYYY(viewingBatch.date)}
+                  {viewingBatch.date.includes("T") && (
+                    <>
+                      {" "}
+                      <span className="tabular-nums">
+                        {new Date(viewingBatch.date).toLocaleTimeString(undefined, {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </span>
+                    </>
+                  )}
+                  <span className="text-muted-foreground/80">
+                    {" "}
+                    · {viewingBatch.count} item{viewingBatch.count === 1 ? "" : "s"}
+                  </span>
+                </p>
+              </DialogDescription>
+            )}
           </DialogHeader>
+          {viewingBatch && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
+              <div className="space-y-0.5 min-w-0">
+                <p className="text-xs text-muted-foreground font-medium">Client</p>
+                {viewingBatch.clientId ? (
+                  <Link
+                    href={`/clients/${viewingBatch.clientId}`}
+                    className="text-sm text-primary hover:underline break-words"
+                  >
+                    {viewingBatch.clientDisplay !== "—" ? viewingBatch.clientDisplay : "View client"}
+                  </Link>
+                ) : (
+                  <p className="text-sm text-foreground break-words">{viewingBatch.clientDisplay}</p>
+                )}
+              </div>
+              {showFinancials && viewingBatch.invoiceNumber && (
+                <div className="space-y-0.5 min-w-0">
+                  <p className="text-xs text-muted-foreground font-medium">Invoice</p>
+                  <p className="text-sm font-mono text-foreground break-all">{viewingBatch.invoiceNumber}</p>
+                </div>
+              )}
+              {viewingBatch.deliveryNoteUrl && (
+                <div className="space-y-0.5 min-w-0 sm:col-span-2">
+                  <p className="text-xs text-muted-foreground font-medium">Delivery note</p>
+                  <a
+                    href={viewingBatch.deliveryNoteUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm text-primary hover:underline inline-flex"
+                  >
+                    Open delivery note
+                  </a>
+                </div>
+              )}
+              {viewingBatch.fromLocation && (
+                <div className="space-y-0.5 min-w-0">
+                  <p className="text-xs text-muted-foreground font-medium">From</p>
+                  <p className="text-sm text-foreground break-words">{viewingBatch.fromLocation}</p>
+                </div>
+              )}
+              {viewingBatch.toLocation && (
+                <div className="space-y-0.5 min-w-0">
+                  <p className="text-xs text-muted-foreground font-medium">To</p>
+                  <p className="text-sm text-foreground break-words">{viewingBatch.toLocation}</p>
+                </div>
+              )}
+              {viewingBatch.assignedToSummary && (
+                <div className="space-y-0.5 min-w-0 sm:col-span-2">
+                  <p className="text-xs text-muted-foreground font-medium">Assigned to</p>
+                  <p className="text-sm text-foreground break-words">{viewingBatch.assignedToSummary}</p>
+                </div>
+              )}
+              {viewingBatch.movementType === "Dispose" && viewingBatch.disposalReasonSummary && (
+                <div className="space-y-0.5 min-w-0">
+                  <p className="text-xs text-muted-foreground font-medium">Disposal reason</p>
+                  <p className="text-sm text-foreground break-words">{viewingBatch.disposalReasonSummary}</p>
+                </div>
+              )}
+              {viewingBatch.movementType === "Dispose" && viewingBatch.authorisedBySummary && (
+                <div className="space-y-0.5 min-w-0">
+                  <p className="text-xs text-muted-foreground font-medium">Authorised by</p>
+                  <p className="text-sm text-foreground break-words">{viewingBatch.authorisedBySummary}</p>
+                </div>
+              )}
+              {viewingBatch.notesSummary && (
+                <div className="space-y-0.5 min-w-0 sm:col-span-2 pt-1 border-t border-border">
+                  <p className="text-xs text-muted-foreground font-medium">Notes</p>
+                  <p className="text-sm text-foreground whitespace-pre-wrap break-words">{viewingBatch.notesSummary}</p>
+                </div>
+              )}
+            </div>
+          )}
           {viewingBatch && viewingBatch.isReversed && (
             <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm space-y-1">
               <p className="font-medium text-foreground">Reversed</p>
@@ -351,6 +449,8 @@ export function TransactionHistoryContent() {
           )}
           {viewingBatch && (
             <>
+              <Separator />
+              <h3 className="text-sm font-medium text-foreground">Serial numbers</h3>
               <Input
                 placeholder="Search serial numbers..."
                 value={batchSearch}

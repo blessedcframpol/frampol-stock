@@ -28,6 +28,7 @@ const statusStyles: Record<string, string> = {
   POC: "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400",
   Rented: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
   Maintenance: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+  "RMA Hold": "bg-orange-500/10 text-orange-600 dark:text-orange-400",
   Disposed: "bg-slate-500/10 text-slate-600 dark:text-slate-400",
 }
 

@@ -41,15 +41,35 @@ interface QScan {
   reversed_at: string | null
 }
 
-type InvRow = Record<string, unknown>
+interface InvRow extends Record<string, unknown> {
+  id: string
+  serial_number: string
+  product_id?: string
+  product_lines?: { product_name: string; vendor: string } | null
+}
 
 const DEFAULT_LOC = "Warehouse A"
-const PTYPE_GENERAL = "ptype-general"
 
-function deviceTypeLabel(scanType: string): string {
-  const t = scanType.trim()
-  if (!t) return "General"
-  return t.length > 120 ? t.slice(0, 120) : t
+function nameFromInv(inv: InvRow): string {
+  const pl = inv.product_lines
+  if (pl?.product_name) return String(pl.product_name)
+  return String(inv.name ?? "Unknown")
+}
+
+function vendorFromInv(inv: InvRow): string {
+  const pl = inv.product_lines
+  if (pl?.vendor != null && String(pl.vendor).trim()) return String(pl.vendor).trim()
+  const v = inv.vendor as string | undefined
+  return v?.trim() ? v : "General"
+}
+
+async function ensureProductLineId(name: string, vendor: string): Promise<string> {
+  const { data, error } = await supabase.rpc("ensure_product_line", {
+    p_product_name: name,
+    p_vendor: vendor,
+  })
+  if (error) throw error
+  return String(data)
 }
 
 function clientLabel(row: QScan): string {
@@ -80,7 +100,9 @@ async function main() {
   const list = (scans ?? []) as QScan[]
   console.log(`Found ${list.length} quick_scans rows`)
 
-  const { data: invRows } = await supabase.from("inventory_items").select("*")
+  const { data: invRows } = await supabase
+    .from("inventory_items")
+    .select("*, product_lines(product_name, vendor)")
   const bySerial = new Map<string, InvRow>()
   for (const r of invRows ?? []) {
     const row = r as InvRow
@@ -112,22 +134,25 @@ async function main() {
     const dateOnly = dateIso.slice(0, 10)
     const batchId = row.batch_id?.trim() || row.id
     const scanName = row.scan_type.trim() || "Unknown"
-    const deviceType = deviceTypeLabel(row.scan_type)
 
     let inv = bySerial.get(serial)
     const client = clientLabel(row)
     const assign = assignedLabel(row)
 
     const persistInv = async (patch: Record<string, unknown>) => {
+      const invName = inv ? nameFromInv(inv) : scanName
+      const invVendor = inv ? vendorFromInv(inv) : "General"
+      const finalName = (patch.name as string | undefined) ?? invName
+      const finalVendorRaw = (patch.vendor as string | undefined) ?? invVendor
+      const finalVendor = finalVendorRaw.trim() ? finalVendorRaw : "General"
+      const productId = await ensureProductLineId(finalName, finalVendor)
+
       if (!inv) {
         const id = `INV-MIG-` + createHash("sha256").update(serial).digest("hex").slice(0, 28)
         const insert = {
           id,
+          product_id: productId,
           serial_number: serial,
-          name: scanName,
-          device_type: deviceType,
-          device_type_id: PTYPE_GENERAL,
-          vendor: "General",
           status: patch.status ?? "In Stock",
           date_added: (patch.date_added as string) ?? dateOnly,
           location: patch.location ?? DEFAULT_LOC,
@@ -144,18 +169,18 @@ async function main() {
         }
         const { error } = await supabase.from("inventory_items").insert(insert)
         if (error) throw new Error(`insert inventory ${serial}: ${error.message}`)
-        inv = insert
+        inv = {
+          ...insert,
+          product_lines: { product_name: finalName, vendor: finalVendor },
+        } as InvRow
         bySerial.set(serial, inv)
       } else {
-        const next = { ...inv, ...patch }
+        const next = { ...inv, ...patch, product_id: productId } as InvRow
         const { error } = await supabase
           .from("inventory_items")
           .update({
+            product_id: productId,
             serial_number: next.serial_number,
-            device_type: next.device_type,
-            device_type_id: next.device_type_id ?? PTYPE_GENERAL,
-            name: next.name,
-            vendor: next.vendor,
             status: next.status,
             date_added: next.date_added,
             location: next.location,
@@ -172,6 +197,7 @@ async function main() {
           })
           .eq("id", next.id as string)
         if (error) throw new Error(`update inventory ${serial}: ${error.message}`)
+        next.product_lines = { product_name: finalName, vendor: finalVendor }
         inv = next
         bySerial.set(serial, inv)
       }
@@ -187,7 +213,6 @@ async function main() {
           client: null,
           assigned_to: null,
           name: scanName,
-          device_type: deviceType,
           date_added: inv?.date_added ?? dateOnly,
           poc_out_date: null,
         })
@@ -218,7 +243,6 @@ async function main() {
           client,
           assigned_to: assign,
           name: scanName,
-          device_type: deviceType,
           date_added: inv?.date_added ?? dateOnly,
         })
         txn = {
@@ -249,7 +273,6 @@ async function main() {
           assigned_to: assign,
           poc_out_date: dateOnly,
           name: scanName,
-          device_type: deviceType,
           date_added: inv?.date_added ?? dateOnly,
         })
         txn = {
@@ -281,7 +304,6 @@ async function main() {
           poc_out_date: null,
           return_date: null,
           name: scanName,
-          device_type: deviceType,
         })
         txn = {
           id: txnId,
@@ -312,7 +334,6 @@ async function main() {
           poc_out_date: null,
           return_date: null,
           name: scanName,
-          device_type: deviceType,
         })
         txn = {
           id: txnId,
@@ -343,7 +364,6 @@ async function main() {
           poc_out_date: dateOnly,
           return_date: defaultRentalReturnDate(dateIso),
           name: scanName,
-          device_type: deviceType,
           date_added: inv?.date_added ?? dateOnly,
         })
         txn = {
@@ -370,7 +390,6 @@ async function main() {
         await persistInv({
           location: DEFAULT_LOC,
           name: scanName,
-          device_type: deviceType,
         })
         txn = {
           id: txnId,
@@ -398,7 +417,6 @@ async function main() {
           client: null,
           assigned_to: null,
           name: scanName,
-          device_type: deviceType,
         })
         txn = {
           id: txnId,
@@ -428,7 +446,6 @@ async function main() {
           client: null,
           assigned_to: null,
           name: scanName,
-          device_type: deviceType,
           date_added: inv?.date_added ?? dateOnly,
           poc_out_date: null,
         })

@@ -6,11 +6,8 @@ export interface Database {
       inventory_items: {
         Row: {
           id: string
+          product_id: string
           serial_number: string
-          device_type: string
-          device_type_id: string
-          name: string
-          vendor: string | null
           status: string
           date_added: string
           location: string
@@ -28,11 +25,8 @@ export interface Database {
         }
         Insert: {
           id: string
+          product_id: string
           serial_number: string
-          device_type: string
-          device_type_id?: string | null
-          name: string
-          vendor?: string | null
           status: string
           date_added: string
           location: string
@@ -50,11 +44,8 @@ export interface Database {
         }
         Update: {
           id?: string
+          product_id?: string
           serial_number?: string
-          device_type?: string
-          device_type_id?: string | null
-          name?: string
-          vendor?: string | null
           status?: string
           date_added?: string
           location?: string
@@ -71,27 +62,24 @@ export interface Database {
           deleted_at?: string | null
         }
       }
-      device_types: {
+      product_lines: {
         Row: {
           id: string
-          name: string
-          active: boolean
+          product_name: string
+          vendor: string
           created_at: string
-          updated_at: string
         }
         Insert: {
-          id?: string
-          name: string
-          active?: boolean
+          id: string
+          product_name: string
+          vendor?: string
           created_at?: string
-          updated_at?: string
         }
         Update: {
           id?: string
-          name?: string
-          active?: boolean
+          product_name?: string
+          vendor?: string
           created_at?: string
-          updated_at?: string
         }
       }
       stock_requests: {
@@ -146,7 +134,6 @@ export interface Database {
           id: string
           request_id: string
           product_name: string
-          device_type: string | null
           quantity_requested: number
           sort_order: number
         }
@@ -154,7 +141,6 @@ export interface Database {
           id?: string
           request_id: string
           product_name: string
-          device_type?: string | null
           quantity_requested: number
           sort_order?: number
         }
@@ -162,7 +148,6 @@ export interface Database {
           id?: string
           request_id?: string
           product_name?: string
-          device_type?: string | null
           quantity_requested?: number
           sort_order?: number
         }
@@ -396,6 +381,10 @@ export interface Database {
       }
     }
     Functions: {
+      ensure_product_line: {
+        Args: { p_product_name: string; p_vendor: string }
+        Returns: string
+      }
       assign_serial_to_request_line: {
         Args: { p_line_id: string; p_inventory_item_id: string }
         Returns: undefined

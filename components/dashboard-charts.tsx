@@ -115,15 +115,29 @@ function inventoryVendorKey(item: { vendor?: string | null }): string {
 export function StockByVendorChart() {
   const { inventory } = useInventoryStore()
   const stockByVendor = useMemo(() => {
-    const byVendor: Record<string, { inStock: number; sold: number; poc: number; rented: number; maintenance: number; disposed: number }> = {}
+    const byVendor: Record<
+      string,
+      {
+        inStock: number
+        sold: number
+        poc: number
+        rented: number
+        maintenance: number
+        rmaHold: number
+        disposed: number
+      }
+    > = {}
     inventory.forEach((item) => {
       const v = inventoryVendorKey(item)
-      if (!byVendor[v]) byVendor[v] = { inStock: 0, sold: 0, poc: 0, rented: 0, maintenance: 0, disposed: 0 }
+      if (!byVendor[v]) {
+        byVendor[v] = { inStock: 0, sold: 0, poc: 0, rented: 0, maintenance: 0, rmaHold: 0, disposed: 0 }
+      }
       if (item.status === "In Stock") byVendor[v].inStock++
       else if (item.status === "Sold") byVendor[v].sold++
       else if (item.status === "POC") byVendor[v].poc++
       else if (item.status === "Rented") byVendor[v].rented++
       else if (item.status === "Maintenance") byVendor[v].maintenance++
+      else if (item.status === "RMA Hold") byVendor[v].rmaHold++
       else if (item.status === "Disposed") byVendor[v].disposed++
     })
     return Object.entries(byVendor)
@@ -134,8 +148,18 @@ export function StockByVendorChart() {
         poc: counts.poc,
         rented: counts.rented,
         maintenance: counts.maintenance,
+        rmaHold: counts.rmaHold,
       }))
-      .sort((a, b) => (b.inStock + b.sold + b.poc + b.rented + b.maintenance) - (a.inStock + a.sold + a.poc + a.rented + a.maintenance))
+      .sort(
+        (a, b) =>
+          b.inStock +
+          b.sold +
+          b.poc +
+          b.rented +
+          b.maintenance +
+          b.rmaHold -
+          (a.inStock + a.sold + a.poc + a.rented + a.maintenance + a.rmaHold)
+      )
   }, [inventory])
 
   const vendorBarCount = stockByVendor.length
@@ -155,6 +179,7 @@ export function StockByVendorChart() {
             poc: { label: "POC", color: "#06b6d4" },
             rented: { label: "Rented", color: "#3b82f6" },
             maintenance: { label: "Maintenance", color: "#f59e0b" },
+            rmaHold: { label: "RMA hold", color: "#ea580c" },
           }}
           className="h-[260px] sm:h-[300px]"
         >
@@ -183,7 +208,8 @@ export function StockByVendorChart() {
               <Bar dataKey="sold" stackId="a" fill="#10b981" name="Sold" />
               <Bar dataKey="poc" stackId="a" fill="#06b6d4" name="POC" />
               <Bar dataKey="rented" stackId="a" fill="#3b82f6" name="Rented" />
-              <Bar dataKey="maintenance" stackId="a" fill="#f59e0b" radius={[4, 4, 0, 0]} name="Maintenance" />
+              <Bar dataKey="maintenance" stackId="a" fill="#f59e0b" name="Maintenance" />
+              <Bar dataKey="rmaHold" stackId="a" fill="#ea580c" radius={[4, 4, 0, 0]} name="RMA hold" />
             </BarChart>
           </ResponsiveContainer>
         </ChartContainer>

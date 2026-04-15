@@ -29,7 +29,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
-import { LOCATIONS, type InventoryItem, type ItemStatus, type DeviceTypeName } from "@/lib/data"
+import { LOCATIONS, type InventoryItem, type ItemStatus } from "@/lib/data"
 import { useInventoryStore } from "@/lib/inventory-store"
 import { filterOnHandInventory } from "@/lib/inventory-visibility"
 import { useAuth } from "@/lib/auth-context"
@@ -59,12 +59,14 @@ const statusStyles: Record<ItemStatus, string> = {
   POC: "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400",
   Rented: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
   Maintenance: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+  "RMA Hold": "bg-orange-500/10 text-orange-600 dark:text-orange-400",
   Disposed: "bg-slate-500/10 text-slate-600 dark:text-slate-400",
 }
 
 type ItemGroup = {
   name: string
-  deviceType: DeviceTypeName
+  /** Representative vendor for the group (first item; same product name may span vendors). */
+  vendor: string
   items: InventoryItem[]
   count: number
 }
@@ -78,7 +80,7 @@ function groupInventoryItems(items: InventoryItem[]): ItemGroup[] {
   }
   return Array.from(byName.entries()).map(([name, items]) => ({
     name,
-    deviceType: items[0].deviceType,
+    vendor: items[0].vendor?.trim() ? items[0].vendor! : "General",
     items,
     count: items.length,
   }))
@@ -91,7 +93,7 @@ const VENDOR_LABELS: Record<string, string> = {
 
 export function InventoryContent() {
   const searchParams = useSearchParams()
-  const { inventory, transactions, addItem, deviceTypes, addDeviceType, archiveDeviceType, reassignInventoryGroup } = useInventoryStore()
+  const { inventory, transactions, addItem, reassignInventoryGroup } = useInventoryStore()
   const onHandInventory = useMemo(() => filterOnHandInventory(inventory), [inventory])
   const { role } = useAuth()
   const isAdmin = canEditInventory(role)
@@ -102,28 +104,24 @@ export function InventoryContent() {
   useEffect(() => {
     if (serialFromUrl) setSearch(serialFromUrl)
   }, [serialFromUrl])
-  const [typeFilter, setTypeFilter] = useState<string>("all")
+  const [vendorFilter, setVendorFilter] = useState<string>("all")
   const [selectedVendor, setSelectedVendor] = useState<string | null>(null)
   const [selectedGroupName, setSelectedGroupName] = useState<string | null>(null)
   const [itemView, setItemView] = useState<"list" | "card">("list")
   const [groupSearch, setGroupSearch] = useState("")
   const [addSerial, setAddSerial] = useState("")
   const [addName, setAddName] = useState("")
-  const [addType, setAddType] = useState<DeviceTypeName>("Starlink Kit")
   const [addVendor, setAddVendor] = useState<string>("")
   const [addNewVendorName, setAddNewVendorName] = useState("")
   const [addLocation, setAddLocation] = useState("Warehouse A")
   const [addPurchaseDate, setAddPurchaseDate] = useState("")
   const [addWarrantyEnd, setAddWarrantyEnd] = useState("")
   const [addDialogOpen, setAddDialogOpen] = useState(false)
-  const [manageTypesOpen, setManageTypesOpen] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
   const [movementDialogOpen, setMovementDialogOpen] = useState(false)
   const [movementItems, setMovementItems] = useState<InventoryItem[]>([])
-  const [newDeviceTypeName, setNewDeviceTypeName] = useState("")
   const [moveGroupOpen, setMoveGroupOpen] = useState(false)
   const [moveTargetGroupName, setMoveTargetGroupName] = useState("")
-  const [moveTargetTypeId, setMoveTargetTypeId] = useState("")
   const [moveTargetVendor, setMoveTargetVendor] = useState("General")
 
   useEffect(() => {
@@ -159,14 +157,18 @@ export function InventoryContent() {
 
   const filteredGroups = useMemo(() => {
     const list = selectedVendor && selectedVendor !== "__flat__" ? groupsInVendor : groups
+    const q = groupSearch.toLowerCase()
     return list.filter((g) => {
       const matchesSearch =
-        g.name.toLowerCase().includes(groupSearch.toLowerCase()) ||
-        g.deviceType.toLowerCase().includes(groupSearch.toLowerCase())
-      const matchesType = typeFilter === "all" || g.deviceType === typeFilter
-      return matchesSearch && matchesType
+        !q ||
+        g.name.toLowerCase().includes(q) ||
+        g.items.some((i) => (i.vendor?.trim() ? i.vendor : "General").toLowerCase().includes(q))
+      const matchesVendor =
+        vendorFilter === "all" ||
+        g.items.some((i) => (i.vendor?.trim() ? i.vendor : "General") === vendorFilter)
+      return matchesSearch && matchesVendor
     })
-  }, [selectedVendor, groupsInVendor, groups, groupSearch, typeFilter])
+  }, [selectedVendor, groupsInVendor, groups, groupSearch, vendorFilter])
 
   const itemsInViewCount = useMemo(
     () => filteredGroups.reduce((sum, g) => sum + g.count, 0),
@@ -227,13 +229,6 @@ export function InventoryContent() {
     })
   }
 
-  const deviceTypeNames: DeviceTypeName[] = useMemo(() => {
-    const activeTypes = deviceTypes.filter((pt) => pt.active).map((pt) => pt.name)
-    const fromInventory = onHandInventory.map((i) => i.deviceType).filter(Boolean)
-    const combined = [...new Set(["General", ...activeTypes, ...fromInventory])]
-    return combined.sort()
-  }, [onHandInventory, deviceTypes])
-
   const showVendorsView = vendors.length > 0 && selectedVendor === null && selectedGroupName === null
   const showProductsView = (vendors.length === 0 || selectedVendor !== null) && selectedGroupName === null
   const showItemsView = selectedGroupName !== null
@@ -286,31 +281,11 @@ export function InventoryContent() {
     </Card>
   )
 
-  async function handleAddDeviceType() {
-    const result = await addDeviceType(newDeviceTypeName)
-    if (!result.ok) {
-      toast.error(result.error ?? "Failed to add device type")
-      return
-    }
-    toast.success("Device type added")
-    setNewDeviceTypeName("")
-  }
-
-  async function handleArchiveDeviceType(id: string) {
-    const result = await archiveDeviceType(id)
-    if (!result.ok) {
-      toast.error(result.error ?? "Failed to archive device type")
-      return
-    }
-    toast.success("Device type archived")
-  }
-
   async function handleMoveGroup() {
     if (!selectedGroup?.name) return
     const result = await reassignInventoryGroup({
       sourceGroupName: selectedGroup.name,
       targetGroupName: moveTargetGroupName.trim() || selectedGroup.name,
-      targetDeviceTypeId: moveTargetTypeId || undefined,
       targetVendor: moveTargetVendor.trim() || "General",
     })
     if (!result.ok) {
@@ -350,7 +325,7 @@ export function InventoryContent() {
                 onClick={() => setSelectedVendor("__flat__")}
               >
                 <List className="w-4 h-4" />
-                <span className="text-xs font-medium hidden sm:inline">All types</span>
+                <span className="text-xs font-medium hidden sm:inline">All products</span>
               </Button>
             </div>
             <Dialog open={addDialogOpen} onOpenChange={(open) => { setAddDialogOpen(open); if (!open) { setAddNewVendorName(""); setAddVendor(""); } }}>
@@ -367,7 +342,7 @@ export function InventoryContent() {
                 </DialogHeader>
                 <form
                   className="flex flex-col gap-4 py-4"
-                  onSubmit={(e) => {
+                  onSubmit={async (e) => {
                     e.preventDefault()
                     const effectiveVendor = addVendor === "__new__" ? addNewVendorName.trim() : addVendor
                     if (!addSerial.trim() || !addName.trim()) return
@@ -376,27 +351,29 @@ export function InventoryContent() {
                       return
                     }
                     const dateAdded = new Date().toISOString().slice(0, 10)
-                    addItem({
-                      serialNumber: addSerial.trim(),
-                      name: addName.trim(),
-                      deviceType: addType,
-                      vendor: effectiveVendor,
-                      status: "In Stock",
-                      dateAdded,
-                      location: addLocation,
-                      purchaseDate: addPurchaseDate.trim() || undefined,
-                      warrantyEndDate: addWarrantyEnd.trim() || undefined,
-                    })
-                    setAddSerial("")
-                    setAddName("")
-                    setAddType("Starlink Kit")
-                    setAddVendor("")
-                    setAddNewVendorName("")
-                    setAddLocation("Warehouse A")
-                    setAddPurchaseDate("")
-                    setAddWarrantyEnd("")
-                    setAddDialogOpen(false)
-                    toast.success("Item added to inventory")
+                    try {
+                      await addItem({
+                        serialNumber: addSerial.trim(),
+                        name: addName.trim(),
+                        vendor: effectiveVendor,
+                        status: "In Stock",
+                        dateAdded,
+                        location: addLocation,
+                        purchaseDate: addPurchaseDate.trim() || undefined,
+                        warrantyEndDate: addWarrantyEnd.trim() || undefined,
+                      })
+                      setAddSerial("")
+                      setAddName("")
+                      setAddVendor("")
+                      setAddNewVendorName("")
+                      setAddLocation("Warehouse A")
+                      setAddPurchaseDate("")
+                      setAddWarrantyEnd("")
+                      setAddDialogOpen(false)
+                      toast.success("Item added to inventory")
+                    } catch {
+                      toast.error("Could not add item")
+                    }
                   }}
                 >
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -429,19 +406,6 @@ export function InventoryContent() {
                           onChange={(e) => setAddNewVendorName(e.target.value)}
                         />
                       )}
-                    </div>
-                    <div className="flex flex-col gap-2">
-                      <Label className="text-foreground">Item Type</Label>
-                      <Select value={addType} onValueChange={(v) => setAddType(v as DeviceTypeName)}>
-                        <SelectTrigger className="bg-card text-foreground border-border">
-                          <SelectValue placeholder="Select type" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {deviceTypeNames.map((type) => (
-                            <SelectItem key={type} value={type}>{type}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
                     </div>
                     <div className="flex flex-col gap-2">
                       <Label className="text-foreground">Location</Label>
@@ -550,51 +514,13 @@ export function InventoryContent() {
                 onClick={() => setSelectedVendor("__flat__")}
               >
                 <List className="w-4 h-4" />
-                <span className="text-xs font-medium hidden sm:inline">All types</span>
+                <span className="text-xs font-medium hidden sm:inline">All products</span>
               </Button>
             </div>
             <Button variant="outline" size="sm" className="text-foreground">
               <Download className="w-4 h-4 mr-1.5" />
               <span className="hidden sm:inline">Export</span>
             </Button>
-            {isAdmin && (
-              <Dialog open={manageTypesOpen} onOpenChange={setManageTypesOpen}>
-                <DialogTrigger asChild>
-                  <Button variant="outline" size="sm" className="text-foreground">
-                    Manage device types
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="bg-card text-card-foreground max-w-[calc(100vw-2rem)] sm:max-w-lg">
-                  <DialogHeader>
-                    <DialogTitle className="text-foreground">Device types (Admin)</DialogTitle>
-                  </DialogHeader>
-                  <div className="flex flex-col gap-3 py-2">
-                    <div className="flex gap-2">
-                      <Input
-                        placeholder="Add device type..."
-                        value={newDeviceTypeName}
-                        onChange={(e) => setNewDeviceTypeName(e.target.value)}
-                      />
-                      <Button onClick={handleAddDeviceType}>Add</Button>
-                    </div>
-                    <div className="max-h-72 overflow-y-auto border border-border rounded-md divide-y divide-border">
-                      {deviceTypes
-                        .filter((pt) => pt.active)
-                        .map((pt) => (
-                          <div key={pt.id} className="flex items-center justify-between px-3 py-2">
-                            <span className="text-sm">{pt.name}</span>
-                            {pt.name !== "General" && (
-                              <Button variant="ghost" size="sm" onClick={() => void handleArchiveDeviceType(pt.id)}>
-                                Archive
-                              </Button>
-                            )}
-                          </div>
-                        ))}
-                    </div>
-                  </div>
-                </DialogContent>
-              </Dialog>
-            )}
             <Dialog open={addDialogOpen} onOpenChange={(open) => { setAddDialogOpen(open); if (!open) { setAddNewVendorName(""); setAddVendor(""); } }}>
               <DialogTrigger asChild>
                 <Button size="sm" className="bg-primary text-primary-foreground hover:bg-primary/90">
@@ -609,7 +535,7 @@ export function InventoryContent() {
                 </DialogHeader>
                 <form
                   className="flex flex-col gap-4 py-4"
-                  onSubmit={(e) => {
+                  onSubmit={async (e) => {
                     e.preventDefault()
                     const effectiveVendor = addVendor === "__new__" ? addNewVendorName.trim() : addVendor
                     if (!addSerial.trim() || !addName.trim()) return
@@ -618,27 +544,29 @@ export function InventoryContent() {
                       return
                     }
                     const dateAdded = new Date().toISOString().slice(0, 10)
-                    addItem({
-                      serialNumber: addSerial.trim(),
-                      name: addName.trim(),
-                      deviceType: addType,
-                      vendor: effectiveVendor,
-                      status: "In Stock",
-                      dateAdded,
-                      location: addLocation,
-                      purchaseDate: addPurchaseDate.trim() || undefined,
-                      warrantyEndDate: addWarrantyEnd.trim() || undefined,
-                    })
-                    setAddSerial("")
-                    setAddName("")
-                    setAddType("Starlink Kit")
-                    setAddVendor("")
-                    setAddNewVendorName("")
-                    setAddLocation("Warehouse A")
-                    setAddPurchaseDate("")
-                    setAddWarrantyEnd("")
-                    setAddDialogOpen(false)
-                    toast.success("Item added to inventory")
+                    try {
+                      await addItem({
+                        serialNumber: addSerial.trim(),
+                        name: addName.trim(),
+                        vendor: effectiveVendor,
+                        status: "In Stock",
+                        dateAdded,
+                        location: addLocation,
+                        purchaseDate: addPurchaseDate.trim() || undefined,
+                        warrantyEndDate: addWarrantyEnd.trim() || undefined,
+                      })
+                      setAddSerial("")
+                      setAddName("")
+                      setAddVendor("")
+                      setAddNewVendorName("")
+                      setAddLocation("Warehouse A")
+                      setAddPurchaseDate("")
+                      setAddWarrantyEnd("")
+                      setAddDialogOpen(false)
+                      toast.success("Item added to inventory")
+                    } catch {
+                      toast.error("Could not add item")
+                    }
                   }}
                 >
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -671,19 +599,6 @@ export function InventoryContent() {
                           onChange={(e) => setAddNewVendorName(e.target.value)}
                         />
                       )}
-                    </div>
-                    <div className="flex flex-col gap-2">
-                      <Label className="text-foreground">Item Type</Label>
-                      <Select value={addType} onValueChange={(v) => setAddType(v as DeviceTypeName)}>
-                        <SelectTrigger className="bg-card text-foreground border-border">
-                          <SelectValue placeholder="Select type" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {deviceTypeNames.map((type) => (
-                            <SelectItem key={type} value={type}>{type}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
                     </div>
                     <div className="flex flex-col gap-2">
                       <Label className="text-foreground">Location</Label>
@@ -722,21 +637,23 @@ export function InventoryContent() {
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                 <Input
-                  placeholder="Search products by name or device type..."
+                  placeholder="Search products by name or vendor..."
                   value={groupSearch}
                   onChange={(e) => setGroupSearch(e.target.value)}
                   className="pl-9 font-mono text-sm h-9 bg-card text-foreground border-border"
                 />
               </div>
-              <Select value={typeFilter} onValueChange={setTypeFilter}>
+              <Select value={vendorFilter} onValueChange={setVendorFilter}>
                 <SelectTrigger className="w-full sm:w-44 h-9 bg-card text-foreground border-border">
                   <Filter className="w-3.5 h-3.5 mr-1.5 text-muted-foreground" />
-                  <SelectValue placeholder="Device type" />
+                  <SelectValue placeholder="Vendor" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All device types</SelectItem>
-                  {deviceTypeNames.map((type) => (
-                    <SelectItem key={type} value={type}>{type}</SelectItem>
+                  <SelectItem value="all">All vendors</SelectItem>
+                  {vendorsFromInventory.map((v) => (
+                    <SelectItem key={v} value={v}>
+                      {VENDOR_LABELS[v] ?? v}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -758,7 +675,7 @@ export function InventoryContent() {
                   </CardTitle>
                   <ChevronRight className="w-5 h-5 shrink-0 text-muted-foreground" />
                 </div>
-                <p className="text-xs text-muted-foreground">{group.deviceType}</p>
+                <p className="text-xs text-muted-foreground">{group.vendor}</p>
               </CardHeader>
               <CardContent className="pt-0">
                 <p className="text-2xl font-bold text-foreground">{group.count}</p>
@@ -801,7 +718,7 @@ export function InventoryContent() {
               {selectedGroup?.name}
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
-              {selectedGroup?.deviceType} · {itemsInGroup.length} in stock
+              {selectedGroup?.vendor} · {itemsInGroup.length} in stock
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -812,12 +729,7 @@ export function InventoryContent() {
                   setMoveGroupOpen(open)
                   if (open) {
                     setMoveTargetGroupName(selectedGroup.name)
-                    setMoveTargetTypeId(
-                      deviceTypes.find((pt) => pt.name.toLowerCase() === selectedGroup.deviceType.toLowerCase())?.id ??
-                        deviceTypes.find((pt) => pt.name === "General")?.id ??
-                        ""
-                    )
-                    setMoveTargetVendor(selectedVendor && selectedVendor !== "__flat__" ? selectedVendor : "General")
+                    setMoveTargetVendor(selectedVendor && selectedVendor !== "__flat__" ? selectedVendor : selectedGroup.vendor)
                   }
                 }}
               >
@@ -837,23 +749,6 @@ export function InventoryContent() {
                     <div className="flex flex-col gap-1.5">
                       <Label>Group name</Label>
                       <Input value={moveTargetGroupName} onChange={(e) => setMoveTargetGroupName(e.target.value)} />
-                    </div>
-                    <div className="flex flex-col gap-1.5">
-                      <Label>Device type</Label>
-                      <Select value={moveTargetTypeId} onValueChange={setMoveTargetTypeId}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select type" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {deviceTypes
-                            .filter((pt) => pt.active)
-                            .map((pt) => (
-                              <SelectItem key={pt.id} value={pt.id}>
-                                {pt.name}
-                              </SelectItem>
-                            ))}
-                        </SelectContent>
-                      </Select>
                     </div>
                     <div className="flex flex-col gap-1.5">
                       <Label>Vendor</Label>

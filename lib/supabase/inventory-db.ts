@@ -4,7 +4,20 @@ import type { Database } from "./database.types"
 type InventoryRow = Database["public"]["Tables"]["inventory_items"]["Row"]
 type TransactionRow = Database["public"]["Tables"]["transactions"]["Row"]
 
-export function rowToInventoryItem(row: InventoryRow): InventoryItem {
+/** Embed from PostgREST when selecting inventory with FK to product_lines. */
+export type ProductLineEmbed = { product_name: string; vendor: string }
+
+export type InventoryItemQueryRow = InventoryRow & {
+  product_lines: ProductLineEmbed | null
+}
+
+/** Use on all inventory_items reads that must populate name/vendor for the app. */
+export const INVENTORY_ITEM_SELECT = "*, product_lines(product_name, vendor)"
+
+export function rowToInventoryItem(row: InventoryItemQueryRow | InventoryRow): InventoryItem {
+  const pl = "product_lines" in row ? row.product_lines : null
+  const name = pl?.product_name ?? (row as InventoryRow & { name?: string }).name ?? ""
+  const vendorRaw = pl?.vendor ?? (row as InventoryRow & { vendor?: string | null }).vendor
   const raw = row.assignment_history as { date: string; assignedTo?: string; assigned_to?: string; notes?: string }[] | null
   const assignmentHistory = raw?.map((h) => ({
     date: h.date,
@@ -13,11 +26,10 @@ export function rowToInventoryItem(row: InventoryRow): InventoryItem {
   }))
   return {
     id: row.id,
+    productId: row.product_id,
     serialNumber: row.serial_number,
-    deviceType: row.device_type as InventoryItem["deviceType"],
-    deviceTypeId: row.device_type_id ?? undefined,
-    name: row.name,
-    vendor: row.vendor ?? undefined,
+    name,
+    vendor: vendorRaw?.trim() ? vendorRaw : "General",
     status: row.status as InventoryItem["status"],
     dateAdded: row.date_added,
     location: row.location,
@@ -41,13 +53,13 @@ export function inventoryItemToRow(item: InventoryItem): Database["public"]["Tab
     assignedTo: h.assignedTo,
     notes: h.notes,
   }))
+  if (!item.productId) {
+    throw new Error("inventoryItemToRow: productId is required for Supabase persistence")
+  }
   return {
     id: item.id,
+    product_id: item.productId,
     serial_number: item.serialNumber,
-    device_type: item.deviceType,
-    device_type_id: item.deviceTypeId ?? "ptype-general",
-    name: item.name,
-    vendor: item.vendor ?? null,
     status: item.status,
     date_added: item.dateAdded,
     location: item.location,

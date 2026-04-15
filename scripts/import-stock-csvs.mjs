@@ -8,6 +8,7 @@
  */
 
 import fs from "node:fs"
+import crypto from "node:crypto"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -59,6 +60,14 @@ function generateId() {
   return `INV-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 }
 
+/** Stable product_lines.id aligned with migration 032 (md5 of lower(name)|normalized vendor). */
+function productLineKeyMeta(productName, vendor) {
+  const k = String(productName).trim().toLowerCase()
+  const v = vendor && String(vendor).trim() ? String(vendor).trim() : "General"
+  const id = `PL-${crypto.createHash("md5").update(`${k}|${v}`).digest("hex")}`
+  return { id, k, v, displayName: String(productName).trim() }
+}
+
 function parseCsvFile(filePath) {
   const content = fs.readFileSync(filePath, "utf-8")
   const lines = content.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
@@ -106,14 +115,13 @@ function main() {
     try {
       const rows = parseCsvFile(filePath)
       for (const row of rows) {
-        const deviceType = row.category === "Fortinet" ? "Router" : "Starlink Kit"
+        const meta = productLineKeyMeta(row.productType, row.category)
         allRows.push({
           id: generateId(),
           serial_number: row.serial,
-          device_type: deviceType,
-          device_type_id: "ptype-general",
           name: row.productType,
-          vendor: row.category,
+          vendor: meta.v,
+          product_id: meta.id,
           status: "In Stock",
           date_added: DATE_ADDED,
           location: LOCATION,
@@ -129,15 +137,28 @@ function main() {
   fs.writeFileSync(OUT_JSON, JSON.stringify(allRows, null, 2), "utf-8")
   console.log("\nWrote", allRows.length, "items to", OUT_JSON)
 
+  const productLineByKey = new Map()
+  for (const row of allRows) {
+    const meta = productLineKeyMeta(row.name, row.vendor)
+    if (!productLineByKey.has(meta.k)) {
+      productLineByKey.set(meta.k, { id: meta.id, product_name: meta.displayName, vendor: meta.v })
+    }
+  }
+
   const sqlLines = [
     "-- Seed from stock files. Run in Supabase SQL Editor or use app seed.",
     `-- Generated ${new Date().toISOString()}`,
     "",
   ]
-  for (const row of allRows) {
-    const vendor = row.vendor ? `'${String(row.vendor).replace(/'/g, "''")}'` : "NULL"
+  for (const pl of productLineByKey.values()) {
     sqlLines.push(
-      `INSERT INTO public.inventory_items (id, serial_number, device_type, device_type_id, name, vendor, status, date_added, location) VALUES ('${row.id}', '${row.serial_number.replace(/'/g, "''")}', '${row.device_type}', '${row.device_type_id}', '${row.name.replace(/'/g, "''")}', ${vendor}, 'In Stock', '${row.date_added}', '${row.location}') ON CONFLICT (id) DO NOTHING;`
+      `INSERT INTO public.product_lines (id, product_name, vendor) VALUES ('${pl.id}', '${pl.product_name.replace(/'/g, "''")}', '${String(pl.vendor).replace(/'/g, "''")}') ON CONFLICT (id) DO NOTHING;`
+    )
+  }
+  sqlLines.push("")
+  for (const row of allRows) {
+    sqlLines.push(
+      `INSERT INTO public.inventory_items (id, serial_number, product_id, status, date_added, location) VALUES ('${row.id}', '${row.serial_number.replace(/'/g, "''")}', '${row.product_id}', 'In Stock', '${row.date_added}', '${row.location}') ON CONFLICT (id) DO NOTHING;`
     )
   }
   fs.writeFileSync(OUT_SQL, sqlLines.join("\n"), "utf-8")
