@@ -202,6 +202,8 @@ export interface Database {
           authorised_by: string | null
           batch_id: string | null
           delivery_note_url: string | null
+          metadata: Json | null
+          created_by: string | null
         }
         Insert: {
           id: string
@@ -220,6 +222,8 @@ export interface Database {
           from_location?: string | null
           to_location?: string | null
           assigned_to?: string | null
+          metadata?: Json | null
+          created_by?: string | null
         }
         Update: {
           id?: string
@@ -238,6 +242,125 @@ export interface Database {
           assigned_to?: string | null
           batch_id?: string | null
           delivery_note_url?: string | null
+          metadata?: Json | null
+          created_by?: string | null
+        }
+      }
+      kit_inspections: {
+        Row: {
+          id: string
+          inventory_item_id: string
+          serial_number: string
+          inspector_name: string | null
+          inspected_at: string
+          outcome: string
+          condition_notes: string | null
+          attachment_urls: string[]
+          transaction_id: string | null
+          created_by: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          inventory_item_id: string
+          serial_number: string
+          inspector_name?: string | null
+          inspected_at?: string
+          outcome: string
+          condition_notes?: string | null
+          attachment_urls?: string[]
+          transaction_id?: string | null
+          created_by?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          inventory_item_id?: string
+          serial_number?: string
+          inspector_name?: string | null
+          inspected_at?: string
+          outcome?: string
+          condition_notes?: string | null
+          attachment_urls?: string[]
+          transaction_id?: string | null
+          created_by?: string | null
+          created_at?: string
+        }
+      }
+      remediation_providers: {
+        Row: {
+          id: string
+          slug: string
+          display_name: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          slug: string
+          display_name: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          slug?: string
+          display_name?: string
+          created_at?: string
+        }
+      }
+      remediation_cases: {
+        Row: {
+          id: string
+          provider_id: string
+          faulty_inventory_item_id: string
+          faulty_serial: string
+          loaner_inventory_item_id: string | null
+          loaner_serial: string | null
+          provider_replacement_inventory_item_id: string | null
+          provider_replacement_serial: string | null
+          status: string
+          date_sent_to_provider: string | null
+          date_replacement_received: string | null
+          tracking_reference: string | null
+          notes: string | null
+          created_by: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          provider_id: string
+          faulty_inventory_item_id: string
+          faulty_serial: string
+          loaner_inventory_item_id?: string | null
+          loaner_serial?: string | null
+          provider_replacement_inventory_item_id?: string | null
+          provider_replacement_serial?: string | null
+          status?: string
+          date_sent_to_provider?: string | null
+          date_replacement_received?: string | null
+          tracking_reference?: string | null
+          notes?: string | null
+          created_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          provider_id?: string
+          faulty_inventory_item_id?: string
+          faulty_serial?: string
+          loaner_inventory_item_id?: string | null
+          loaner_serial?: string | null
+          provider_replacement_inventory_item_id?: string | null
+          provider_replacement_serial?: string | null
+          status?: string
+          date_sent_to_provider?: string | null
+          date_replacement_received?: string | null
+          tracking_reference?: string | null
+          notes?: string | null
+          created_by?: string | null
+          created_at?: string
+          updated_at?: string
         }
       }
       outbound_batches: {

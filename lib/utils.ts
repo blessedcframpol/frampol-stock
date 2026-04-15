@@ -15,3 +15,24 @@ export function formatDateDDMMYYYY(dateStr: string | undefined | null): string {
   const year = d.getFullYear()
   return `${day}/${month}/${year}`
 }
+
+const INVALID_FILENAME_CHARS = /[/\\?%*:|"<>]/g
+
+/** One segment of a downloaded filename (no extension). */
+export function sanitizeFilenameSegment(raw: string, maxLen = 64): string {
+  const s = raw
+    .trim()
+    .replace(INVALID_FILENAME_CHARS, "-")
+    .replace(/\s+/g, " ")
+    .replace(/-+/g, "-")
+    .slice(0, maxLen)
+    .replace(/-+$/, "")
+    .trim()
+  return s || "export"
+}
+
+/** Join sanitized parts and a yyyy-mm-dd suffix into `name-2026-04-15.csv`. */
+export function buildCsvFilename(parts: string[], isoDate: string): string {
+  const base = parts.map((p) => sanitizeFilenameSegment(p)).filter(Boolean).join("-")
+  return `${base}-${isoDate.slice(0, 10)}.csv`
+}

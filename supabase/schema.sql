@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS public.inventory_items (
   cloud_key TEXT,
   deleted_at TIMESTAMPTZ,
   CONSTRAINT inventory_items_status_check
-    CHECK (status IN ('In Stock', 'Sold', 'POC', 'Rented', 'Maintenance', 'Disposed', 'RMA Hold'))
+    CHECK (status IN ('In Stock', 'Sold', 'POC', 'Rented', 'Maintenance', 'Disposed', 'RMA Hold', 'Pending Inspection'))
 );
 
 COMMENT ON TABLE public.inventory_items IS 'Physical inventory; product identity is product_lines via product_id (no name/vendor columns on this table).';
@@ -60,11 +60,16 @@ CREATE TABLE IF NOT EXISTS public.transactions (
   from_location TEXT,
   to_location TEXT,
   assigned_to TEXT,
+  metadata JSONB,
+  created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
   CONSTRAINT transactions_type_check
-    CHECK (type IN ('Inbound', 'Sale', 'POC Out', 'POC Return', 'Rental Return', 'Transfer', 'Dispose', 'Rentals', 'Sale Return'))
+    CHECK (type IN (
+      'Inbound', 'Sale', 'POC Out', 'POC Return', 'Rental Return', 'Transfer', 'Dispose', 'Rentals', 'Sale Return',
+      'Decommissioned', 'Inspection Pass', 'Inspection Fail', 'Remediation Loaner Issue'
+    ))
 );
 
-COMMENT ON TABLE public.transactions IS 'History of stock movements (in/out, POC, transfer, dispose, sale return / RMA).';
+COMMENT ON TABLE public.transactions IS 'History of stock movements (in/out, POC, transfer, dispose, sale return / RMA, decommission, inspection, remediation).';
 
 -- Admin reversal audit for movement batches (replaces legacy quick_scans reversal columns)
 CREATE TABLE IF NOT EXISTS public.batch_reversals (

@@ -1,4 +1,4 @@
-import type { InventoryItem, ItemStatus, Transaction, TransactionType } from "@/lib/data"
+import type { InventoryItem, ItemStatus, JsonValue, Transaction, TransactionType } from "@/lib/data"
 
 /**
  * Given current inventory and movement params, compute the updated items and new transactions.
@@ -26,6 +26,7 @@ const OUTBOUND_CLOUD_KEY_TYPES: ReadonlySet<TransactionType> = new Set([
   "Rentals",
   "Transfer",
   "Dispose",
+  "Remediation Loaner Issue",
 ])
 
 export type InboundCreateDefaults = {
@@ -51,6 +52,12 @@ function normalizeInventoryVendor(value: string | undefined | null): string {
 
 function stringsMatchCi(a: string, b: string): boolean {
   return a.trim().toLowerCase() === b.trim().toLowerCase()
+}
+
+function mergeRecordMeta(base: JsonValue | undefined, patch: Record<string, JsonValue>): JsonValue {
+  const a =
+    base && typeof base === "object" && !Array.isArray(base) ? (base as Record<string, JsonValue>) : {}
+  return { ...a, ...patch }
 }
 
 /** When any expectation is set, existing inventory rows must match (after trash check). */
@@ -93,12 +100,12 @@ export function validateMovementForItem(
       if (st !== "In Stock") return `Not available for ${type} (status is ${st}, need In Stock)`
       return null
     case "Dispose":
-      if (st !== "In Stock" && st !== "Maintenance" && st !== "RMA Hold") {
+      if (st !== "In Stock" && st !== "Maintenance" && st !== "RMA Hold" && st !== "Pending Inspection") {
         return `Cannot dispose (status is ${st})`
       }
       return null
     case "Transfer":
-      if (st !== "In Stock" && st !== "Maintenance" && st !== "RMA Hold") {
+      if (st !== "In Stock" && st !== "Maintenance" && st !== "RMA Hold" && st !== "Pending Inspection") {
         return `Cannot transfer (status is ${st})`
       }
       if (ctx.fromLocation?.trim() && item.location !== ctx.fromLocation.trim()) {
@@ -120,6 +127,22 @@ export function validateMovementForItem(
       return null
     case "Sale Return":
       if (st !== "Sold") return `Sale Return requires status Sold (current: ${st})`
+      return null
+    case "Decommissioned":
+      if (st !== "POC" && st !== "Rented" && st !== "Sold") {
+        return `Decommissioned requires status POC, Rented, or Sold (current: ${st})`
+      }
+      return null
+    case "Inspection Pass":
+    case "Inspection Fail":
+      if (st !== "Pending Inspection") {
+        return `Inspection requires status Pending Inspection (current: ${st})`
+      }
+      return null
+    case "Remediation Loaner Issue":
+      if (st !== "In Stock") {
+        return `Remediation loaner issue requires status In Stock (current: ${st})`
+      }
       return null
     default:
       return null
@@ -158,6 +181,8 @@ export function computeMovementResult(
     saleTransactionDateIso?: string
     expectedProductName?: string
     expectedVendor?: string
+    /** Extra JSON stored on transaction rows (decommission reason, remediation case id, etc.) */
+    movementMetadata?: JsonValue
   }
 ): {
   success: string[]
@@ -186,6 +211,7 @@ export function computeMovementResult(
     saleTransactionDateIso,
     expectedProductName,
     expectedVendor,
+    movementMetadata,
   } = params
   const nowIso = new Date().toISOString()
   const date = type === "Sale" ? resolveSaleTransactionDate(saleTransactionDateIso, nowIso) : nowIso
@@ -240,6 +266,44 @@ export function computeMovementResult(
           authorisedBy: undefined,
           batchId: batchId ?? undefined,
           deliveryNoteUrl: deliveryNoteUrl ?? undefined,
+          metadata: movementMetadata,
+        })
+      } else if (type === "Decommissioned" && inboundCreateDefaults) {
+        const d = inboundCreateDefaults
+        const v = d.vendor?.trim() ? d.vendor.trim() : "General"
+        const holdLoc = toLocation?.trim() || d.location || "Warehouse A"
+        const newItem: InventoryItem = {
+          id: `INV-${idBase}-${success.length}-${Math.random().toString(36).slice(2, 9)}`,
+          serialNumber: trimmed,
+          name: d.name,
+          vendor: v,
+          status: "Pending Inspection",
+          dateAdded: date.slice(0, 10),
+          location: holdLoc,
+          client: clientDisplay !== "Internal" ? clientDisplay : undefined,
+          assignedTo: clientDisplay !== "Internal" ? clientDisplay : undefined,
+        }
+        next.push(newItem)
+        success.push(trimmed)
+        updatedItems.push(newItem)
+        newTransactions.push({
+          id: `TXN-${Date.now()}-${success.length}-${Math.random().toString(36).slice(2, 9)}`,
+          type,
+          serialNumber: trimmed,
+          itemName: newItem.name,
+          client: clientDisplay,
+          date,
+          clientId,
+          invoiceNumber,
+          notes,
+          assignedTo: undefined,
+          fromLocation: undefined,
+          toLocation: holdLoc,
+          disposalReason: undefined,
+          authorisedBy: undefined,
+          batchId: batchId ?? undefined,
+          deliveryNoteUrl: undefined,
+          metadata: mergeRecordMeta(movementMetadata, { intakeSource: "unknown_serial" }),
         })
       }
       continue
@@ -258,6 +322,24 @@ export function computeMovementResult(
 
     success.push(trimmed)
     const history = [...(it.assignmentHistory ?? [])]
+
+    let txnMetadata: JsonValue | undefined = movementMetadata
+    if (type === "Decommissioned") {
+      txnMetadata = mergeRecordMeta(movementMetadata, {
+        previousStatus: it.status,
+        previousLocation: it.location,
+        previousClient: it.client ?? null,
+        previousAssignedTo: it.assignedTo ?? null,
+        previousPocOutDate: it.pocOutDate ?? null,
+        previousReturnDate: it.returnDate ?? null,
+      })
+    }
+    if (type === "Inspection Pass") {
+      txnMetadata = mergeRecordMeta(movementMetadata, { inspectionOutcome: "available" })
+    }
+    if (type === "Inspection Fail") {
+      txnMetadata = mergeRecordMeta(movementMetadata, { inspectionOutcome: "faulty" })
+    }
 
     switch (type) {
       case "Inbound":
@@ -323,6 +405,35 @@ export function computeMovementResult(
         it.client = undefined
         it.assignedTo = undefined
         break
+      case "Decommissioned":
+        it.status = "Pending Inspection"
+        it.location = toLocation ?? it.location ?? "Warehouse A"
+        it.pocOutDate = undefined
+        it.returnDate = undefined
+        break
+      case "Inspection Pass":
+        it.status = "In Stock"
+        it.location = toLocation ?? "Warehouse A"
+        it.client = undefined
+        it.assignedTo = undefined
+        it.pocOutDate = undefined
+        it.returnDate = undefined
+        break
+      case "Inspection Fail":
+        it.status = "RMA Hold"
+        it.location = toLocation ?? "Warehouse A"
+        it.client = undefined
+        it.assignedTo = undefined
+        it.pocOutDate = undefined
+        it.returnDate = undefined
+        break
+      case "Remediation Loaner Issue":
+        it.status = "Sold"
+        it.location = "Delivered"
+        it.client = clientDisplay
+        it.assignedTo = assignedTo ?? clientDisplay
+        if (assignedTo) history.push({ date: date.slice(0, 10), assignedTo, notes: notes ?? "Remediation loaner" })
+        break
     }
     if (cloudKeysBySerial && OUTBOUND_CLOUD_KEY_TYPES.has(type)) {
       const k = cloudKeysBySerial[trimmed]
@@ -341,16 +452,27 @@ export function computeMovementResult(
       clientId,
       invoiceNumber,
       notes,
-      assignedTo: assignedTo ?? (type === "Sale" || type === "POC Out" || type === "Rentals" ? clientDisplay : undefined),
+      assignedTo:
+        assignedTo ??
+        (type === "Sale" || type === "POC Out" || type === "Rentals" || type === "Remediation Loaner Issue"
+          ? clientDisplay
+          : undefined),
       fromLocation: type === "Transfer" ? fromLocation : undefined,
       toLocation:
-        type === "Transfer" || type === "POC Return" || type === "Rental Return" || type === "Sale Return"
+        type === "Transfer" ||
+        type === "POC Return" ||
+        type === "Rental Return" ||
+        type === "Sale Return" ||
+        type === "Decommissioned" ||
+        type === "Inspection Pass" ||
+        type === "Inspection Fail"
           ? toLocation
           : undefined,
       disposalReason: type === "Dispose" ? disposalReason : undefined,
       authorisedBy: type === "Dispose" ? authorisedBy : undefined,
       batchId: batchId ?? undefined,
       deliveryNoteUrl: type === "Inbound" ? deliveryNoteUrl : undefined,
+      metadata: txnMetadata,
     })
   }
 

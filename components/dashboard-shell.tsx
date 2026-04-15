@@ -58,6 +58,7 @@ import { SearchSuggestions } from "@/components/search-suggestions"
 const inventoryChildren = [
   { href: "/inventory/dispatched", label: "Dispatched" },
   { href: "/inventory/movement", label: "Inventory movement" },
+  { href: "/inventory/remediation", label: "Remediation" },
   { href: "/inventory/stock-take", label: "Stock take" },
   { href: "/inventory/trash", label: "Trash", adminOnly: true as const },
 ]

@@ -2,8 +2,10 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react"
 import type { InventoryItem } from "@/lib/data"
-import { LOCATIONS } from "@/lib/data"
+import { INTERNAL_LOCATIONS, LOCATIONS } from "@/lib/data"
 import { useInventoryStore, INVENTORY_TRASH_RETENTION_DAYS } from "@/lib/inventory-store"
+import { Textarea } from "@/components/ui/textarea"
+import { Loader2 } from "lucide-react"
 import { useAuth } from "@/lib/auth-context"
 import { canEditInventory } from "@/lib/permissions"
 import { formatDateDDMMYYYY } from "@/lib/utils"
@@ -74,7 +76,7 @@ type Props = {
 }
 
 export function InventoryItemActionsMenu({ item, menuTrigger, onRecordMovement }: Props) {
-  const { transactions, updateItem, softDeleteItem } = useInventoryStore()
+  const { transactions, updateItem, softDeleteItem, applyMovement, refetchLedger } = useInventoryStore()
   const { role } = useAuth()
   const isAdmin = canEditInventory(role)
 
@@ -89,6 +91,13 @@ export function InventoryItemActionsMenu({ item, menuTrigger, onRecordMovement }
   const [editNotes, setEditNotes] = useState("")
   const [editPurchase, setEditPurchase] = useState("")
   const [editWarranty, setEditWarranty] = useState("")
+
+  const [inspectOpen, setInspectOpen] = useState(false)
+  const [inspectionOutcome, setInspectionOutcome] = useState<"available" | "faulty">("available")
+  const [inspectorName, setInspectorName] = useState("")
+  const [conditionNotes, setConditionNotes] = useState("")
+  const [inspectionToLocation, setInspectionToLocation] = useState("Warehouse A")
+  const [inspectionSubmitting, setInspectionSubmitting] = useState(false)
 
   const recentTxns = useMemo(() => {
     return transactions
@@ -129,6 +138,45 @@ export function InventoryItemActionsMenu({ item, menuTrigger, onRecordMovement }
     }
   }
 
+  async function handleInspectionSubmit() {
+    if (!inspectorName.trim()) {
+      toast.error("Enter inspector name")
+      return
+    }
+    setInspectionSubmitting(true)
+    try {
+      const type = inspectionOutcome === "available" ? "Inspection Pass" : "Inspection Fail"
+      const result = applyMovement({
+        type,
+        serialNumbers: [item.serialNumber],
+        clientDisplay: "Internal",
+        toLocation: inspectionToLocation,
+        notes: conditionNotes.trim() || undefined,
+        movementMetadata: { inspectorName: inspectorName.trim() },
+        kitInspectionPayload: {
+          inventoryItemId: item.id,
+          serialNumber: item.serialNumber,
+          inspectorName: inspectorName.trim(),
+          outcome: inspectionOutcome === "available" ? "available" : "faulty",
+          conditionNotes: conditionNotes.trim() || undefined,
+          attachmentUrls: [],
+        },
+      })
+      if (result.success.length > 0) {
+        toast.success(inspectionOutcome === "available" ? "Marked available (In Stock)" : "Marked faulty (RMA Hold)")
+        void refetchLedger()
+        setInspectOpen(false)
+        setInspectorName("")
+        setConditionNotes("")
+      }
+      if (result.rejected.length > 0) {
+        toast.error(result.rejected.map((r) => r.reason).join("; "))
+      }
+    } finally {
+      setInspectionSubmitting(false)
+    }
+  }
+
   async function handleConfirmDelete() {
     setDeleting(true)
     try {
@@ -162,6 +210,9 @@ export function InventoryItemActionsMenu({ item, menuTrigger, onRecordMovement }
           <DropdownMenuItem onSelect={() => setViewOpen(true)}>View Details</DropdownMenuItem>
           {onRecordMovement && (
             <DropdownMenuItem onSelect={() => onRecordMovement(item)}>Record movement…</DropdownMenuItem>
+          )}
+          {item.status === "Pending Inspection" && (
+            <DropdownMenuItem onSelect={() => setInspectOpen(true)}>Complete inspection…</DropdownMenuItem>
           )}
           {isAdmin && (
             <>
@@ -281,6 +332,67 @@ export function InventoryItemActionsMenu({ item, menuTrigger, onRecordMovement }
             </Button>
             <Button type="button" onClick={handleSaveEdit}>
               Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={inspectOpen} onOpenChange={setInspectOpen}>
+        <DialogContent className="bg-card text-card-foreground max-w-[calc(100vw-2rem)] sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-foreground">Inspection</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-3 py-1">
+            <div className="flex flex-col gap-1.5">
+              <Label>Outcome</Label>
+              <Select
+                value={inspectionOutcome}
+                onValueChange={(v) => setInspectionOutcome(v as "available" | "faulty")}
+              >
+                <SelectTrigger className="bg-card">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="available">Available (return to sellable stock)</SelectItem>
+                  <SelectItem value="faulty">Faulty (RMA hold)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Inspector name</Label>
+              <Input className="bg-card" value={inspectorName} onChange={(e) => setInspectorName(e.target.value)} />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Location after inspection</Label>
+              <Select value={inspectionToLocation} onValueChange={setInspectionToLocation}>
+                <SelectTrigger className="bg-card">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {INTERNAL_LOCATIONS.map((loc) => (
+                    <SelectItem key={loc} value={loc}>
+                      {loc}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Condition notes</Label>
+              <Textarea
+                className="bg-card min-h-[72px]"
+                value={conditionNotes}
+                onChange={(e) => setConditionNotes(e.target.value)}
+                placeholder="Cosmetic damage, missing parts, firmware…"
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button type="button" variant="outline" onClick={() => setInspectOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={() => void handleInspectionSubmit()} disabled={inspectionSubmitting}>
+              {inspectionSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Save"}
             </Button>
           </DialogFooter>
         </DialogContent>

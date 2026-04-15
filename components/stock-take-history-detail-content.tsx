@@ -15,12 +15,12 @@ import {
 } from "@/components/ui/table"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
-import { ArrowLeft, CheckCircle2, AlertTriangle, Loader2 } from "lucide-react"
+import { ArrowLeft, CheckCircle2, AlertTriangle, Loader2, Copy, Download } from "lucide-react"
 import type { StockTakeRecord, StockTakeSnapshotItem } from "@/lib/data"
 import { formatDateDDMMYYYY } from "@/lib/utils"
 import { toast } from "sonner"
 import { toastFromApiErrorBody, toastFromCaughtError } from "@/lib/toast-reportable-error"
-import { cn } from "@/lib/utils"
+import { buildCsvFilename, cn } from "@/lib/utils"
 
 const statusStyles: Record<string, string> = {
   "In Stock": "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
@@ -29,7 +29,52 @@ const statusStyles: Record<string, string> = {
   Rented: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
   Maintenance: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
   "RMA Hold": "bg-orange-500/10 text-orange-600 dark:text-orange-400",
+  "Pending Inspection": "bg-teal-500/10 text-teal-700 dark:text-teal-400",
   Disposed: "bg-slate-500/10 text-slate-600 dark:text-slate-400",
+}
+
+async function copySerialLinesToClipboard(serials: string[], toastLabel: string) {
+  const text = serials.join("\n")
+  if (!text.trim()) {
+    toast.error("Nothing to copy")
+    return
+  }
+  try {
+    await navigator.clipboard.writeText(text)
+    toast.success(toastLabel)
+  } catch {
+    toast.error("Could not copy — check browser permissions for clipboard")
+  }
+}
+
+function exportStockTakeSectionCsv(
+  section: "matched" | "notInSystem" | "notScanned",
+  matched: StockTakeSnapshotItem[],
+  notInSystem: string[],
+  notScanned: StockTakeSnapshotItem[],
+  completedAtIso: string
+) {
+  const rows: string[][] = []
+  if (section === "matched") {
+    rows.push(["Serial", "Name", "Status", "Location"])
+    for (const item of matched) rows.push([item.serialNumber, item.name, item.status, item.location])
+  } else if (section === "notInSystem") {
+    rows.push(["Serial", "Result"])
+    for (const serial of notInSystem) rows.push([serial, "Not in system"])
+  } else {
+    rows.push(["Serial", "Name", "Status", "Location"])
+    for (const item of notScanned) rows.push([item.serialNumber, item.name, item.status, item.location])
+  }
+  const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n")
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement("a")
+  a.href = url
+  const sectionLabel =
+    section === "matched" ? "matched" : section === "notInSystem" ? "not in system" : "not scanned"
+  a.download = buildCsvFilename(["Stock take history", sectionLabel], completedAtIso)
+  a.click()
+  URL.revokeObjectURL(url)
 }
 
 export function StockTakeHistoryDetailContent({ id }: { id: string }) {
@@ -81,6 +126,22 @@ export function StockTakeHistoryDetailContent({ id }: { id: string }) {
   }
 
   const s = record.resultSnapshot
+  const stockTakeCompletedAt = record.completedAt
+
+  async function handleCopySection(section: "matched" | "notInSystem" | "notScanned") {
+    const serials =
+      section === "matched"
+        ? s.matched.map((i) => i.serialNumber)
+        : section === "notInSystem"
+          ? s.notInSystem
+          : s.notScanned.map((i) => i.serialNumber)
+    await copySerialLinesToClipboard(serials, `Copied ${serials.length} serial(s)`)
+  }
+
+  function handleExportSection(section: "matched" | "notInSystem" | "notScanned") {
+    exportStockTakeSectionCsv(section, s.matched, s.notInSystem, s.notScanned, stockTakeCompletedAt)
+    toast.success("Section CSV downloaded")
+  }
 
   return (
     <div className="flex flex-col gap-4 md:gap-6 min-w-0 p-4 md:p-6">
@@ -116,6 +177,16 @@ export function StockTakeHistoryDetailContent({ id }: { id: string }) {
               </TabsTrigger>
             </TabsList>
             <TabsContent value="matched" className="mt-3">
+              <div className="mb-2 flex items-center justify-end gap-2">
+                <Button type="button" size="sm" variant="outline" onClick={() => void handleCopySection("matched")}>
+                  <Copy className="size-4 mr-1" />
+                  Copy serials
+                </Button>
+                <Button type="button" size="sm" variant="outline" onClick={() => handleExportSection("matched")}>
+                  <Download className="size-4 mr-1" />
+                  Export section
+                </Button>
+              </div>
               <SnapshotResultTable
                 items={s.matched}
                 emptyIcon={<CheckCircle2 className="size-6" />}
@@ -125,6 +196,16 @@ export function StockTakeHistoryDetailContent({ id }: { id: string }) {
               />
             </TabsContent>
             <TabsContent value="notInSystem" className="mt-3">
+              <div className="mb-2 flex items-center justify-end gap-2">
+                <Button type="button" size="sm" variant="outline" onClick={() => void handleCopySection("notInSystem")}>
+                  <Copy className="size-4 mr-1" />
+                  Copy serials
+                </Button>
+                <Button type="button" size="sm" variant="outline" onClick={() => handleExportSection("notInSystem")}>
+                  <Download className="size-4 mr-1" />
+                  Export section
+                </Button>
+              </div>
               <NotInSystemList
                 serials={s.notInSystem}
                 emptyIcon={<AlertTriangle className="size-6" />}
@@ -133,6 +214,16 @@ export function StockTakeHistoryDetailContent({ id }: { id: string }) {
               />
             </TabsContent>
             <TabsContent value="notScanned" className="mt-3">
+              <div className="mb-2 flex items-center justify-end gap-2">
+                <Button type="button" size="sm" variant="outline" onClick={() => void handleCopySection("notScanned")}>
+                  <Copy className="size-4 mr-1" />
+                  Copy serials
+                </Button>
+                <Button type="button" size="sm" variant="outline" onClick={() => handleExportSection("notScanned")}>
+                  <Download className="size-4 mr-1" />
+                  Export section
+                </Button>
+              </div>
               <SnapshotResultTable
                 items={s.notScanned}
                 emptyIcon={<AlertTriangle className="size-6" />}

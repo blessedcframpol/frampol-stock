@@ -1,7 +1,7 @@
 "use client"
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react"
-import type { InventoryItem, Transaction, TransactionType } from "./data"
+import type { InventoryItem, JsonValue, Transaction, TransactionType } from "./data"
 import { inventoryItems as initialInventory, recentTransactions as initialTransactions, clients } from "./data"
 import { getReorderLevelForProduct, getReorderLevelOverrides } from "./settings"
 import { getSupabaseClient } from "./supabase/client"
@@ -78,6 +78,23 @@ export interface MovementParams {
   /** Optional: reject existing rows whose name/vendor do not match (see movement-utils). */
   expectedProductName?: string
   expectedVendor?: string
+  /** Stored on transaction rows (JSON). */
+  movementMetadata?: JsonValue
+  /** When type is Inspection Pass / Fail: persist kit_inspections after transactions. */
+  kitInspectionPayload?: {
+    inventoryItemId: string
+    serialNumber: string
+    inspectorName: string
+    outcome: "available" | "faulty"
+    conditionNotes?: string
+    attachmentUrls: string[]
+  }
+  /** After Remediation Loaner Issue: link loaner serial to remediation_cases row. */
+  remediationCaseLoanerLink?: {
+    caseId: string
+    loanerInventoryItemId: string
+    loanerSerial: string
+  }
 }
 
 const APPROACHING_DAYS = 7
@@ -352,6 +369,9 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
         saleTransactionDateIso,
         expectedProductName,
         expectedVendor,
+        movementMetadata,
+        kitInspectionPayload,
+        remediationCaseLoanerLink,
       } = params
       const clientDisplay =
         clientDisplayOverride ?? (clientId ? getClientDisplay(clientId) : "Internal")
@@ -377,6 +397,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
         saleTransactionDateIso,
         expectedProductName,
         expectedVendor,
+        movementMetadata,
       })
 
       if (result.rejected.length > 0) {
@@ -457,10 +478,39 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
             }
           }
           if (result.newTransactions.length) {
-            const { error } = await supabase
-              .from("transactions")
-              .insert(result.newTransactions.map(transactionToRow))
+            const rows = result.newTransactions.map((t) =>
+              transactionToRow({ ...t, createdBy: user?.id })
+            )
+            const { error } = await supabase.from("transactions").insert(rows)
             if (reportFail("Transaction log", error)) return
+          }
+          if (
+            kitInspectionPayload &&
+            (type === "Inspection Pass" || type === "Inspection Fail") &&
+            result.newTransactions[0]
+          ) {
+            const { error: inspErr } = await supabase.from("kit_inspections").insert({
+              inventory_item_id: kitInspectionPayload.inventoryItemId,
+              serial_number: kitInspectionPayload.serialNumber,
+              inspector_name: kitInspectionPayload.inspectorName.trim() || null,
+              outcome: kitInspectionPayload.outcome,
+              condition_notes: kitInspectionPayload.conditionNotes?.trim() || null,
+              attachment_urls: kitInspectionPayload.attachmentUrls ?? [],
+              transaction_id: result.newTransactions[0].id,
+              created_by: user?.id ?? null,
+            })
+            if (reportFail("Kit inspection", inspErr)) return
+          }
+          if (type === "Remediation Loaner Issue" && remediationCaseLoanerLink && result.success.length > 0) {
+            const { error: remErr } = await supabase
+              .from("remediation_cases")
+              .update({
+                loaner_inventory_item_id: remediationCaseLoanerLink.loanerInventoryItemId,
+                loaner_serial: remediationCaseLoanerLink.loanerSerial,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", remediationCaseLoanerLink.caseId)
+            if (reportFail("Remediation case", remErr)) return
           }
           await refetchLedger({ isStale: () => false })
         } catch (e) {
@@ -480,7 +530,10 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
         const created = result.updatedItems.filter((u) => !prevIds.has(u.id))
         return [...merged, ...created]
       })
-      setTransactions((prev) => [...result.newTransactions, ...prev])
+      setTransactions((prev) => [
+        ...result.newTransactions.map((t) => ({ ...t, createdBy: user?.id })),
+        ...prev,
+      ])
 
       return {
         success: result.success,
@@ -489,7 +542,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
         movementBatchId: newBatchId,
       }
     },
-    [inventory, supabase, refetchLedger]
+    [inventory, supabase, refetchLedger, user?.id]
   )
 
   const updateItem = useCallback(
@@ -673,6 +726,14 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
       const txn = transactions.find((t) => t.id === txnId)
       if (!txn) return { ok: false, error: "Transaction not found" }
       if (txn.type === "Dispose") return { ok: false, error: "Disposal cannot be undone." }
+      if (
+        txn.type === "Decommissioned" ||
+        txn.type === "Inspection Pass" ||
+        txn.type === "Inspection Fail" ||
+        txn.type === "Remediation Loaner Issue"
+      ) {
+        return { ok: false, error: "This transaction type cannot be undone from the UI." }
+      }
       const item = inventory.find((i) => i.serialNumber === txn.serialNumber)
       const updates = getRevertUpdatesForTransaction(txn)
       if (item && Object.keys(updates).length > 0) {

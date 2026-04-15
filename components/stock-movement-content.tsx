@@ -35,7 +35,7 @@ import {
 } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
 import { LOCATIONS, INTERNAL_LOCATIONS } from "@/lib/data"
-import type { TransactionType, ClientSite } from "@/lib/data"
+import type { TransactionType, ClientSite, JsonValue } from "@/lib/data"
 import { useClients, insertClient } from "@/lib/supabase/clients-db"
 import { useInventoryStore } from "@/lib/inventory-store"
 import {
@@ -132,6 +132,10 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
   const [mainClientSites, setMainClientSites] = useState<ClientSite[]>([{ address: "" }])
   /** TEMPORARY (admin): optional sale ledger date until stock-requests workflow */
   const [adminSaleDate, setAdminSaleDate] = useState("")
+  const [decommissionReason, setDecommissionReason] = useState("")
+  const [decommissionReceivedDate, setDecommissionReceivedDate] = useState("")
+  const [decommissionDocFile, setDecommissionDocFile] = useState<File | null>(null)
+  const [remediationCaseId, setRemediationCaseId] = useState("")
 
   useEffect(() => {
     if (!embedMode) return
@@ -282,7 +286,8 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
       clientPhone?: string
       sites?: ClientSite[]
     },
-    deliveryNoteUrl?: string
+    deliveryNoteUrl?: string,
+    decommissionDocumentUrl?: string
   ) {
     setLastDuplicateMessage(null)
     setIsSubmitting(true)
@@ -305,9 +310,40 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
         vendor: normalizeInventoryVendor(scanVendor),
         location: inboundReceiveLocation.trim() || "Warehouse A",
       }
+    } else if (selectedType === "Decommissioned") {
+      inboundDefaults = {
+        name: pn,
+        vendor: normalizeInventoryVendor(scanVendor),
+        location: toLocation?.trim() || "Warehouse A",
+      }
     } else {
       inboundDefaults = undefined
     }
+
+    let movementMetadata: JsonValue | undefined
+    if (selectedType === "Decommissioned") {
+      movementMetadata = {
+        decommissionReason: decommissionReason.trim(),
+        receivedDate: decommissionReceivedDate.trim() || undefined,
+        documentUrl: decommissionDocumentUrl || undefined,
+      }
+    }
+    if (selectedType === "Remediation Loaner Issue") {
+      movementMetadata = {
+        remediation_case_id: remediationCaseId.trim(),
+      }
+    }
+
+    const loanerSerial = list.map((s) => s.trim()).filter(Boolean)[0]
+    const loanerItem = loanerSerial ? inventory.find((i) => i.serialNumber === loanerSerial) : undefined
+    const remediationCaseLoanerLink =
+      selectedType === "Remediation Loaner Issue" && loanerItem && remediationCaseId.trim()
+        ? {
+            caseId: remediationCaseId.trim(),
+            loanerInventoryItemId: loanerItem.id,
+            loanerSerial,
+          }
+        : undefined
 
     const expectedVendorForMovement: string | undefined = pendingOutbound
       ? normalizeInventoryVendor(pendingOutbound.vendor)
@@ -318,16 +354,7 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
         : normalizeInventoryVendor(scanVendor)
 
     const result = applyMovement({
-      type: selectedType as
-        | "Inbound"
-        | "Sale"
-        | "POC Out"
-        | "POC Return"
-        | "Rental Return"
-        | "Sale Return"
-        | "Rentals"
-        | "Transfer"
-        | "Dispose",
+      type: selectedType as TransactionType,
       serialNumbers: list,
       clientId: effectiveClientId,
       clientDisplayOverride,
@@ -336,7 +363,8 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
         selectedType === "Transfer" ||
         selectedType === "POC Return" ||
         selectedType === "Rental Return" ||
-        selectedType === "Sale Return"
+        selectedType === "Sale Return" ||
+        selectedType === "Decommissioned"
           ? toLocation || undefined
           : undefined,
       assignedTo: (outboundDetails?.clientName ?? outboundDetails?.clientCompany) ?? (clientId ? clients.find((c) => c.id === clientId)?.company : undefined),
@@ -355,6 +383,8 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
       cloudKeysBySerial,
       saleTransactionDateIso:
         selectedType === "Sale" && isAdmin && adminSaleDate.trim() ? adminSaleDate.trim() : undefined,
+      movementMetadata,
+      remediationCaseLoanerLink,
       ...(pn && expectedVendorForMovement !== undefined
         ? { expectedProductName: pn, expectedVendor: expectedVendorForMovement }
         : pn
@@ -379,6 +409,15 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
         setAuthorisedBy("")
       }
       if (selectedType === "Inbound") setDeliveryNoteFile(null)
+      if (selectedType === "Decommissioned") {
+        setDecommissionReason("")
+        setDecommissionReceivedDate("")
+        setDecommissionDocFile(null)
+        setToLocation("")
+      }
+      if (selectedType === "Remediation Loaner Issue") {
+        setRemediationCaseId("")
+      }
       if (OUTBOUND_LIKE_MOVEMENTS.includes(selectedType as TransactionType)) {
         setCloudKeysInput("")
       }
@@ -503,6 +542,31 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
         return
       }
     }
+    if (selectedType === "Decommissioned") {
+      if (!toLocation?.trim()) {
+        toast.error("Select a hold / receive location for decommissioned kits")
+        return
+      }
+      if (!decommissionReason.trim()) {
+        toast.error("Enter a reason for decommission")
+        return
+      }
+      const hasUnknown = uniqueSerials.some((s) => !inventorySerialSet.has(s))
+      if (hasUnknown && !clientId) {
+        toast.error("Select a client (source) when decommissioning serials not previously in inventory")
+        return
+      }
+    }
+    if (selectedType === "Remediation Loaner Issue") {
+      if (uniqueSerials.length !== 1) {
+        toast.error("Remediation loaner issue: enter exactly one serial (the loaner unit from stock)")
+        return
+      }
+      if (!remediationCaseId.trim()) {
+        toast.error("Enter the remediation case ID (UUID from the remediation case)")
+        return
+      }
+    }
 
     let resolvedClientId = clientId
 
@@ -545,7 +609,10 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
           setIsSubmitting(false)
         }
       } else if (
-        (selectedType === "Sale" || selectedType === "POC Out" || selectedType === "Rentals") &&
+        (selectedType === "Sale" ||
+          selectedType === "POC Out" ||
+          selectedType === "Rentals" ||
+          selectedType === "Remediation Loaner Issue") &&
         !clientId
       ) {
         toast.error("Select a client or choose Add new client")
@@ -582,13 +649,26 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
           )
           setIsSubmitting(false)
         }
+      } else if (selectedType === "Decommissioned" && decommissionDocFile) {
+        setIsSubmitting(true)
+        try {
+          const url = await uploadDeliveryNote(decommissionDocFile)
+          doSubmit(undefined, undefined, url)
+        } catch (e) {
+          toastFromCaughtError(e, "Failed to upload attachment.")
+          setIsSubmitting(false)
+        }
       } else {
         doSubmit()
       }
       return
     }
     const missing = uniqueSerials.filter((s) => !inventorySerialSet.has(s))
-    if (missing.length > 0) {
+    if (missing.length > 0 && selectedType === "Remediation Loaner Issue") {
+      toast.error("Loaner serial must exist in inventory (status In Stock).")
+      return
+    }
+    if (missing.length > 0 && selectedType !== "Decommissioned") {
       if (isEmbed) {
         toast.error(`Serial(s) not in inventory: ${missing.join(", ")}`)
         return
@@ -832,7 +912,105 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
                   </Select>
                 </div>
               )}
-              {(selectedType === "Sale" || selectedType === "POC Out" || selectedType === "Rentals" || selectedType === "Transfer" || selectedType === "Dispose") && (
+              {selectedType === "Decommissioned" && (
+                <>
+                  <div className="flex flex-col gap-2">
+                    <Label className="text-foreground">Hold / receive location</Label>
+                    <Select value={toLocation} onValueChange={setToLocation}>
+                      <SelectTrigger className="bg-card text-foreground border-border">
+                        <SelectValue placeholder="Select location..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {INTERNAL_LOCATIONS.map((loc) => (
+                          <SelectItem key={loc} value={loc}>
+                            {loc}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <Label className="text-foreground">Reason for decommission</Label>
+                    <Select value={decommissionReason} onValueChange={setDecommissionReason}>
+                      <SelectTrigger className="bg-card text-foreground border-border">
+                        <SelectValue placeholder="Select reason..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Client cancellation">Client cancellation</SelectItem>
+                        <SelectItem value="Upgrade">Upgrade</SelectItem>
+                        <SelectItem value="Fault">Fault</SelectItem>
+                        <SelectItem value="End of contract">End of contract</SelectItem>
+                        <SelectItem value="Other">Other</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <Label className="text-foreground">Date received / decommissioned (optional)</Label>
+                    <Input
+                      type="date"
+                      className="bg-card text-foreground border-border max-w-xs"
+                      value={decommissionReceivedDate}
+                      onChange={(e) => setDecommissionReceivedDate(e.target.value)}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <Label className="text-foreground flex items-center gap-2">
+                      <Upload className="w-4 h-4 text-muted-foreground" />
+                      Invoice / reference document (optional)
+                    </Label>
+                    {!decommissionDocFile ? (
+                      <Input
+                        type="file"
+                        accept=".pdf,image/jpeg,image/png,image/webp,application/pdf"
+                        className="cursor-pointer text-sm file:mr-2 file:rounded-md file:border-0 file:bg-primary/10 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-primary"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0]
+                          if (f) setDecommissionDocFile(f)
+                          e.target.value = ""
+                        }}
+                      />
+                    ) : (
+                      <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm">
+                        <span className="truncate text-foreground">{decommissionDocFile.name}</span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 w-7 p-0 shrink-0"
+                          onClick={() => setDecommissionDocFile(null)}
+                          aria-label="Remove file"
+                        >
+                          <X className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Status becomes <strong>Pending Inspection</strong>. Serials must be POC, Rented, or Sold — or new serials with product/vendor above for manual intake.
+                  </p>
+                </>
+              )}
+              {selectedType === "Remediation Loaner Issue" && (
+                <div className="flex flex-col gap-2">
+                  <Label className="text-foreground">Remediation case ID</Label>
+                  <Input
+                    placeholder="Paste case UUID from Remediation page"
+                    className="font-mono text-sm bg-card text-foreground border-border"
+                    value={remediationCaseId}
+                    onChange={(e) => setRemediationCaseId(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Create the case first (Remediation page), then issue one loaner serial from <strong>In Stock</strong> here.
+                  </p>
+                </div>
+              )}
+              {(selectedType === "Sale" ||
+                selectedType === "POC Out" ||
+                selectedType === "Rentals" ||
+                selectedType === "Transfer" ||
+                selectedType === "Dispose" ||
+                selectedType === "Decommissioned" ||
+                selectedType === "Remediation Loaner Issue") && (
                 <div className="flex flex-col gap-3">
                   <div className="flex flex-col gap-2">
                     <Label className="text-foreground">Client / Customer (assigned to)</Label>
@@ -1149,6 +1327,9 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
                     selectedType === "Sale Return" && "bg-orange-500/10 text-orange-600 dark:text-orange-400",
                     selectedType === "Transfer" && "bg-violet-500/10 text-violet-600 dark:text-violet-400",
                     selectedType === "Dispose" && "bg-slate-500/10 text-slate-600 dark:text-slate-400",
+                    selectedType === "Decommissioned" && "bg-teal-500/10 text-teal-700 dark:text-teal-400",
+                    selectedType === "Remediation Loaner Issue" &&
+                      "bg-rose-500/10 text-rose-700 dark:text-rose-400",
                   )}
                 >
                   {selectedType}

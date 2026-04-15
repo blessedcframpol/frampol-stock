@@ -47,7 +47,7 @@ import {
   Layers,
   List,
 } from "lucide-react"
-import { cn, formatDateDDMMYYYY } from "@/lib/utils"
+import { buildCsvFilename, cn, formatDateDDMMYYYY } from "@/lib/utils"
 import { toast } from "sonner"
 import { InventoryItemActionsMenu } from "@/components/inventory-item-actions"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -60,6 +60,7 @@ const statusStyles: Record<ItemStatus, string> = {
   Rented: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
   Maintenance: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
   "RMA Hold": "bg-orange-500/10 text-orange-600 dark:text-orange-400",
+  "Pending Inspection": "bg-teal-500/10 text-teal-700 dark:text-teal-400",
   Disposed: "bg-slate-500/10 text-slate-600 dark:text-slate-400",
 }
 
@@ -69,6 +70,21 @@ type ItemGroup = {
   vendor: string
   items: InventoryItem[]
   count: number
+}
+
+function toCsv(rows: string[][]): string {
+  return rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n")
+}
+
+function downloadCsv(rows: string[][], filename: string) {
+  const csv = toCsv(rows)
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement("a")
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
 }
 
 function groupInventoryItems(items: InventoryItem[]): ItemGroup[] {
@@ -297,6 +313,68 @@ export function InventoryContent() {
     setMoveTargetGroupName("")
   }
 
+  function handleExportVendorsCsv() {
+    const rows: string[][] = [["Vendor", "Items In Stock", "Product Groups"]]
+    for (const vendor of vendors) {
+      const itemsForVendor = onHandInventory.filter((i) => (i.vendor?.trim() ? i.vendor : "General") === vendor)
+      const groupCount = new Set(itemsForVendor.map((i) => i.name)).size
+      rows.push([vendor, String(itemsForVendor.length), String(groupCount)])
+    }
+    const iso = new Date().toISOString()
+    downloadCsv(rows, buildCsvFilename(["All vendors", "summary"], iso))
+    toast.success("Vendor summary CSV downloaded")
+  }
+
+  function handleExportGroupsCsv() {
+    const rows: string[][] = [["Vendor", "Product", "In Stock Count"]]
+    for (const group of filteredGroups) {
+      rows.push([group.vendor, group.name, String(group.count)])
+    }
+    const iso = new Date().toISOString()
+    const scope =
+      selectedVendor && selectedVendor !== "__flat__"
+        ? [selectedVendor, "product groups"]
+        : ["All products", "product groups"]
+    downloadCsv(rows, buildCsvFilename(scope, iso))
+    toast.success("Product groups CSV downloaded")
+  }
+
+  function handleExportItemsCsv() {
+    const rows: string[][] = [[
+      "Serial Number",
+      "Name",
+      "Vendor",
+      "Status",
+      "Location",
+      "Assigned To",
+      "Date Added",
+      "Purchase Date",
+      "Warranty End",
+    ]]
+    for (const item of filteredItems) {
+      rows.push([
+        item.serialNumber,
+        item.name,
+        item.vendor?.trim() ? item.vendor : "General",
+        item.status,
+        item.location,
+        item.assignedTo ?? "",
+        item.dateAdded,
+        item.purchaseDate ?? "",
+        item.warrantyEndDate ?? "",
+      ])
+    }
+    const iso = new Date().toISOString()
+    const nameParts =
+      selectedGroup
+        ? [selectedGroup.vendor, selectedGroup.name, "items"]
+        : selectedGroupName
+          ? [selectedGroupName, "items"]
+          : ["inventory", "items"]
+    downloadCsv(rows, buildCsvFilename(nameParts, iso))
+    toast.success("Item-level CSV downloaded")
+  }
+
   // —— Level 1: Vendors (Starlink, Fortinet, …)
   if (showVendorsView) {
     return (
@@ -328,6 +406,10 @@ export function InventoryContent() {
                 <span className="text-xs font-medium hidden sm:inline">All products</span>
               </Button>
             </div>
+            <Button variant="outline" size="sm" className="text-foreground" onClick={handleExportVendorsCsv}>
+              <Download className="w-4 h-4 mr-1.5" />
+              <span className="hidden sm:inline">Export</span>
+            </Button>
             <Dialog open={addDialogOpen} onOpenChange={(open) => { setAddDialogOpen(open); if (!open) { setAddNewVendorName(""); setAddVendor(""); } }}>
               <DialogTrigger asChild>
                 <Button size="sm" className="bg-primary text-primary-foreground hover:bg-primary/90">
@@ -517,7 +599,7 @@ export function InventoryContent() {
                 <span className="text-xs font-medium hidden sm:inline">All products</span>
               </Button>
             </div>
-            <Button variant="outline" size="sm" className="text-foreground">
+            <Button variant="outline" size="sm" className="text-foreground" onClick={handleExportGroupsCsv}>
               <Download className="w-4 h-4 mr-1.5" />
               <span className="hidden sm:inline">Export</span>
             </Button>
@@ -781,7 +863,7 @@ export function InventoryContent() {
                 <span className="sr-only">Card view</span>
               </Button>
             </div>
-            <Button variant="outline" size="sm" className="text-foreground">
+            <Button variant="outline" size="sm" className="text-foreground" onClick={handleExportItemsCsv}>
               <Download className="w-4 h-4 mr-1.5" />
               <span className="hidden sm:inline">Export</span>
             </Button>

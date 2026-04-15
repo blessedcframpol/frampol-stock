@@ -14,6 +14,7 @@ This document describes how **stock statuses**, **transaction types**, and the *
 | **Rented** | Out on rental at client site. |
 | **Maintenance** | Internal repair/service; not treated as sellable without a further movement. |
 | **RMA Hold** | Faulty unit returned after a **sale**; held while waiting on vendor (e.g. Starlink) replacement or disposal. Not sellable. |
+| **Pending Inspection** | Kit received via **Decommissioned** (or unknown-serial intake); not sellable until **Inspection Pass** or **Inspection Fail**. |
 | **Disposed** | Written off; end of life for that serial in normal operations. |
 
 **Dispatched** (conceptually): items that are **not** available as normal warehouse stock include Sold, POC, Rented, Maintenance, and Disposed. **RMA Hold** is *not* grouped as “dispatched to client”; it appears on the main inventory list with an orange **RMA Hold** badge so you can see kits physically on hand but not for sale.
@@ -27,9 +28,30 @@ Each successful movement appends one **transaction** row per serial (audit trail
 - **POC Return** / **Rental Return** — Bring serials back from POC / Rented to **In Stock** at a chosen location.
 - **Sale Return** — **Sold** → **RMA Hold** at a chosen **hold location** (warehouse/service). Use for faulty kits the customer brings back while you arrange a vendor replacement.
 - **Transfer** — Change location; allowed for **In Stock**, **Maintenance**, and **RMA Hold** (status unchanged).
-- **Dispose** — Allowed from **In Stock**, **Maintenance**, or **RMA Hold** → **Disposed**.
+- **Dispose** — Allowed from **In Stock**, **Maintenance**, **RMA Hold**, or **Pending Inspection** → **Disposed**.
+- **Decommissioned** — **POC**, **Rented**, or **Sold** (or unknown serial with product defaults) → **Pending Inspection** at a hold/receive location. Use when equipment returns from site for inspection (not the same as **Dispose**). Optional **metadata** on the transaction stores reason, dates, document URL.
+- **Inspection Pass** / **Inspection Fail** — From **Pending Inspection** only. Pass → **In Stock**; fail → **RMA Hold**. Optionally creates a **`kit_inspections`** row (inspector, outcome, notes).
+- **Remediation Loaner Issue** — **In Stock** → **Sold** at **Delivered** (like a sale) with **metadata** linking a **remediation case**; updates the case with the loaner serial.
 
 Validation and transitions are implemented in `validateMovementForItem` and `computeMovementResult` in `lib/supabase/movement-utils.ts`.
+
+### Decommissioned vs Sale Return vs Dispose
+
+| | **Decommissioned** | **Sale Return** | **Dispose** |
+|---|-------------------|-----------------|-------------|
+| **Use for** | Kits returning from POC/rental/sale for inspection | Faulty **sold** unit into RMA hold | Write-off / scrap |
+| **Resulting status** | **Pending Inspection** | **RMA Hold** | **Disposed** |
+| **Undo** | Not supported from UI | Supported (with caveats) | Not supported |
+
+### Remediation (provider RMA)
+
+- **Remediation** page (`/inventory/remediation`): create a case for a **Starlink** faulty unit on **RMA Hold**, then use **Inventory movement → Rem. loaner** with the **case UUID** to issue a working unit from stock (`Remediation Loaner Issue`). The case tracks status, tracking ref, dates, and provider replacement serial when recorded.
+- Migrations: **`034_decommissioned_pending_inspection.sql`**, **`035_kit_inspections.sql`**, **`036_remediation.sql`**.
+
+### Reporting / export
+
+- Filter **`transactions`** by **`type`** (e.g. `Decommissioned`, `Inspection Pass`) and/or **`metadata`** JSON in Supabase SQL or the dashboard.
+- **`created_by`** on **`transactions`** records the authenticated user when available.
 
 ## RMA / Starlink-style replacement workflow (recommended)
 
@@ -57,14 +79,18 @@ Validation and transitions are implemented in `validateMovementForItem` and `com
 
 - **Dispose** cannot be undone from the standard undo action.
 
+- **Decommissioned**, **Inspection Pass**, **Inspection Fail**, and **Remediation Loaner Issue** cannot be undone from the standard undo action (use a corrective movement after team agreement).
+
 ## Database
 
-- `inventory_items.status` and `transactions.type` are constrained with `CHECK` constraints; see `supabase/schema.sql` and migration **033_sale_return_rma_hold.sql**.
+- `inventory_items.status` and `transactions.type` are constrained with `CHECK` constraints; see `supabase/schema.sql` and migrations **033**, **034**, **035**, **036**.
 - Trigger `inventory_items_guard_status_transition` allows only defined status edges, including:
   - `Sold` → `RMA Hold` (Sale Return)
   - `RMA Hold` → `In Stock` | `Disposed` | `Sold` (the last is for undo of Sale Return)
+  - `POC` / `Rented` / `Sold` → `Pending Inspection` (Decommissioned)
+  - `Pending Inspection` → `In Stock` | `RMA Hold` | `Disposed`
 
-Apply migrations in order on production (including **033** after **028**).
+Apply migrations in order on production (including **033** after **028**, then **034**–**036**).
 
 ## UI surfaces
 

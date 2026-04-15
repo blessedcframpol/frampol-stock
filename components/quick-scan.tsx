@@ -67,6 +67,7 @@ const MOVEMENT_TYPE_OPTIONS: { value: TransactionType; label: string }[] = [
   { value: "Rentals", label: "Rentals" },
   { value: "Rental Return", label: "Rental Return" },
   { value: "Sale Return", label: "Sale Return" },
+  { value: "Decommissioned", label: "Decommissioned" },
   { value: "Transfer", label: "Transfer" },
   { value: "Dispose", label: "Dispose" },
 ]
@@ -271,6 +272,54 @@ export function QuickScan() {
           setSerialInput("")
           textareaRef.current?.focus()
           void refetchLedger()
+        }
+        if (result.notFound.length > 0) {
+          setLastDuplicateMessage(result.notFound)
+          toast.warning(`Serial number(s) not found: ${result.notFound.slice(0, 5).join(", ")}${result.notFound.length > 5 ? "…" : ""}`)
+        }
+      } finally {
+        setIsSubmitting(false)
+      }
+      return
+    }
+
+    if (movementType === "Decommissioned") {
+      const unknown = uniqueSerials.filter((s) => !inventorySerialSet.has(s))
+      if (unknown.length > 0) {
+        toast.error("Unknown serials: use Inventory Movement to enter client / source details.")
+        return
+      }
+      if (!returnLocation.trim()) {
+        toast.error("Select hold location")
+        return
+      }
+      setLastDuplicateMessage(null)
+      setIsSubmitting(true)
+      try {
+        const result = applyMovement({
+          type: "Decommissioned",
+          serialNumbers: uniqueSerials,
+          toLocation: returnLocation.trim(),
+          movementMetadata: {
+            decommissionReason: "Quick scan",
+            source: "quick_scan",
+          },
+          expectedProductName: product,
+          expectedVendor: normalizeInventoryVendor(scanVendor),
+        })
+        if (result.success.length > 0) {
+          toast.success(
+            result.success.length === 1
+              ? `Recorded: ${result.success[0]} (${product})`
+              : `Recorded ${result.success.length} item(s) (${product})`
+          )
+          setSerialInput("")
+          textareaRef.current?.focus()
+          void refetchLedger()
+        }
+        if (result.rejected.length > 0) {
+          const msg = result.rejected.map((r) => `${r.serial}: ${r.reason}`).join("; ")
+          toast.warning(msg.slice(0, 500))
         }
         if (result.notFound.length > 0) {
           setLastDuplicateMessage(result.notFound)
@@ -545,9 +594,11 @@ export function QuickScan() {
             </Select>
           </div>
         )}
-        {RETURN_LIKE_MOVEMENTS.includes(movementType) && (
+        {(RETURN_LIKE_MOVEMENTS.includes(movementType) || movementType === "Decommissioned") && (
           <div className="flex flex-col gap-1.5">
-            <Label className="text-xs text-muted-foreground">Return location</Label>
+            <Label className="text-xs text-muted-foreground">
+              {movementType === "Decommissioned" ? "Hold / receive location" : "Return location"}
+            </Label>
             <Select value={returnLocation} onValueChange={setReturnLocation}>
               <SelectTrigger className="h-10 bg-card border-border text-foreground">
                 <SelectValue placeholder="Where stock is received" />
@@ -637,9 +688,11 @@ export function QuickScan() {
             ? "For Sale, POC Out, Rentals, Transfer and Dispose, serials must exist in inventory. You’ll enter client and site details next."
             : RETURN_LIKE_MOVEMENTS.includes(movementType)
               ? "Returns require a return location. POC/Rental returns need matching status; Sale Return needs serials still marked Sold — items move to RMA Hold for vendor replacement (see docs)."
-              : movementType === "Inbound"
-                ? "Inbound creates or updates inventory rows and logs one transaction batch. Serials already In Stock are blocked."
-                : "Choose vendor and product, then paste or type serial numbers. Use commas or new lines; pasted lines are auto-separated."}
+              : movementType === "Decommissioned"
+                ? "Decommissioned: serials must be POC, Rented, or Sold (match product/vendor). Status becomes Pending Inspection. Unknown serials: use Inventory Movement for client/source."
+                : movementType === "Inbound"
+                  ? "Inbound creates or updates inventory rows and logs one transaction batch. Serials already In Stock are blocked."
+                  : "Choose vendor and product, then paste or type serial numbers. Use commas or new lines; pasted lines are auto-separated."}
         </p>
       </CardContent>
 

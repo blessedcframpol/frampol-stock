@@ -78,7 +78,14 @@ export function inventoryItemToRow(item: InventoryItem): Database["public"]["Tab
 }
 
 export function rowToTransaction(row: TransactionRow): Transaction {
-  const r = row as TransactionRow & { disposal_reason?: string | null; authorised_by?: string | null; batch_id?: string | null; delivery_note_url?: string | null }
+  const r = row as TransactionRow & {
+    disposal_reason?: string | null
+    authorised_by?: string | null
+    batch_id?: string | null
+    delivery_note_url?: string | null
+    metadata?: unknown
+    created_by?: string | null
+  }
   return {
     id: row.id,
     type: row.type as Transaction["type"],
@@ -96,6 +103,8 @@ export function rowToTransaction(row: TransactionRow): Transaction {
     authorisedBy: r.authorised_by ?? undefined,
     batchId: r.batch_id ?? undefined,
     deliveryNoteUrl: r.delivery_note_url ?? undefined,
+    metadata: r.metadata != null ? (r.metadata as Transaction["metadata"]) : undefined,
+    createdBy: r.created_by ?? undefined,
   }
 }
 
@@ -117,5 +126,7 @@ export function transactionToRow(txn: Transaction): Database["public"]["Tables"]
     authorised_by: txn.authorisedBy ?? null,
     batch_id: txn.batchId ?? null,
     delivery_note_url: txn.deliveryNoteUrl ?? null,
+    metadata: txn.metadata != null ? (txn.metadata as Database["public"]["Tables"]["transactions"]["Row"]["metadata"]) : null,
+    created_by: txn.createdBy ?? null,
   }
 }

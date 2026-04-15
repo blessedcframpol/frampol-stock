@@ -6,6 +6,10 @@ export type ItemStatus =
   | "Maintenance"
   | "RMA Hold"
   | "Disposed"
+  | "Pending Inspection"
+
+export type JsonValue = string | number | boolean | null | { [key: string]: JsonValue | undefined } | JsonValue[]
+
 export type TransactionType =
   | "Inbound"
   | "Sale"
@@ -16,6 +20,10 @@ export type TransactionType =
   | "Transfer"
   | "Dispose"
   | "Rentals"
+  | "Decommissioned"
+  | "Inspection Pass"
+  | "Inspection Fail"
+  | "Remediation Loaner Issue"
 
 export const LOCATIONS = ["Warehouse A", "Warehouse B", "Service Center", "Client Site", "Delivered"] as const
 export type Location = (typeof LOCATIONS)[number]
@@ -120,6 +128,10 @@ export interface Transaction {
   batchId?: string
   /** For Inbound: public URL of uploaded delivery note (e.g. PDF) */
   deliveryNoteUrl?: string
+  /** Structured fields (decommission, inspection, remediation); persisted when using Supabase */
+  metadata?: JsonValue
+  /** User who recorded the transaction (Supabase auth user id) */
+  createdBy?: string
 }
 
 export interface Client {

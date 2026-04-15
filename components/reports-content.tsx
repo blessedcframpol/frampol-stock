@@ -14,13 +14,48 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart"
 import { salesByEmployee, clients, monthlySales } from "@/lib/data"
+import { buildCsvFilename } from "@/lib/utils"
 import { Download, TrendingUp, Users, DollarSign } from "lucide-react"
 
 const BAR_COLORS = ["#6366f1", "#06b6d4", "#10b981", "#f59e0b"]
 
 const topClients = [...clients].sort((a, b) => b.totalSpent - a.totalSpent).slice(0, 5)
 
+function toCsv(rows: string[][]): string {
+  return rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n")
+}
+
+function downloadCsv(rows: string[][], filename: string) {
+  const csv = toCsv(rows)
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement("a")
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 export function ReportsContent() {
+  function handleExportCsv() {
+    const rows: string[][] = []
+
+    rows.push(["Section", "Month", "Sales", "Revenue"])
+    for (const m of monthlySales) rows.push(["Monthly Sales", m.month, String(m.sales), String(m.revenue)])
+    rows.push([])
+
+    rows.push(["Section", "Employee", "Sales", "Revenue"])
+    for (const s of salesByEmployee) rows.push(["Sales by Employee", s.name, String(s.sales), String(s.revenue)])
+    rows.push([])
+
+    rows.push(["Section", "Client Name", "Company", "Total Orders", "Total Spent"])
+    for (const c of topClients) {
+      rows.push(["Top Clients", c.name, c.company, String(c.totalOrders), String(c.totalSpent)])
+    }
+
+    downloadCsv(rows, buildCsvFilename(["Sales reports"], new Date().toISOString()))
+  }
+
   return (
     <div className="flex flex-col gap-4 md:gap-6 min-w-0">
       {/* Header */}
@@ -29,7 +64,7 @@ export function ReportsContent() {
           <h1 className="text-xl md:text-2xl font-bold text-foreground tracking-tight text-balance">Reports & Analytics</h1>
           <p className="text-sm text-muted-foreground mt-1">Sales performance and stock turnover insights.</p>
         </div>
-        <Button variant="outline" size="sm" className="text-foreground w-fit">
+        <Button variant="outline" size="sm" className="text-foreground w-fit" onClick={handleExportCsv}>
           <Download className="w-4 h-4 mr-1.5" />
           Export CSV
         </Button>

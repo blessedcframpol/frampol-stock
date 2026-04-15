@@ -30,6 +30,7 @@ const statusStyles: Record<ItemStatus, string> = {
   Rented: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
   Maintenance: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
   "RMA Hold": "bg-orange-500/10 text-orange-600 dark:text-orange-400",
+  "Pending Inspection": "bg-teal-500/10 text-teal-700 dark:text-teal-400",
   Disposed: "bg-slate-500/10 text-slate-600 dark:text-slate-400",
 }
 
@@ -39,6 +40,10 @@ const movementTypeStyles: Record<string, string> = {
   Rentals: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
   Dispose: "bg-slate-500/10 text-slate-600 dark:text-slate-400",
   "Sale Return": "bg-orange-500/10 text-orange-600 dark:text-orange-400",
+  Decommissioned: "bg-teal-500/10 text-teal-700 dark:text-teal-400",
+  "Inspection Pass": "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+  "Inspection Fail": "bg-orange-500/10 text-orange-600 dark:text-orange-400",
+  "Remediation Loaner Issue": "bg-rose-500/10 text-rose-700 dark:text-rose-400",
 }
 
 type DispatchedRow = {

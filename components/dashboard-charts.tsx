@@ -124,13 +124,23 @@ export function StockByVendorChart() {
         rented: number
         maintenance: number
         rmaHold: number
+        pendingInspection: number
         disposed: number
       }
     > = {}
     inventory.forEach((item) => {
       const v = inventoryVendorKey(item)
       if (!byVendor[v]) {
-        byVendor[v] = { inStock: 0, sold: 0, poc: 0, rented: 0, maintenance: 0, rmaHold: 0, disposed: 0 }
+        byVendor[v] = {
+          inStock: 0,
+          sold: 0,
+          poc: 0,
+          rented: 0,
+          maintenance: 0,
+          rmaHold: 0,
+          pendingInspection: 0,
+          disposed: 0,
+        }
       }
       if (item.status === "In Stock") byVendor[v].inStock++
       else if (item.status === "Sold") byVendor[v].sold++
@@ -138,6 +148,7 @@ export function StockByVendorChart() {
       else if (item.status === "Rented") byVendor[v].rented++
       else if (item.status === "Maintenance") byVendor[v].maintenance++
       else if (item.status === "RMA Hold") byVendor[v].rmaHold++
+      else if (item.status === "Pending Inspection") byVendor[v].pendingInspection++
       else if (item.status === "Disposed") byVendor[v].disposed++
     })
     return Object.entries(byVendor)
@@ -149,6 +160,7 @@ export function StockByVendorChart() {
         rented: counts.rented,
         maintenance: counts.maintenance,
         rmaHold: counts.rmaHold,
+        pendingInspection: counts.pendingInspection,
       }))
       .sort(
         (a, b) =>
@@ -157,8 +169,15 @@ export function StockByVendorChart() {
           b.poc +
           b.rented +
           b.maintenance +
-          b.rmaHold -
-          (a.inStock + a.sold + a.poc + a.rented + a.maintenance + a.rmaHold)
+          b.rmaHold +
+          b.pendingInspection -
+          (a.inStock +
+            a.sold +
+            a.poc +
+            a.rented +
+            a.maintenance +
+            a.rmaHold +
+            a.pendingInspection)
       )
   }, [inventory])
 
@@ -180,6 +199,7 @@ export function StockByVendorChart() {
             rented: { label: "Rented", color: "#3b82f6" },
             maintenance: { label: "Maintenance", color: "#f59e0b" },
             rmaHold: { label: "RMA hold", color: "#ea580c" },
+            pendingInspection: { label: "Pending inspection", color: "#14b8a6" },
           }}
           className="h-[260px] sm:h-[300px]"
         >
@@ -209,7 +229,8 @@ export function StockByVendorChart() {
               <Bar dataKey="poc" stackId="a" fill="#06b6d4" name="POC" />
               <Bar dataKey="rented" stackId="a" fill="#3b82f6" name="Rented" />
               <Bar dataKey="maintenance" stackId="a" fill="#f59e0b" name="Maintenance" />
-              <Bar dataKey="rmaHold" stackId="a" fill="#ea580c" radius={[4, 4, 0, 0]} name="RMA hold" />
+              <Bar dataKey="rmaHold" stackId="a" fill="#ea580c" name="RMA hold" />
+              <Bar dataKey="pendingInspection" stackId="a" fill="#14b8a6" radius={[4, 4, 0, 0]} name="Pending inspection" />
             </BarChart>
           </ResponsiveContainer>
         </ChartContainer>
