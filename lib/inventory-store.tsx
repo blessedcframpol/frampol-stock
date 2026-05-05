@@ -19,6 +19,7 @@ import {
   type MovementRejection,
 } from "./supabase/movement-utils"
 import { useAuth } from "./auth-context"
+import { reportAppEvent } from "./report-app-event"
 import { toast } from "sonner"
 
 function deepClone<T>(arr: T[]): T[] {
@@ -95,6 +96,8 @@ export interface MovementParams {
     loanerInventoryItemId: string
     loanerSerial: string
   }
+  /** Resolve `transactions.client_id` when display text is "Name - Company" (returns + form edge cases). */
+  clientDirectory?: { id: string; name: string; company: string }[]
 }
 
 const APPROACHING_DAYS = 7
@@ -265,12 +268,12 @@ function getRevertUpdatesForTransaction(txn: Transaction): Partial<InventoryItem
 interface InventoryStoreValue {
   inventory: InventoryItem[]
   transactions: Transaction[]
-  applyMovement: (params: MovementParams) => {
+  applyMovement: (params: MovementParams) => Promise<{
     success: string[]
     notFound: string[]
     rejected: MovementRejection[]
     movementBatchId?: string
-  }
+  }>
   refetchLedger: () => Promise<void>
   updateItem: (id: string, updates: Partial<InventoryItem>) => Promise<void>
   softDeleteItem: (id: string) => Promise<{ ok: boolean; error?: string }>
@@ -346,9 +349,14 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
   }, [supabase, authLoading, user?.id, refetchLedger])
 
   const applyMovement = useCallback(
-    (
+    async (
       params: MovementParams
-    ): { success: string[]; notFound: string[]; rejected: MovementRejection[]; movementBatchId?: string } => {
+    ): Promise<{
+      success: string[]
+      notFound: string[]
+      rejected: MovementRejection[]
+      movementBatchId?: string
+    }> => {
       const {
         type,
         serialNumbers,
@@ -372,6 +380,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
         movementMetadata,
         kitInspectionPayload,
         remediationCaseLoanerLink,
+        clientDirectory,
       } = params
       const clientDisplay =
         clientDisplayOverride ?? (clientId ? getClientDisplay(clientId) : "Internal")
@@ -382,6 +391,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
         serialNumbers,
         clientDisplay,
         clientId,
+        clientDirectory,
         fromLocation,
         toLocation,
         assignedTo,
@@ -417,13 +427,26 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
         }
       }
 
-      const runPersist = async () => {
-        if (!supabase) return
+      const runPersist = async (): Promise<boolean> => {
+        if (!supabase) return true
+        const persistMeta = () => ({
+          movementType: type,
+          batchId: newBatchId,
+          serialNumbers: [...serialNumbers],
+        })
         const reportFail = (step: string, error: { message: string } | null) => {
           if (!error) return false
           toast.error("Could not save stock movement", {
             description: `${step}: ${error.message}`,
             duration: 20_000,
+          })
+          void reportAppEvent({
+            severity: "error",
+            source: "client",
+            context: "movement_persist",
+            message: `Stock movement persist failed: ${step}`,
+            detail: error.message,
+            metadata: { step, ...persistMeta() },
           })
           return true
         }
@@ -444,7 +467,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
               invoice_number: invoiceNumber ?? null,
               created_at: dateIso,
             })
-            if (reportFail("Outbound batch", error)) return
+            if (reportFail("Outbound batch", error)) return false
           }
           const prevIds = new Set(inventory.map((i) => i.id))
           for (const item of result.updatedItems) {
@@ -463,7 +486,20 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
                   description: `Product line: ${msg}`,
                   duration: 20_000,
                 })
-                return
+                void reportAppEvent({
+                  severity: "error",
+                  source: "client",
+                  context: "movement_persist",
+                  message: "Stock movement persist failed: Product line",
+                  detail: msg,
+                  metadata: {
+                    step: "Product line",
+                    ...persistMeta(),
+                    productName: persistItem.name,
+                    vendor: persistItem.vendor ?? "General",
+                  },
+                })
+                return false
               }
             }
             if (prevIds.has(item.id)) {
@@ -471,10 +507,10 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
                 .from("inventory_items")
                 .update(inventoryItemToRow(persistItem))
                 .eq("id", item.id)
-              if (reportFail("Inventory update", error)) return
+              if (reportFail("Inventory update", error)) return false
             } else {
               const { error } = await supabase.from("inventory_items").insert(inventoryItemToRow(persistItem))
-              if (reportFail("Inventory insert", error)) return
+              if (reportFail("Inventory insert", error)) return false
             }
           }
           if (result.newTransactions.length) {
@@ -482,7 +518,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
               transactionToRow({ ...t, createdBy: user?.id })
             )
             const { error } = await supabase.from("transactions").insert(rows)
-            if (reportFail("Transaction log", error)) return
+            if (reportFail("Transaction log", error)) return false
           }
           if (
             kitInspectionPayload &&
@@ -499,7 +535,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
               transaction_id: result.newTransactions[0].id,
               created_by: user?.id ?? null,
             })
-            if (reportFail("Kit inspection", inspErr)) return
+            if (reportFail("Kit inspection", inspErr)) return false
           }
           if (type === "Remediation Loaner Issue" && remediationCaseLoanerLink && result.success.length > 0) {
             const { error: remErr } = await supabase
@@ -510,30 +546,51 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
                 updated_at: new Date().toISOString(),
               })
               .eq("id", remediationCaseLoanerLink.caseId)
-            if (reportFail("Remediation case", remErr)) return
+            if (reportFail("Remediation case", remErr)) return false
           }
           await refetchLedger({ isStale: () => false })
+          return true
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e)
           toast.error("Could not save stock movement", { description: msg, duration: 20_000 })
+          void reportAppEvent({
+            severity: "error",
+            source: "client",
+            context: "movement_persist",
+            message: "Stock movement persist failed: unexpected error",
+            detail: msg,
+            metadata: { step: "unexpected", ...persistMeta() },
+          })
+          return false
         }
       }
 
-      void runPersist()
-
-      setInventory((prev) => {
-        const prevIds = new Set(prev.map((i) => i.id))
-        const merged = prev.map((item) => {
-          const u = result.updatedItems.find((x) => x.id === item.id)
-          return u ?? item
+      if (supabase) {
+        const ok = await runPersist()
+        if (!ok) {
+          void refetchLedger({ isStale: () => false })
+          return {
+            success: [],
+            notFound: result.notFound,
+            rejected: result.rejected,
+            movementBatchId: undefined,
+          }
+        }
+      } else {
+        setInventory((prev) => {
+          const prevIds = new Set(prev.map((i) => i.id))
+          const merged = prev.map((item) => {
+            const u = result.updatedItems.find((x) => x.id === item.id)
+            return u ?? item
+          })
+          const created = result.updatedItems.filter((u) => !prevIds.has(u.id))
+          return [...merged, ...created]
         })
-        const created = result.updatedItems.filter((u) => !prevIds.has(u.id))
-        return [...merged, ...created]
-      })
-      setTransactions((prev) => [
-        ...result.newTransactions.map((t) => ({ ...t, createdBy: user?.id })),
-        ...prev,
-      ])
+        setTransactions((prev) => [
+          ...result.newTransactions.map((t) => ({ ...t, createdBy: user?.id })),
+          ...prev,
+        ])
+      }
 
       return {
         success: result.success,

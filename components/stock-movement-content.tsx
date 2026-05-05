@@ -130,6 +130,8 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
   const [mainNewClientEmail, setMainNewClientEmail] = useState("")
   const [mainNewClientPhone, setMainNewClientPhone] = useState("")
   const [mainClientSites, setMainClientSites] = useState<ClientSite[]>([{ address: "" }])
+  const [mainClientOpen, setMainClientOpen] = useState(false)
+  const [mainClientSearch, setMainClientSearch] = useState("")
   /** TEMPORARY (admin): optional sale ledger date until stock-requests workflow */
   const [adminSaleDate, setAdminSaleDate] = useState("")
   const [decommissionReason, setDecommissionReason] = useState("")
@@ -177,6 +179,18 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
     }
     return Array.from(names).sort()
   }, [inventory, scanVendor])
+  const sortedClients = useMemo(() => {
+    const collator = new Intl.Collator(undefined, { sensitivity: "base" })
+    return [...clients].sort((a, b) => {
+      const left = `${a.name} ${a.company}`.trim()
+      const right = `${b.name} ${b.company}`.trim()
+      return collator.compare(left, right)
+    })
+  }, [clients])
+  const clientDirectory = useMemo(
+    () => clients.map((c) => ({ id: c.id, name: c.name, company: c.company })),
+    [clients]
+  )
 
   function handleScanVendorChange(next: string) {
     setScanVendor(next)
@@ -277,7 +291,7 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
     setMainClientSites((prev) => prev.map((s, i) => (i === index ? { ...s, [field]: value } : s)))
   }
 
-  function doSubmit(
+  async function doSubmit(
     outboundDetails?: {
       clientId?: string
       clientName?: string
@@ -353,7 +367,7 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
           : undefined
         : normalizeInventoryVendor(scanVendor)
 
-    const result = applyMovement({
+    const result = await applyMovement({
       type: selectedType as TransactionType,
       serialNumbers: list,
       clientId: effectiveClientId,
@@ -385,6 +399,7 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
         selectedType === "Sale" && isAdmin && adminSaleDate.trim() ? adminSaleDate.trim() : undefined,
       movementMetadata,
       remediationCaseLoanerLink,
+      clientDirectory,
       ...(pn && expectedVendorForMovement !== undefined
         ? { expectedProductName: pn, expectedVendor: expectedVendorForMovement }
         : pn
@@ -393,7 +408,6 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
     })
     if (result.success.length > 0) {
       toast.success(`Recorded ${result.success.length} item(s)`)
-      void refetchLedger()
       embedMode?.onClose?.()
       if (isEmbed) {
         setPendingOutbound(null)
@@ -488,7 +502,7 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
     }
     const validSites = sites.filter((s) => s.address.trim())
     if (validSites.length > 0) outboundDetails.sites = validSites.map((s) => ({ name: s.name?.trim(), address: s.address.trim() }))
-    doSubmit(outboundDetails)
+    await doSubmit(outboundDetails)
   }
 
   async function uploadDeliveryNote(file: File): Promise<string> {
@@ -641,7 +655,7 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
         setIsSubmitting(true)
         try {
           const url = await uploadDeliveryNote(deliveryNoteFile)
-          doSubmit(undefined, url)
+          await doSubmit(undefined, url)
         } catch (e) {
           toastFromCaughtError(
             e,
@@ -653,13 +667,13 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
         setIsSubmitting(true)
         try {
           const url = await uploadDeliveryNote(decommissionDocFile)
-          doSubmit(undefined, undefined, url)
+          await doSubmit(undefined, undefined, url)
         } catch (e) {
           toastFromCaughtError(e, "Failed to upload attachment.")
           setIsSubmitting(false)
         }
       } else {
-        doSubmit()
+        await doSubmit()
       }
       return
     }
@@ -1014,36 +1028,75 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
                 <div className="flex flex-col gap-3">
                   <div className="flex flex-col gap-2">
                     <Label className="text-foreground">Client / Customer (assigned to)</Label>
-                    <Select
-                      value={clientId === NEW_CLIENT_SELECT ? NEW_CLIENT_SELECT : clientId || undefined}
-                      onValueChange={(v) => {
-                        setClientId(v)
-                        if (v !== NEW_CLIENT_SELECT) {
-                          setMainNewClientName("")
-                          setMainNewClientCompany("")
-                          setMainNewClientEmail("")
-                          setMainNewClientPhone("")
-                          setMainClientSites([{ address: "" }])
-                        }
-                      }}
-                    >
-                      <SelectTrigger className="bg-card text-foreground border-border">
-                        <SelectValue placeholder="Select existing client or add new…" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value={NEW_CLIENT_SELECT} className="text-primary">
-                          <span className="flex items-center gap-2">
-                            <Plus className="h-3.5 w-3.5" />
-                            Add new client…
+                    <Popover open={mainClientOpen} onOpenChange={setMainClientOpen}>
+                      <PopoverTrigger asChild>
+                        <Button variant="outline" role="combobox" className="w-full justify-between h-10 font-normal bg-card">
+                          <span className={cn("truncate", !clientId && "text-muted-foreground")}>
+                            {clientId === NEW_CLIENT_SELECT
+                              ? "Add new client…"
+                              : clientId
+                                ? sortedClients.find((c) => c.id === clientId)?.name +
+                                  " – " +
+                                  sortedClients.find((c) => c.id === clientId)?.company
+                                : "Select existing client or add new…"}
                           </span>
-                        </SelectItem>
-                        {clients.map((client) => (
-                          <SelectItem key={client.id} value={client.id}>
-                            {client.name} – {client.company}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="min-w-[300px] p-0" align="start">
+                        <Command shouldFilter={false}>
+                          <CommandInput
+                            placeholder="Search clients..."
+                            value={mainClientSearch}
+                            onValueChange={setMainClientSearch}
+                          />
+                          <CommandList>
+                            <CommandEmpty>No client found.</CommandEmpty>
+                            <CommandGroup>
+                              <CommandItem
+                                value="__new"
+                                onSelect={() => {
+                                  setClientId(NEW_CLIENT_SELECT)
+                                  setMainClientOpen(false)
+                                  setMainClientSearch("")
+                                }}
+                              >
+                                <Plus className="h-4 w-4 mr-2" />
+                                Add new client…
+                              </CommandItem>
+                              {sortedClients
+                                .filter(
+                                  (c) =>
+                                    !mainClientSearch.trim() ||
+                                    [c.name, c.company, c.email].some(
+                                      (x) =>
+                                        typeof x === "string" &&
+                                        x.toLowerCase().includes(mainClientSearch.trim().toLowerCase())
+                                    )
+                                )
+                                .map((c) => (
+                                  <CommandItem
+                                    key={c.id}
+                                    value={c.id}
+                                    onSelect={() => {
+                                      setClientId(c.id)
+                                      setMainClientOpen(false)
+                                      setMainClientSearch("")
+                                      setMainNewClientName("")
+                                      setMainNewClientCompany("")
+                                      setMainNewClientEmail("")
+                                      setMainNewClientPhone("")
+                                      setMainClientSites([{ address: "" }])
+                                    }}
+                                  >
+                                    {c.name} – {c.company}
+                                  </CommandItem>
+                                ))}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
                     <p className="text-xs text-muted-foreground">
                       {clients.length === 0
                         ? "No clients in the directory yet — use Add new client or add one from the Clients page."
@@ -1459,14 +1512,16 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
                         {outboundClientId === "new"
                           ? "New client (enter details below)"
                           : outboundClientId
-                            ? clients.find((c) => c.id === outboundClientId)?.name + " – " + clients.find((c) => c.id === outboundClientId)?.company
+                            ? sortedClients.find((c) => c.id === outboundClientId)?.name +
+                              " – " +
+                              sortedClients.find((c) => c.id === outboundClientId)?.company
                             : "Select or add client..."}
                       </span>
                       <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="min-w-[300px] p-0" align="start">
-                    <Command>
+                    <Command shouldFilter={false}>
                       <CommandInput
                         placeholder="Search clients..."
                         value={outboundClientSearch}
@@ -1485,7 +1540,7 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
                             <Plus className="h-4 w-4 mr-2" />
                             Add new client
                           </CommandItem>
-                          {clients
+                          {sortedClients
                             .filter(
                               (c) =>
                                 !outboundClientSearch.trim() ||

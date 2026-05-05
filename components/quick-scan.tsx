@@ -139,6 +139,10 @@ export function QuickScan() {
 
   const uniqueSerials = useMemo(() => [...new Set(serialList)], [serialList])
   const inListDuplicateCount = serialList.length - uniqueSerials.length
+  const clientDirectory = useMemo(
+    () => clients.map((c) => ({ id: c.id, name: c.name, company: c.company })),
+    [clients]
+  )
   const [lastDuplicateMessage, setLastDuplicateMessage] = useState<string[] | null>(null)
 
   function handleSerialChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
@@ -256,12 +260,13 @@ export function QuickScan() {
       setLastDuplicateMessage(null)
       setIsSubmitting(true)
       try {
-        const result = applyMovement({
+        const result = await applyMovement({
           type: movementType,
           serialNumbers: uniqueSerials,
           toLocation: returnLocation.trim(),
           expectedProductName: product,
           expectedVendor: normalizeInventoryVendor(scanVendor),
+          clientDirectory,
         })
         if (result.success.length > 0) {
           toast.success(
@@ -296,7 +301,7 @@ export function QuickScan() {
       setLastDuplicateMessage(null)
       setIsSubmitting(true)
       try {
-        const result = applyMovement({
+        const result = await applyMovement({
           type: "Decommissioned",
           serialNumbers: uniqueSerials,
           toLocation: returnLocation.trim(),
@@ -306,6 +311,7 @@ export function QuickScan() {
           },
           expectedProductName: product,
           expectedVendor: normalizeInventoryVendor(scanVendor),
+          clientDirectory,
         })
         if (result.success.length > 0) {
           toast.success(
@@ -335,7 +341,7 @@ export function QuickScan() {
       setLastDuplicateMessage(null)
       setIsSubmitting(true)
       try {
-        const result = applyMovement({
+        const result = await applyMovement({
           type: "Inbound",
           serialNumbers: uniqueSerials,
           deliveryNoteUrl: undefined,
@@ -346,6 +352,7 @@ export function QuickScan() {
           },
           expectedProductName: product,
           expectedVendor: normalizeInventoryVendor(scanVendor),
+          clientDirectory,
         })
         if (result.success.length > 0) {
           toast.success(
@@ -445,7 +452,7 @@ export function QuickScan() {
           : outboundDetails.clientName && outboundDetails.clientCompany
             ? `${outboundDetails.clientName} - ${outboundDetails.clientCompany}`
             : undefined
-      const result = applyMovement({
+      const result = await applyMovement({
         type: pendingOutbound.movementType,
         serialNumbers: pendingOutbound.serials,
         clientId: outboundDetails.clientId,
@@ -459,6 +466,7 @@ export function QuickScan() {
             : undefined,
         expectedProductName: pendingOutbound.productName.trim(),
         expectedVendor: normalizeInventoryVendor(pendingOutbound.vendor),
+        clientDirectory,
       })
       if (result.success.length > 0) {
         toast.success(`Recorded ${result.success.length} item(s) — inventory updated`)

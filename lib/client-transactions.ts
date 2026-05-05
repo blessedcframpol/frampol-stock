@@ -6,14 +6,11 @@ export function isTransactionForClient(
   client: { id: string; company: string; name: string }
 ): boolean {
   if (txn.clientId === client.id) return true
-  if (!txn.client) return false
-  const c = txn.client.trim()
-  return (
-    c === client.company ||
-    c === client.name ||
-    c.includes(client.company) ||
-    c === `${client.name} - ${client.company}`
-  )
+  const c = txn.client?.trim()
+  if (!c) return false
+  const canonical = `${client.name} - ${client.company}`.trim()
+  if (c === canonical || c.toLowerCase() === canonical.toLowerCase()) return true
+  return c === client.company || c === client.name || c.includes(client.company)
 }
 
 /** Outbound types where multiple lines from one submit often share one invoice/time but may lack batch_id (legacy Sale). */

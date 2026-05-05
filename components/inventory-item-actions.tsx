@@ -146,10 +146,10 @@ export function InventoryItemActionsMenu({ item, menuTrigger, onRecordMovement }
     setInspectionSubmitting(true)
     try {
       const type = inspectionOutcome === "available" ? "Inspection Pass" : "Inspection Fail"
-      const result = applyMovement({
+      const result = await applyMovement({
         type,
         serialNumbers: [item.serialNumber],
-        clientDisplay: "Internal",
+        clientDisplayOverride: "Internal",
         toLocation: inspectionToLocation,
         notes: conditionNotes.trim() || undefined,
         movementMetadata: { inspectorName: inspectorName.trim() },

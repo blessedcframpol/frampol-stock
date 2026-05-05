@@ -15,6 +15,11 @@ export function canManageUsers(role: AppRole | null | undefined): boolean {
   return role === ADMIN
 }
 
+/** View persisted app event / error logs (admin only). */
+export function canViewAppLogs(role: AppRole | null | undefined): boolean {
+  return role === ADMIN
+}
+
 /** Reverse a quick-scan batch on Transaction history (audit trail + reason). Admin only. */
 export function canReverseQuickScanBatches(role: AppRole | null | undefined): boolean {
   return role === ADMIN

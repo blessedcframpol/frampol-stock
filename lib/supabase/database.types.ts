@@ -3,6 +3,44 @@ export type Json = string | number | boolean | null | { [key: string]: Json | un
 export interface Database {
   public: {
     Tables: {
+      app_event_logs: {
+        Row: {
+          id: string
+          created_at: string
+          severity: string
+          source: string
+          context: string
+          message: string
+          detail: string | null
+          metadata: Json | null
+          user_id: string | null
+          request_id: string | null
+        }
+        Insert: {
+          id?: string
+          created_at?: string
+          severity: string
+          source: string
+          context: string
+          message: string
+          detail?: string | null
+          metadata?: Json | null
+          user_id?: string | null
+          request_id?: string | null
+        }
+        Update: {
+          id?: string
+          created_at?: string
+          severity?: string
+          source?: string
+          context?: string
+          message?: string
+          detail?: string | null
+          metadata?: Json | null
+          user_id?: string | null
+          request_id?: string | null
+        }
+      }
       inventory_items: {
         Row: {
           id: string

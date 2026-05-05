@@ -149,6 +149,24 @@ export function validateMovementForItem(
   }
 }
 
+const RETURN_TYPES_FOR_LEDGER_CLIENT: ReadonlySet<TransactionType> = new Set([
+  "POC Return",
+  "Rental Return",
+  "Sale Return",
+])
+
+function resolveClientIdFromDirectoryLabel(
+  label: string | undefined,
+  directory: { id: string; name: string; company: string }[] | undefined
+): string | undefined {
+  if (!label?.trim() || !directory?.length) return undefined
+  const t = label.trim()
+  for (const c of directory) {
+    if (`${c.name} - ${c.company}`.trim() === t) return c.id
+  }
+  return undefined
+}
+
 export function computeMovementResult(
   inventory: InventoryItem[],
   params: {
@@ -157,6 +175,8 @@ export function computeMovementResult(
     clientDisplay: string
     /** When client selected from directory */
     clientId?: string
+    /** Match ledger `client_id` when `clientDisplay` is "Name - Company" from inventory or form. */
+    clientDirectory?: { id: string; name: string; company: string }[]
     fromLocation?: string
     toLocation?: string
     assignedTo?: string
@@ -212,6 +232,7 @@ export function computeMovementResult(
     expectedProductName,
     expectedVendor,
     movementMetadata,
+    clientDirectory,
   } = params
   const nowIso = new Date().toISOString()
   const date = type === "Sale" ? resolveSaleTransactionDate(saleTransactionDateIso, nowIso) : nowIso
@@ -310,6 +331,18 @@ export function computeMovementResult(
     }
 
     const it = next[idx]!
+    const labelFromItem = it.client?.trim() ? it.client.trim() : undefined
+    const isReturnLedger = RETURN_TYPES_FOR_LEDGER_CLIENT.has(type)
+    let txnClientDisplay = clientDisplay
+    let txnClientId = clientId
+    if (isReturnLedger && !clientId && (!clientDisplay || clientDisplay === "Internal") && labelFromItem) {
+      txnClientDisplay = labelFromItem
+    }
+    txnClientId =
+      txnClientId ??
+      resolveClientIdFromDirectoryLabel(txnClientDisplay, clientDirectory) ??
+      (isReturnLedger ? resolveClientIdFromDirectoryLabel(labelFromItem, clientDirectory) : undefined)
+
     const reason = validateMovementForItem(type, it, {
       fromLocation,
       expectedProductName,
@@ -447,15 +480,15 @@ export function computeMovementResult(
       type,
       serialNumber: trimmed,
       itemName: it.name,
-      client: clientDisplay,
+      client: txnClientDisplay,
       date,
-      clientId,
+      clientId: txnClientId,
       invoiceNumber,
       notes,
       assignedTo:
         assignedTo ??
         (type === "Sale" || type === "POC Out" || type === "Rentals" || type === "Remediation Loaner Issue"
-          ? clientDisplay
+          ? txnClientDisplay
           : undefined),
       fromLocation: type === "Transfer" ? fromLocation : undefined,
       toLocation:

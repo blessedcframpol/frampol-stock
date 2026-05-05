@@ -25,6 +25,7 @@ import {
   Clock,
   History,
   Loader2,
+  ScrollText,
 } from "lucide-react"
 import { cn, formatDateDDMMYYYY } from "@/lib/utils"
 import { Input } from "@/components/ui/input"
@@ -49,7 +50,13 @@ import { useIsMobile } from "@/hooks/use-mobile"
 import { useState, useMemo, useEffect } from "react"
 import { appUsers } from "@/lib/data"
 import { useAuth } from "@/lib/auth-context"
-import { canAccessReports, canAccessRequests, canEditInventory, type AppRole } from "@/lib/permissions"
+import {
+  canAccessReports,
+  canAccessRequests,
+  canEditInventory,
+  canViewAppLogs,
+  type AppRole,
+} from "@/lib/permissions"
 import { useInboxNotifications } from "@/hooks/use-inbox-notifications"
 import { useClients } from "@/lib/supabase/clients-db"
 import { runSearch } from "@/lib/search"
@@ -83,9 +90,22 @@ const allNavItems: NavItem[] = [
   { href: "/reports", label: "Reports", icon: BarChart3 },
 ]
 
-const bottomNavItems = [
+type BottomNavEntry = {
+  href: string
+  label: string
+  icon: React.ComponentType<{ className?: string }>
+  adminOnly?: boolean
+}
+
+const bottomNavItems: BottomNavEntry[] = [
+  { href: "/logs", label: "Error logs", icon: ScrollText, adminOnly: true },
   { href: "/settings", label: "Settings", icon: Settings },
 ]
+
+function filterBottomNavForRole(role: string | null | undefined): BottomNavEntry[] {
+  const r = role as AppRole | null | undefined
+  return bottomNavItems.filter((item) => !item.adminOnly || canViewAppLogs(r))
+}
 
 function filterNavByRole(items: NavItem[], role: string | null | undefined): NavItem[] {
   const r = role as AppRole | null | undefined
@@ -112,6 +132,8 @@ function SidebarNav({
   navItems,
 }: { onNavigate?: () => void; alertCount?: number; navItems: NavItem[] }) {
   const pathname = usePathname()
+  const { role } = useAuth()
+  const bottomFiltered = useMemo(() => filterBottomNavForRole(role), [role])
   const [inventoryExpanded, setInventoryExpanded] = useState(true)
 
   return (
@@ -213,7 +235,7 @@ function SidebarNav({
         })}
       </nav>
       <div className="px-4 pb-5 flex flex-col gap-1 border-t border-sidebar-border pt-4">
-        {bottomNavItems.map((item) => {
+        {bottomFiltered.map((item) => {
           const isActive = pathname === item.href
           return (
             <Link
@@ -314,6 +336,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
       ),
     [filteredNavItems, inboxCount]
   )
+  const bottomNavFiltered = useMemo(() => filterBottomNavForRole(role), [role])
   const displayName = profile?.display_name || user?.email?.split("@")[0] || "User"
   const initials = (displayName.slice(0, 2) || "?").toUpperCase()
   const roleLabel = role ? role.charAt(0).toUpperCase() + role.slice(1) : ""
@@ -423,7 +446,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                 })}
               </nav>
               <div className="px-2 pb-4 flex flex-col gap-1 border-t border-sidebar-border pt-4">
-                {bottomNavItems.map((item) => {
+                {bottomNavFiltered.map((item) => {
                   const isActive = pathname === item.href
                   return (
                     <Link

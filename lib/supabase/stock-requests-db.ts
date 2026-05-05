@@ -71,6 +71,23 @@ export async function fetchStockRequestById(sb: SB, id: string): Promise<StockRe
   }
 }
 
+export async function fetchStockRequestsForClient(sb: SB, clientId: string): Promise<StockRequestWithRelations[]> {
+  const { data, error } = await sb
+    .from("stock_requests")
+    .select("*, stock_request_lines(*)")
+    .eq("client_id", clientId)
+    .order("created_at", { ascending: false })
+  if (error) throw error
+  const rows = (data ?? []) as StockRequestWithRelations[]
+  const { data: clientRow } = await sb.from("clients").select("*").eq("id", clientId).maybeSingle()
+  const client = clientRow ? rowToClient(clientRow) : null
+  return rows.map((r) => ({
+    ...r,
+    client,
+    stock_request_lines: [...(r.stock_request_lines ?? [])].sort((a, b) => a.sort_order - b.sort_order),
+  }))
+}
+
 export async function fetchLatestOpenRequests(sb: SB, limit: number): Promise<StockRequestWithRelations[]> {
   const { data, error } = await sb
     .from("stock_requests")

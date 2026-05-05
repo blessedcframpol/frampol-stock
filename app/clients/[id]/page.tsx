@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useParams } from "next/navigation"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import {
   Table,
   TableBody,
@@ -35,8 +35,26 @@ import { useAuth } from "@/lib/auth-context"
 import { canViewFinancials } from "@/lib/permissions"
 import { useInventoryStore } from "@/lib/inventory-store"
 import { useClients, updateClient } from "@/lib/supabase/clients-db"
+import { getSupabaseClient } from "@/lib/supabase/client"
+import {
+  fetchStockRequestsForClient,
+  type StockRequestWithRelations,
+} from "@/lib/supabase/stock-requests-db"
 import { cn, formatDateDDMMYYYY } from "@/lib/utils"
-import { FileText, ArrowLeft, Mail, Phone, Building2, MapPin, Package, ChevronRight, Pencil, Plus, Trash2 } from "lucide-react"
+import {
+  FileText,
+  ArrowLeft,
+  Mail,
+  Phone,
+  Building2,
+  MapPin,
+  Package,
+  ChevronRight,
+  Pencil,
+  Plus,
+  Trash2,
+  MessageSquare,
+} from "lucide-react"
 import { toast } from "sonner"
 import { toastFromCaughtError } from "@/lib/toast-reportable-error"
 import {
@@ -45,6 +63,15 @@ import {
   isTransactionForClient,
 } from "@/lib/client-transactions"
 import type { ClientSite, Transaction } from "@/lib/data"
+
+const requestStatusStyles: Record<string, string> = {
+  draft: "bg-muted text-foreground",
+  submitted: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+  in_progress: "bg-blue-500/15 text-blue-700 dark:text-blue-400",
+  serviced: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
+  invoiced: "bg-slate-500/15 text-slate-700 dark:text-slate-300",
+  cancelled: "bg-destructive/15 text-destructive",
+}
 
 const statusStyles: Record<string, string> = {
   Inbound: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
@@ -91,8 +118,34 @@ export default function ClientDetailPage() {
   const [editPhone, setEditPhone] = useState("")
   const [editSites, setEditSites] = useState<ClientSite[]>([{ address: "" }])
   const [isSavingClient, setIsSavingClient] = useState(false)
+  const [clientRequests, setClientRequests] = useState<StockRequestWithRelations[]>([])
+  const [requestsLoading, setRequestsLoading] = useState(false)
 
   const client = id ? (clients.find((c) => c.id === id) ?? null) : null
+
+  useEffect(() => {
+    if (!id || !client) {
+      setClientRequests([])
+      setRequestsLoading(false)
+      return
+    }
+    let cancelled = false
+    setRequestsLoading(true)
+    ;(async () => {
+      try {
+        const sb = getSupabaseClient()
+        const list = await fetchStockRequestsForClient(sb, id)
+        if (!cancelled) setClientRequests(list)
+      } catch {
+        if (!cancelled) setClientRequests([])
+      } finally {
+        if (!cancelled) setRequestsLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [id, client?.id])
   const clientOrders = client
     ? transactions.filter((txn) => isTransactionForClient(txn, client))
     : []
@@ -406,6 +459,66 @@ export default function ClientDetailPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* Stock requests (orders) */}
+        <Card className="flex flex-col min-h-[120px]">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base font-semibold text-foreground flex items-center gap-2">
+              <MessageSquare className="w-4 h-4" />
+              Stock requests
+            </CardTitle>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Sales requests tied to this client in the directory. Open a row for fulfilment and billing.
+            </p>
+          </CardHeader>
+          <CardContent className="flex-1 min-h-0 overflow-auto overflow-x-auto">
+            {requestsLoading ? (
+              <p className="text-sm text-muted-foreground py-4">Loading requests…</p>
+            ) : clientRequests.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-4">No stock requests for this client yet.</p>
+            ) : (
+              <Table className="min-w-[480px]">
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead className="text-xs text-muted-foreground font-medium">Lines</TableHead>
+                    <TableHead className="text-xs text-muted-foreground font-medium">Status</TableHead>
+                    <TableHead className="text-xs text-muted-foreground font-medium">Created</TableHead>
+                    <TableHead className="w-24" />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {clientRequests.map((r) => (
+                    <TableRow key={r.id}>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {(r.stock_request_lines ?? []).length} line
+                        {(r.stock_request_lines ?? []).length !== 1 ? "s" : ""}
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant="secondary"
+                          className={`text-[10px] border-0 ${requestStatusStyles[r.status] ?? ""}`}
+                        >
+                          {r.status.replace("_", " ")}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
+                        {formatDateDDMMYYYY(r.created_at)}
+                      </TableCell>
+                      <TableCell>
+                        <Button variant="ghost" size="sm" className="h-8 px-2" asChild>
+                          <Link href={`/requests/${r.id}`} className="gap-1">
+                            Open
+                            <ChevronRight className="w-3.5 h-3.5" />
+                          </Link>
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
 
         {/* Transactions & consignments */}
         <Card className="flex flex-col min-h-[200px]">

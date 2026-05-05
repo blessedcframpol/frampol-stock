@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto"
 import { NextResponse } from "next/server"
 import type { ParsedApiError } from "@/lib/parse-api-error"
+import { scheduleApiErrorAppEventLog } from "@/lib/app-event-log-server"
 
 export type ApiErrorPayload = ParsedApiError & { error: string; requestId: string }
 
@@ -38,6 +39,13 @@ export function apiErrorResponse(
     : `[${requestId}] HTTP ${status}`
   if (options?.cause !== undefined) console.error(logMsg, options.cause)
   else console.error(logMsg)
+  scheduleApiErrorAppEventLog({
+    status,
+    requestId: payload.requestId,
+    message,
+    detail,
+    logLabel: options?.logLabel,
+  })
   return NextResponse.json(payload, { status })
 }
 
