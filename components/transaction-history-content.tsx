@@ -34,7 +34,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { History, Undo2, Loader2, Search, Copy, ChevronsUpDown } from "lucide-react"
+import { History, Undo2, Loader2, Search, Copy, ChevronsUpDown, Download } from "lucide-react"
 import { INTERNAL_LOCATIONS, type InternalLocation } from "@/lib/data"
 import type { TransactionBatchSummary } from "@/lib/transaction-batches"
 import { cn } from "@/lib/utils"
@@ -42,7 +42,7 @@ import { formatDateDDMMYYYY } from "@/lib/utils"
 import { toast } from "sonner"
 import { toastFromApiErrorBody, toastFromCaughtError } from "@/lib/toast-reportable-error"
 import { useAuth } from "@/lib/auth-context"
-import { canReverseQuickScanBatches, canViewFinancials } from "@/lib/permissions"
+import { canExportAllTransactions, canReverseQuickScanBatches, canViewFinancials } from "@/lib/permissions"
 import { isQuickScanStockReversibleMovement } from "@/lib/quick-scan-reversal-inventory"
 
 const MIN_REASON_LENGTH = 15
@@ -67,12 +67,21 @@ async function copySerialLinesToClipboard(serials: string[], toastLabel: string)
   }
 }
 
+function getFilenameFromContentDisposition(contentDisposition: string | null): string | null {
+  if (!contentDisposition) return null
+  const match = /filename="([^"]+)"/i.exec(contentDisposition)
+  if (!match) return null
+  return match[1]?.trim() || null
+}
+
 export function TransactionHistoryContent() {
   const { role } = useAuth()
   const canReverse = canReverseQuickScanBatches(role)
+  const canExport = canExportAllTransactions(role)
   const showFinancials = canViewFinancials(role)
   const [batches, setBatches] = useState<TransactionBatchSummary[]>([])
   const [loading, setLoading] = useState(true)
+  const [exporting, setExporting] = useState(false)
   const [reversingBatchKey, setReversingBatchKey] = useState<string | null>(null)
   const [viewingBatch, setViewingBatch] = useState<TransactionBatchSummary | null>(null)
   const [batchSearch, setBatchSearch] = useState("")
@@ -186,15 +195,62 @@ export function TransactionHistoryContent() {
     setLocationOpen(false)
   }
 
+  async function handleExportAllTransactions() {
+    if (!canExport || exporting) return
+    setExporting(true)
+    try {
+      const res = await fetch("/api/admin/transactions/export")
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        toastFromApiErrorBody(data, "Failed to export transactions")
+        return
+      }
+      const blob = await res.blob()
+      const filename =
+        getFilenameFromContentDisposition(res.headers.get("content-disposition")) ??
+        `all-transactions-${new Date().toISOString().slice(0, 10)}.csv`
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = filename
+      a.click()
+      URL.revokeObjectURL(url)
+      toast.success("Transaction export downloaded")
+    } catch (e) {
+      toastFromCaughtError(e, "Failed to export transactions")
+    } finally {
+      setExporting(false)
+    }
+  }
+
   return (
     <div className="flex flex-col gap-6 min-w-0">
-      <div>
-        <h1 className="text-xl md:text-2xl font-bold text-foreground tracking-tight">
-          Transaction history
-        </h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          One row per stock movement batch (same data as <span className="text-foreground font-medium">Recent transactions</span> on the dashboard). Admins can reverse supported quick-scan batches with a reason and return location (Sale, POC Out, Rentals, Dispose, Transfer).
-        </p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-xl md:text-2xl font-bold text-foreground tracking-tight">
+            Transaction history
+          </h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            One row per stock movement batch (same data as <span className="text-foreground font-medium">Recent transactions</span> on the dashboard). Admins can reverse supported quick-scan batches with a reason and return location (Sale, POC Out, Rentals, Dispose, Transfer).
+          </p>
+        </div>
+        {canExport && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="w-fit"
+            onClick={() => void handleExportAllTransactions()}
+            disabled={exporting}
+          >
+            {exporting ? (
+              <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+            ) : (
+              <Download className="w-4 h-4 mr-1.5" />
+            )}
+            Export all transactions
+          </Button>
+        )}
       </div>
 
       <Card className="border-border">

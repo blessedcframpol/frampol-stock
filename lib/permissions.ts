@@ -25,6 +25,11 @@ export function canReverseQuickScanBatches(role: AppRole | null | undefined): bo
   return role === ADMIN
 }
 
+/** Export full transaction ledger (admin only). */
+export function canExportAllTransactions(role: AppRole | null | undefined): boolean {
+  return role === ADMIN
+}
+
 export function canEditInventory(role: AppRole | null | undefined): boolean {
   return role === ADMIN
 }
