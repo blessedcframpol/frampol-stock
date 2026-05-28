@@ -46,7 +46,14 @@ export async function fetchActiveMovementBatchRows(
 }
 
 export type RevertInventoryResult =
-  | { ok: true }
+  | {
+      ok: true
+      requestedCount: number
+      reversedCount: number
+      alreadyReversedCount: number
+      reversedSerials: string[]
+      alreadyReversedSerials: string[]
+    }
   | { ok: false; status: number; error: string; detail?: string[] }
 
 type PlanEntry =
@@ -56,6 +63,7 @@ type PlanEntry =
       inventoryId: string
       next: InventoryItem
       transactionId: string | null
+      expectedStatus: ItemStatus
     }
   | {
       kind: "transfer"
@@ -63,7 +71,32 @@ type PlanEntry =
       inventoryId: string
       next: InventoryItem
       transactionId: string
+      expectedLocation: string
     }
+
+type ReverseQuickScanRpcEntry = {
+  serial: string
+  entry_kind: "full" | "transfer"
+  inventory_id: string
+  transaction_id: string | null
+  reverted_row: Database["public"]["Tables"]["inventory_items"]["Insert"]
+  expected_status: string | null
+  expected_location: string | null
+}
+
+type ReverseQuickScanRpcResult = {
+  ok: boolean
+  batch_id?: string
+  requested_count?: number
+  reversed_count?: number
+  already_reversed_count?: number
+  failed_count?: number
+  reversed_serials?: string[]
+  already_reversed_serials?: string[]
+  failed_serials?: string[]
+  failed_details?: { serial: string; reason: string }[]
+  error?: string
+}
 
 const REQUIRED_STATUS: Record<string, ItemStatus> = {
   Sale: "Sold",
@@ -117,9 +150,9 @@ function patchOutboundRevert(movementType: string, returnLocation: InternalLocat
  */
 export async function revertInventoryAndTransactionsForQuickScan(
   supabase: SupabaseClient<Database>,
-  options: { rows: QuickScanBatchRow[]; returnLocation: InternalLocation }
+  options: { batchId: string; rows: QuickScanBatchRow[]; returnLocation: InternalLocation }
 ): Promise<RevertInventoryResult> {
-  const { rows, returnLocation } = options
+  const { batchId, rows, returnLocation } = options
   if (rows.length === 0) {
     return { ok: false, status: 404, error: "No active scan rows in batch" }
   }
@@ -182,7 +215,14 @@ export async function revertInventoryAndTransactionsForQuickScan(
       }
       const backTo = (txn.from_location?.trim() || returnLocation) as InternalLocation | string
       const next: InventoryItem = { ...item, location: backTo }
-      plan.push({ kind: "transfer", serial, inventoryId: item.id, next, transactionId: txn.id })
+      plan.push({
+        kind: "transfer",
+        serial,
+        inventoryId: item.id,
+        next,
+        transactionId: txn.id,
+        expectedLocation: toLoc,
+      })
     }
   } else {
     const required = REQUIRED_STATUS[movementType]
@@ -217,7 +257,14 @@ export async function revertInventoryAndTransactionsForQuickScan(
       const transactionId = txnRows?.[0]?.id ?? null
 
       const next: InventoryItem = { ...item, ...patch }
-      plan.push({ kind: "full", serial, inventoryId: item.id, next, transactionId })
+      plan.push({
+        kind: "full",
+        serial,
+        inventoryId: item.id,
+        next,
+        transactionId,
+        expectedStatus: required,
+      })
     }
   }
 
@@ -225,44 +272,160 @@ export async function revertInventoryAndTransactionsForQuickScan(
     return { ok: false, status: 409, error: "Cannot reverse batch — fix items or choose another approach.", detail: errors }
   }
 
-  for (const entry of plan) {
-    const { error: upErr } = await supabase
-      .from("inventory_items")
-      .update(inventoryItemToRow(entry.next))
-      .eq("id", entry.inventoryId)
-    if (upErr) {
-      return {
-        ok: false,
-        status: 500,
-        error: `Failed to update inventory for ${entry.serial}`,
-        detail: [upErr.message],
-      }
+  const rpcEntries: ReverseQuickScanRpcEntry[] = plan.map((entry) => ({
+    serial: entry.serial,
+    entry_kind: entry.kind,
+    inventory_id: entry.inventoryId,
+    transaction_id: entry.transactionId,
+    reverted_row: inventoryItemToRow(entry.next),
+    expected_status: entry.kind === "full" ? entry.expectedStatus : null,
+    expected_location: entry.kind === "transfer" ? entry.expectedLocation : null,
+  }))
+
+  const { data, error } = await supabase.rpc("reverse_quick_scan_batch", {
+    p_batch_id: batchId,
+    p_entries: rpcEntries,
+  })
+  if (error) {
+    return {
+      ok: false,
+      status: 500,
+      error: "Failed to reverse batch atomically.",
+      detail: [error.message],
     }
   }
 
-  for (const entry of plan) {
-    if (entry.kind === "transfer") {
-      const { error: delErr } = await supabase.from("transactions").delete().eq("id", entry.transactionId)
-      if (delErr) {
-        return {
-          ok: false,
-          status: 500,
-          error: `Inventory updated but failed to remove transaction for ${entry.serial}`,
-          detail: [delErr.message],
-        }
-      }
-    } else if (entry.transactionId) {
-      const { error: delErr } = await supabase.from("transactions").delete().eq("id", entry.transactionId)
-      if (delErr) {
-        return {
-          ok: false,
-          status: 500,
-          error: `Inventory updated but failed to remove transaction for ${entry.serial}`,
-          detail: [delErr.message],
-        }
-      }
+  const rpc = (data ?? null) as ReverseQuickScanRpcResult | null
+  if (!rpc || typeof rpc !== "object") {
+    return {
+      ok: false,
+      status: 500,
+      error: "Invalid reversal response from database.",
     }
   }
 
-  return { ok: true }
+  if (!rpc.ok) {
+    const failedDetails = (rpc.failed_details ?? [])
+      .map((x) => `${x.serial}: ${x.reason}`)
+      .filter(Boolean)
+    const fallbackFailed = rpc.failed_serials?.length ? rpc.failed_serials.join(", ") : ""
+    return {
+      ok: false,
+      status: 409,
+      error: rpc.error?.trim() || "Cannot reverse batch — preconditions changed.",
+      detail: failedDetails.length > 0 ? failedDetails : fallbackFailed ? [fallbackFailed] : undefined,
+    }
+  }
+
+  const requestedCount = Number(rpc.requested_count ?? serials.length)
+  const reversedCount = Number(rpc.reversed_count ?? 0)
+  const alreadyReversedCount = Number(rpc.already_reversed_count ?? 0)
+  const reversedSerials = Array.isArray(rpc.reversed_serials) ? rpc.reversed_serials : []
+  const alreadyReversedSerials = Array.isArray(rpc.already_reversed_serials) ? rpc.already_reversed_serials : []
+
+  if (reversedCount + alreadyReversedCount !== requestedCount) {
+    const failed = Array.isArray(rpc.failed_serials) ? rpc.failed_serials : []
+    return {
+      ok: false,
+      status: 409,
+      error: "Cannot confirm complete reversal for this batch.",
+      detail: failed.length > 0 ? [`Failed serial(s): ${failed.join(", ")}`] : undefined,
+    }
+  }
+
+  return {
+    ok: true,
+    requestedCount,
+    reversedCount,
+    alreadyReversedCount,
+    reversedSerials,
+    alreadyReversedSerials,
+  }
+}
+
+export type BatchReversalCompleteness = {
+  batchId: string
+  batchReversalExists: boolean
+  remainingTransactions: number
+  nonRevertedSerials: string[]
+}
+
+/**
+ * Reconciliation check by batch id: reports whether any rows are still in non-reverted state.
+ * This is independent of in-the-moment reverse request to verify completeness after the fact.
+ */
+export async function getQuickScanBatchReversalCompleteness(
+  supabase: SupabaseClient<Database>,
+  batchId: string
+): Promise<BatchReversalCompleteness | null> {
+  const { data: rev, error: revErr } = await supabase
+    .from("batch_reversals")
+    .select("batch_id")
+    .eq("batch_id", batchId)
+    .maybeSingle()
+  if (revErr) {
+    console.error("getQuickScanBatchReversalCompleteness batch_reversals:", revErr)
+    return null
+  }
+
+  const { data: txRows, error: txErr } = await supabase
+    .from("transactions")
+    .select("serial_number, type, to_location")
+    .eq("batch_id", batchId)
+  if (txErr) {
+    console.error("getQuickScanBatchReversalCompleteness transactions:", txErr)
+    return null
+  }
+
+  const remainingTransactions = (txRows ?? []).length
+  if (remainingTransactions === 0) {
+    return {
+      batchId,
+      batchReversalExists: Boolean(rev?.batch_id),
+      remainingTransactions: 0,
+      nonRevertedSerials: [],
+    }
+  }
+
+  const serials = [...new Set((txRows ?? []).map((t) => t.serial_number?.trim()).filter(Boolean) as string[])]
+  const { data: invRows, error: invErr } = await supabase
+    .from("inventory_items")
+    .select("serial_number, status, location")
+    .in("serial_number", serials)
+  if (invErr) {
+    console.error("getQuickScanBatchReversalCompleteness inventory_items:", invErr)
+    return null
+  }
+
+  const invBySerial = new Map((invRows ?? []).map((r) => [r.serial_number, r]))
+  const outgoingStatus: Record<string, string> = {
+    Sale: "Sold",
+    "POC Out": "POC",
+    Rentals: "Rented",
+    Dispose: "Disposed",
+  }
+  const nonRevertedSerials = new Set<string>()
+  for (const tx of txRows ?? []) {
+    const serial = tx.serial_number?.trim()
+    if (!serial) continue
+    const inv = invBySerial.get(serial)
+    if (!inv) {
+      nonRevertedSerials.add(serial)
+      continue
+    }
+    if (tx.type === "Transfer") {
+      const toLoc = tx.to_location?.trim() ?? ""
+      if (toLoc && inv.location === toLoc) nonRevertedSerials.add(serial)
+      continue
+    }
+    const outStatus = outgoingStatus[tx.type]
+    if (outStatus && inv.status === outStatus) nonRevertedSerials.add(serial)
+  }
+
+  return {
+    batchId,
+    batchReversalExists: Boolean(rev?.batch_id),
+    remainingTransactions,
+    nonRevertedSerials: [...nonRevertedSerials].sort(),
+  }
 }

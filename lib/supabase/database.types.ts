@@ -542,6 +542,24 @@ export interface Database {
       }
     }
     Functions: {
+      apply_stock_movement: {
+        Args: {
+          p_inventory_upserts: Json
+          p_inventory_inserts: Json
+          p_transactions: Json
+          p_outbound_batch?: Json
+          p_kit_inspection?: Json
+          p_remediation_patch?: Json
+        }
+        Returns: undefined
+      }
+      reverse_quick_scan_batch: {
+        Args: {
+          p_batch_id: string
+          p_entries: Json
+        }
+        Returns: Json
+      }
       ensure_product_line: {
         Args: { p_product_name: string; p_vendor: string }
         Returns: string

@@ -50,7 +50,7 @@ export async function insertAppEventLogRow(
   return true
 }
 
-/** Non-blocking: log a server 5xx response to `app_event_logs` (skips if unauthenticated or self app-logs route). */
+/** Non-blocking: log a server 4xx/5xx response to `app_event_logs` (skips if unauthenticated or self app-logs route). */
 export function scheduleApiErrorAppEventLog(input: {
   status: number
   requestId: string
@@ -58,9 +58,10 @@ export function scheduleApiErrorAppEventLog(input: {
   detail?: string | undefined
   logLabel?: string | undefined
 }): void {
-  if (input.status < 500) return
+  if (input.status < 400) return
   const label = input.logLabel ?? ""
   if (label.startsWith("app-logs")) return
+  const severity: AppEventSeverity = input.status >= 500 ? "error" : "warn"
 
   void (async () => {
     try {
@@ -71,12 +72,12 @@ export function scheduleApiErrorAppEventLog(input: {
       } = await supabase.auth.getUser()
       if (!user) return
       await insertAppEventLogRow(supabase, {
-        severity: "error",
+        severity,
         source: "api",
         context: label ? label.slice(0, 512) : "api_error",
         message: input.message.slice(0, 8000),
         detail: input.detail ?? null,
-        metadata: { httpStatus: input.status } as Json,
+        metadata: { httpStatus: input.status, requestClass: input.status >= 500 ? "server" : "client" } as Json,
         requestId: input.requestId,
         userId: user.id,
       })

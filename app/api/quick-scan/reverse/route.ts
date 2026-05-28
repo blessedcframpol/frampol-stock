@@ -5,6 +5,7 @@ import { isInternalLocation } from "@/lib/data"
 import { reverseQuickScansByBatchId } from "@/lib/quick-scans-db"
 import {
   fetchActiveMovementBatchRows,
+  getQuickScanBatchReversalCompleteness,
   revertInventoryAndTransactionsForQuickScan,
 } from "@/lib/quick-scan-reversal-inventory"
 import { insertBatchReversal } from "@/lib/supabase/batch-reversals-db"
@@ -59,6 +60,7 @@ export async function POST(request: NextRequest) {
 
     if (batchRows.length > 0) {
       const stockResult = await revertInventoryAndTransactionsForQuickScan(supabase, {
+        batchId,
         rows: batchRows,
         returnLocation: returnLocationRaw,
       })
@@ -82,7 +84,53 @@ export async function POST(request: NextRequest) {
           logLabel: "Quick scan reverse after inventory",
         })
       }
-      return NextResponse.json({ ok: true, updated: 1, inventoryReverted: true })
+      return NextResponse.json({
+        ok: true,
+        updated: stockResult.reversedCount,
+        alreadyReversed: stockResult.alreadyReversedCount,
+        requested: stockResult.requestedCount,
+        reversedSerials: stockResult.reversedSerials,
+        alreadyReversedSerials: stockResult.alreadyReversedSerials,
+        inventoryReverted: stockResult.reversedCount > 0,
+        message:
+          stockResult.reversedCount === 0 && stockResult.alreadyReversedCount > 0
+            ? "This batch was already reversed."
+            : undefined,
+      })
+    }
+
+    const completeness = await getQuickScanBatchReversalCompleteness(supabase, batchId)
+    if (!completeness) {
+      return apiErrorResponse(500, "Could not verify batch reversal completeness", {
+        logLabel: "Quick scan reverse completeness check",
+      })
+    }
+    if (completeness.batchReversalExists && completeness.remainingTransactions === 0) {
+      return NextResponse.json({
+        ok: true,
+        updated: 0,
+        alreadyReversed: true,
+        requested: 0,
+        inventoryReverted: false,
+        message: "This batch was already reversed.",
+      })
+    }
+    if (completeness.remainingTransactions > 0) {
+      const detail = [
+        `Remaining transaction rows in batch: ${completeness.remainingTransactions}.`,
+        ...(completeness.nonRevertedSerials.length > 0
+          ? [`Non-reverted serial(s): ${completeness.nonRevertedSerials.join(", ")}`]
+          : []),
+      ]
+      const requestId = randomUUID()
+      return NextResponse.json(
+        {
+          error: "Batch reversal is incomplete — manual follow-up required.",
+          detail: detail.join("\n"),
+          requestId,
+        },
+        { status: 409 }
+      )
     }
 
     const fileUpdated = reverseQuickScansByBatchId(batchId, reason, user.id)

@@ -62,5 +62,14 @@ export function apiClientError(
   const label = options?.logLabel ?? message
   if (log === "warn") console.warn(`[${requestId}] HTTP ${status}:`, label)
   else if (log === "error") console.error(`[${requestId}] HTTP ${status}:`, label)
+  if (log !== "none") {
+    scheduleApiErrorAppEventLog({
+      status,
+      requestId,
+      message,
+      detail: label,
+      logLabel: options?.logLabel,
+    })
+  }
   return NextResponse.json({ error: message, requestId }, { status })
 }

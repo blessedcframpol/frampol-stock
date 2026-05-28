@@ -21,6 +21,7 @@ import {
 import { useAuth } from "./auth-context"
 import { reportAppEvent } from "./report-app-event"
 import { toast } from "sonner"
+import type { Database } from "./supabase/database.types"
 
 function deepClone<T>(arr: T[]): T[] {
   return JSON.parse(JSON.stringify(arr))
@@ -451,35 +452,19 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
           return true
         }
         try {
-          if (newBatchId && (type === "POC Out" || type === "Rentals") && result.newTransactions.length > 0) {
-            const txn = result.newTransactions[0]
-            const dateIso = txn.date
-            const dateOnly = dateIso.slice(0, 10)
-            const endDate = type === "Rentals" && result.updatedItems[0]?.returnDate ? result.updatedItems[0].returnDate : null
-            const { error } = await supabase.from("outbound_batches").insert({
-              id: newBatchId,
-              type,
-              client: clientDisplay,
-              client_id: clientId ?? null,
-              start_date: dateOnly,
-              end_date: endDate,
-              status: "open",
-              invoice_number: invoiceNumber ?? null,
-              created_at: dateIso,
-            })
-            if (reportFail("Outbound batch", error)) return false
-          }
-          const prevIds = new Set(inventory.map((i) => i.id))
+          const resolvedItems: InventoryItem[] = []
+          const productLineByKey = new Map<string, string>()
           for (const item of result.updatedItems) {
-            let persistItem = item
-            if (!persistItem.productId) {
+            if (item.productId) {
+              resolvedItems.push(item)
+              continue
+            }
+            const vendor = item.vendor?.trim() ? item.vendor.trim() : "General"
+            const key = `${item.name}\u0000${vendor}`
+            let pid = productLineByKey.get(key)
+            if (!pid) {
               try {
-                const pid = await ensureProductLine(
-                  supabase,
-                  persistItem.name,
-                  persistItem.vendor ?? "General"
-                )
-                persistItem = { ...persistItem, productId: pid }
+                pid = await ensureProductLine(supabase, item.name, vendor)
               } catch (e) {
                 const msg = e instanceof Error ? e.message : String(e)
                 toast.error("Could not save stock movement", {
@@ -495,37 +480,57 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
                   metadata: {
                     step: "Product line",
                     ...persistMeta(),
-                    productName: persistItem.name,
-                    vendor: persistItem.vendor ?? "General",
+                    productName: item.name,
+                    vendor,
                   },
                 })
                 return false
               }
+              productLineByKey.set(key, pid)
             }
-            if (prevIds.has(item.id)) {
-              const { error } = await supabase
-                .from("inventory_items")
-                .update(inventoryItemToRow(persistItem))
-                .eq("id", item.id)
-              if (reportFail("Inventory update", error)) return false
-            } else {
-              const { error } = await supabase.from("inventory_items").insert(inventoryItemToRow(persistItem))
-              if (reportFail("Inventory insert", error)) return false
+            resolvedItems.push({ ...item, productId: pid })
+          }
+
+          const prevIds = new Set(inventory.map((i) => i.id))
+          const inventoryUpserts: Database["public"]["Tables"]["inventory_items"]["Insert"][] = []
+          const inventoryInserts: Database["public"]["Tables"]["inventory_items"]["Insert"][] = []
+          for (const item of resolvedItems) {
+            const row = inventoryItemToRow(item)
+            if (prevIds.has(item.id)) inventoryUpserts.push(row)
+            else inventoryInserts.push(row)
+          }
+
+          const transactionRows = result.newTransactions.map((t) =>
+            transactionToRow({ ...t, createdBy: user?.id })
+          )
+
+          let outboundBatchPayload: Database["public"]["Tables"]["outbound_batches"]["Insert"] | null = null
+          if (newBatchId && (type === "POC Out" || type === "Rentals") && result.newTransactions.length > 0) {
+            const txn = result.newTransactions[0]
+            const dateIso = txn.date
+            const dateOnly = dateIso.slice(0, 10)
+            const endDate =
+              type === "Rentals" && result.updatedItems[0]?.returnDate ? result.updatedItems[0].returnDate : null
+            outboundBatchPayload = {
+              id: newBatchId,
+              type,
+              client: clientDisplay,
+              client_id: clientId ?? null,
+              start_date: dateOnly,
+              end_date: endDate,
+              status: "open",
+              invoice_number: invoiceNumber ?? null,
+              created_at: dateIso,
             }
           }
-          if (result.newTransactions.length) {
-            const rows = result.newTransactions.map((t) =>
-              transactionToRow({ ...t, createdBy: user?.id })
-            )
-            const { error } = await supabase.from("transactions").insert(rows)
-            if (reportFail("Transaction log", error)) return false
-          }
+
+          let kitInspectionPayloadRow: Database["public"]["Tables"]["kit_inspections"]["Insert"] | null = null
           if (
             kitInspectionPayload &&
             (type === "Inspection Pass" || type === "Inspection Fail") &&
             result.newTransactions[0]
           ) {
-            const { error: inspErr } = await supabase.from("kit_inspections").insert({
+            kitInspectionPayloadRow = {
               inventory_item_id: kitInspectionPayload.inventoryItemId,
               serial_number: kitInspectionPayload.serialNumber,
               inspector_name: kitInspectionPayload.inspectorName.trim() || null,
@@ -534,20 +539,34 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
               attachment_urls: kitInspectionPayload.attachmentUrls ?? [],
               transaction_id: result.newTransactions[0].id,
               created_by: user?.id ?? null,
-            })
-            if (reportFail("Kit inspection", inspErr)) return false
+            }
           }
+
+          let remediationPatch: {
+            id: string
+            loaner_inventory_item_id: string
+            loaner_serial: string
+            updated_at: string
+          } | null = null
           if (type === "Remediation Loaner Issue" && remediationCaseLoanerLink && result.success.length > 0) {
-            const { error: remErr } = await supabase
-              .from("remediation_cases")
-              .update({
-                loaner_inventory_item_id: remediationCaseLoanerLink.loanerInventoryItemId,
-                loaner_serial: remediationCaseLoanerLink.loanerSerial,
-                updated_at: new Date().toISOString(),
-              })
-              .eq("id", remediationCaseLoanerLink.caseId)
-            if (reportFail("Remediation case", remErr)) return false
+            remediationPatch = {
+              id: remediationCaseLoanerLink.caseId,
+              loaner_inventory_item_id: remediationCaseLoanerLink.loanerInventoryItemId,
+              loaner_serial: remediationCaseLoanerLink.loanerSerial,
+              updated_at: new Date().toISOString(),
+            }
           }
+
+          const { error } = await supabase.rpc("apply_stock_movement", {
+            p_inventory_upserts: inventoryUpserts,
+            p_inventory_inserts: inventoryInserts,
+            p_transactions: transactionRows,
+            p_outbound_batch: outboundBatchPayload,
+            p_kit_inspection: kitInspectionPayloadRow,
+            p_remediation_patch: remediationPatch,
+          })
+          if (reportFail("Atomic movement persist", error)) return false
+
           await refetchLedger({ isStale: () => false })
           return true
         } catch (e) {
