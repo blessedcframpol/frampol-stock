@@ -49,6 +49,8 @@ import {
   X,
   Trash2,
   ChevronsUpDown,
+  Copy,
+  Check,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -109,6 +111,8 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
   const [authorisedBy, setAuthorisedBy] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [lastDuplicateMessage, setLastDuplicateMessage] = useState<string[] | null>(null)
+  const [duplicateSerials, setDuplicateSerials] = useState<string[] | null>(null)
+  const [copiedDuplicates, setCopiedDuplicates] = useState(false)
   const [missingSerialsState, setMissingSerialsState] = useState<MissingSerialsState | null>(null)
   const [pendingOutbound, setPendingOutbound] = useState<PendingOutbound | null>(null)
   const [outboundClientId, setOutboundClientId] = useState<string | "new" | "">("")
@@ -222,7 +226,10 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
   function handleSerialChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
     const v = e.target.value
     setSerialNumbers(v.includes("\n") ? v.replace(/\n+/g, ", ").replace(/,+\s*,/g, ", ") : v)
-    if (!v.trim()) setLastDuplicateMessage(null)
+    if (!v.trim()) {
+      setLastDuplicateMessage(null)
+      setDuplicateSerials(null)
+    }
   }
   function handleSerialPaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
     const pasted = e.clipboardData.getData("text")
@@ -304,6 +311,8 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
     decommissionDocumentUrl?: string
   ) {
     setLastDuplicateMessage(null)
+    setDuplicateSerials(null)
+    setCopiedDuplicates(false)
     setIsSubmitting(true)
     const cloudKeysBySerial = outboundCloudKeysRef.current
     outboundCloudKeysRef.current = undefined
@@ -441,6 +450,12 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
     if (result.notFound.length > 0) {
       toast.warning(`Serial number(s) not found: ${result.notFound.join(", ")}`)
       setLastDuplicateMessage(result.notFound)
+    }
+    if (selectedType === "Inbound") {
+      const dupes = result.rejected
+        .filter((r) => /already in stock/i.test(r.reason))
+        .map((r) => r.serial)
+      setDuplicateSerials(dupes.length > 0 ? dupes : null)
     }
     setIsSubmitting(false)
   }
@@ -842,6 +857,37 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
                     {lastDuplicateMessage.length > 5 && ` +${lastDuplicateMessage.length - 5} more`}
                   </p>
                 )}
+                {duplicateSerials && duplicateSerials.length > 0 && (
+                  <div className="flex flex-col gap-1.5 text-xs text-amber-700 dark:text-amber-300 bg-amber-500/10 rounded-md px-2 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium">
+                        {duplicateSerials.length} serial{duplicateSerials.length !== 1 ? "s" : ""} already in stock — not recorded (duplicates)
+                      </span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-6 gap-1 px-2 text-xs"
+                        onClick={async () => {
+                          try {
+                            await navigator.clipboard.writeText(duplicateSerials.join("\n"))
+                            setCopiedDuplicates(true)
+                            toast.success(`Copied ${duplicateSerials.length} serial${duplicateSerials.length !== 1 ? "s" : ""}`)
+                            window.setTimeout(() => setCopiedDuplicates(false), 2000)
+                          } catch {
+                            toast.error("Could not copy to clipboard")
+                          }
+                        }}
+                      >
+                        {copiedDuplicates ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                        {copiedDuplicates ? "Copied" : "Copy"}
+                      </Button>
+                    </div>
+                    <div className="font-mono text-[11px] leading-relaxed max-h-24 overflow-auto whitespace-pre-wrap break-all">
+                      {duplicateSerials.join(", ")}
+                    </div>
+                  </div>
+                )}
               </div>
               {scannedCount > 0 && (
                 <div className="flex items-center gap-2">
@@ -852,7 +898,7 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
                     variant="ghost"
                     size="sm"
                     className="h-6 text-xs text-muted-foreground hover:text-foreground"
-                    onClick={() => { setSerialNumbers(""); setLastDuplicateMessage(null) }}
+                    onClick={() => { setSerialNumbers(""); setLastDuplicateMessage(null); setDuplicateSerials(null) }}
                   >
                     Clear all
                   </Button>

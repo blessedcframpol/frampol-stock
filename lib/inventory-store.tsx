@@ -34,6 +34,9 @@ function generateId(prefix: string): string {
 /** Days before trashed inventory rows are eligible for permanent purge. */
 export const INVENTORY_TRASH_RETENTION_DAYS = 30
 
+/** PostgREST's max rows per response; ledger loads page through this. */
+const LEDGER_PAGE_SIZE = 1000
+
 function getClientDisplay(clientId: string): string {
   if (!clientId || clientId === "internal") return "Internal"
   const c = clients.find((x) => x.id === clientId)
@@ -311,23 +314,53 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
     async (opts?: { isStale?: () => boolean }) => {
       const stale = () => opts?.isStale?.() ?? false
       if (!supabase) return
-      const { data: invRows, error: invError } = await supabase
-        .from("inventory_items")
-        .select(INVENTORY_ITEM_SELECT)
-        .is("deleted_at", null)
-        .order("date_added", { ascending: true })
-      if (invError) {
-        console.error("refetchLedger inventory_items:", invError)
-        return
+
+      // PostgREST caps a single response at 1000 rows. Page through with an
+      // explicit range so the in-memory ledger always reflects every live row;
+      // otherwise insert-vs-update decisions are made against a truncated set
+      // and unseen serials get re-inserted as duplicates.
+      type InvRow = Parameters<typeof rowToInventoryItem>[0]
+      const allInvRows: InvRow[] = []
+      for (let from = 0; ; from += LEDGER_PAGE_SIZE) {
+        const { data, error } = await supabase
+          .from("inventory_items")
+          .select(INVENTORY_ITEM_SELECT)
+          .is("deleted_at", null)
+          .order("date_added", { ascending: true })
+          .order("id", { ascending: true })
+          .range(from, from + LEDGER_PAGE_SIZE - 1)
+        if (error) {
+          console.error("refetchLedger inventory_items:", error)
+          return
+        }
+        if (stale()) return
+        const page = data ?? []
+        allInvRows.push(...page)
+        if (page.length < LEDGER_PAGE_SIZE) break
       }
       if (stale()) return
-      setInventory((invRows ?? []).map(rowToInventoryItem))
+      setInventory(allInvRows.map(rowToInventoryItem))
 
-      const { data: txnRows, error: txnError } = await supabase.from("transactions").select("*").order("date", { ascending: false })
-      if (txnError) {
-        console.error("refetchLedger transactions:", txnError)
-      } else if (!stale()) {
-        setTransactions((txnRows ?? []).map(rowToTransaction))
+      type TxnRow = Parameters<typeof rowToTransaction>[0]
+      const allTxnRows: TxnRow[] = []
+      for (let from = 0; ; from += LEDGER_PAGE_SIZE) {
+        const { data, error } = await supabase
+          .from("transactions")
+          .select("*")
+          .order("date", { ascending: false })
+          .order("id", { ascending: false })
+          .range(from, from + LEDGER_PAGE_SIZE - 1)
+        if (error) {
+          console.error("refetchLedger transactions:", error)
+          return
+        }
+        if (stale()) return
+        const page = data ?? []
+        allTxnRows.push(...page)
+        if (page.length < LEDGER_PAGE_SIZE) break
+      }
+      if (!stale()) {
+        setTransactions(allTxnRows.map(rowToTransaction))
       }
     },
     [supabase]
@@ -439,6 +472,30 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
       }
 
       if (result.success.length === 0) {
+        void reportAppEvent({
+          severity: "warn",
+          source: "client",
+          context: "movement_noop",
+          message: "Stock movement completed with zero persisted serials",
+          detail:
+            result.rejected.length > 0
+              ? `All serials rejected (${result.rejected.length})`
+              : result.notFound.length > 0
+                ? `No matching serials found (${result.notFound.length})`
+                : "No eligible serials after validation",
+          metadata: {
+            movementType: type,
+            batchId: newBatchId,
+            requestedCount: serialNumbers.length,
+            rejectedCount: result.rejected.length,
+            notFoundCount: result.notFound.length,
+            sampleRejected: result.rejected.slice(0, 10).map((r) => ({
+              serial: r.serial,
+              reason: r.reason,
+            })),
+            sampleNotFound: result.notFound.slice(0, 20),
+          },
+        })
         return {
           success: [],
           notFound: result.notFound,
