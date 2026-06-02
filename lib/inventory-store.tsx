@@ -417,6 +417,25 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
           result.rejected.length > 3 ? ` (+${result.rejected.length - 3} more)` : ""
         const detail = preview.map((r) => `${r.serial}: ${r.reason}`).join("; ")
         toast.warning(`Some serials were skipped${more}`, { description: detail, duration: 12_000 })
+        void reportAppEvent({
+          severity: "warn",
+          source: "client",
+          context: "movement_validation_rejected",
+          message: `Stock movement rejected ${result.rejected.length} serial(s) before persist`,
+          detail: detail || undefined,
+          metadata: {
+            movementType: type,
+            batchId: newBatchId,
+            requestedCount: serialNumbers.length,
+            rejectedCount: result.rejected.length,
+            successCount: result.success.length,
+            notFoundCount: result.notFound.length,
+            sampleRejected: result.rejected.slice(0, 10).map((r) => ({
+              serial: r.serial,
+              reason: r.reason,
+            })),
+          },
+        })
       }
 
       if (result.success.length === 0) {
