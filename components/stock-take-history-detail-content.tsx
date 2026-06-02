@@ -1,7 +1,6 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import Link from "next/link"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -15,7 +14,8 @@ import {
 } from "@/components/ui/table"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
-import { ArrowLeft, CheckCircle2, AlertTriangle, Loader2, Copy, Download } from "lucide-react"
+import { CheckCircle2, AlertTriangle, Loader2, Copy, Download } from "lucide-react"
+import { PageBackLink, PageHeader } from "@/components/page-nav"
 import type { StockTakeRecord, StockTakeSnapshotItem } from "@/lib/data"
 import { formatDateDDMMYYYY } from "@/lib/utils"
 import { toast } from "sonner"
@@ -105,22 +105,18 @@ export function StockTakeHistoryDetailContent({ id }: { id: string }) {
 
   if (loading) {
     return (
-      <div className="flex flex-col gap-6 p-4 md:p-6">
-        <div className="flex items-center justify-center py-12 text-muted-foreground">
-          <Loader2 className="size-6 animate-spin mr-2" />
-          Loading…
-        </div>
+      <div className="flex items-center justify-center py-12 text-muted-foreground">
+        <Loader2 className="size-6 animate-spin mr-2" />
+        Loading…
       </div>
     )
   }
 
   if (!record) {
     return (
-      <div className="flex flex-col gap-6 p-4 md:p-6">
+      <div className="flex flex-col gap-4">
+        <PageBackLink href="/inventory/stock-take/history" label="History" />
         <p className="text-muted-foreground">Stock take not found.</p>
-        <Link href="/inventory/stock-take/history">
-          <Button variant="outline">Back to history</Button>
-        </Link>
       </div>
     )
   }
@@ -144,20 +140,12 @@ export function StockTakeHistoryDetailContent({ id }: { id: string }) {
   }
 
   return (
-    <div className="flex flex-col gap-4 md:gap-6 min-w-0 p-4 md:p-6">
-      <div className="flex items-center gap-2">
-        <Link href="/inventory/stock-take/history">
-          <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="Back to history">
-            <ArrowLeft className="size-4" />
-          </Button>
-        </Link>
-        <div>
-          <h1 className="text-xl md:text-2xl font-bold text-foreground tracking-tight">Stock take</h1>
-          <p className="text-sm text-muted-foreground">
-            {formatDateDDMMYYYY(record.completedAt.slice(0, 10))} at {record.completedAt.slice(11, 16)} — read-only
-          </p>
-        </div>
-      </div>
+    <div className="flex flex-col gap-4 md:gap-6 min-w-0">
+      <PageHeader
+        title="Stock take"
+        description={`${formatDateDDMMYYYY(record.completedAt.slice(0, 10))} at ${record.completedAt.slice(11, 16)} — read-only`}
+        back={{ href: "/inventory/stock-take/history", label: "History" }}
+      />
 
       <Card>
         <CardHeader className="pb-3">

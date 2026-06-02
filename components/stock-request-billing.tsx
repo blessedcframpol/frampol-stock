@@ -28,7 +28,8 @@ import { canMarkRequestInvoiced, lineRequiresSerialsBeforeInvoice } from "@/lib/
 import { formatDateDDMMYYYY } from "@/lib/utils"
 import { toast } from "sonner"
 import { toastFromCaughtError } from "@/lib/toast-reportable-error"
-import { AlertCircle, ArrowLeft, ExternalLink, Loader2 } from "lucide-react"
+import { AlertCircle, ExternalLink, Loader2 } from "lucide-react"
+import { PageBackLink, PageHeader } from "@/components/page-nav"
 
 export function StockRequestBilling({ requestId }: { requestId: string }) {
   const router = useRouter()
@@ -130,12 +131,7 @@ export function StockRequestBilling({ requestId }: { requestId: string }) {
   if (!row) {
     return (
       <div className="flex flex-col gap-4">
-        <Button variant="ghost" size="sm" asChild className="w-fit gap-1">
-          <Link href="/requests">
-            <ArrowLeft className="size-4" />
-            Requests
-          </Link>
-        </Button>
+        <PageBackLink href="/requests" label="Requests" />
         <p className="text-sm text-muted-foreground">Request not found.</p>
       </div>
     )
@@ -144,12 +140,7 @@ export function StockRequestBilling({ requestId }: { requestId: string }) {
   if (row.status !== "serviced" && row.status !== "invoiced") {
     return (
       <div className="flex flex-col gap-4 max-w-xl">
-        <Button variant="ghost" size="sm" asChild className="w-fit gap-1">
-          <Link href={`/requests/${row.id}`}>
-            <ArrowLeft className="size-4" />
-            Request detail
-          </Link>
-        </Button>
+        <PageBackLink href={`/requests/${row.id}`} label="Request" />
         <p className="text-sm text-muted-foreground">
           Billing is available once the request is serviced (current: {row.status}).
         </p>
@@ -161,20 +152,11 @@ export function StockRequestBilling({ requestId }: { requestId: string }) {
 
   return (
     <div className="flex flex-col gap-6 max-w-3xl">
-      <div className="flex items-center gap-3">
-        <Button variant="ghost" size="sm" asChild className="shrink-0 -ml-2 gap-1">
-          <Link href={`/requests/${row.id}`}>
-            <ArrowLeft className="size-4" />
-            Back
-          </Link>
-        </Button>
-        <div>
-          <h1 className="text-xl font-bold tracking-tight">Billing</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {row.client ? `${row.client.name} — ${row.client.company}` : row.client_id}
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        title="Billing"
+        description={row.client ? `${row.client.name} — ${row.client.company}` : row.client_id}
+        back={{ href: `/requests/${row.id}` }}
+      />
 
       {row.status === "serviced" && !gate.ok && (
         <div

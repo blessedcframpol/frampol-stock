@@ -33,6 +33,7 @@ import type { InventoryItem, ItemStatus } from "@/lib/data"
 import { useInventoryStore } from "@/lib/inventory-store"
 import { compareStockTake, buildStockTakeSnapshot } from "@/lib/stock-take"
 import Link from "next/link"
+import { PageHeader } from "@/components/page-nav"
 import { toast } from "sonner"
 import { toastFromApiErrorBody, toastFromCaughtError } from "@/lib/toast-reportable-error"
 import { buildCsvFilename, cn } from "@/lib/utils"
@@ -248,21 +249,19 @@ export function StockTakeContent() {
   }
 
   return (
-    <div className="flex flex-col gap-4 md:gap-6 min-w-0 p-4 md:p-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-        <div>
-          <h1 className="text-xl md:text-2xl font-bold text-foreground tracking-tight text-balance">Stock take</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Scan or paste serials, then compare with current inventory to find matches, unknown items, and missing counts.
-          </p>
-        </div>
-        <Link href="/inventory/stock-take/history">
-          <Button variant="outline" size="sm" className="gap-2 shrink-0">
-            <History className="size-4" />
-            History
+    <div className="flex flex-col gap-4 md:gap-6 min-w-0">
+      <PageHeader
+        title="Stock take"
+        description="Scan or paste serials, then compare with current inventory to find matches, unknown items, and missing counts."
+        actions={
+          <Button variant="outline" size="sm" className="gap-2 shrink-0" asChild>
+            <Link href="/inventory/stock-take/history">
+              <History className="size-4" />
+              History
+            </Link>
           </Button>
-        </Link>
-      </div>
+        }
+      />
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card className="border-dashed border-primary/30 bg-primary/[0.02]">

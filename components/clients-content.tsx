@@ -22,6 +22,7 @@ import type { ClientSite } from "@/lib/data"
 import { Search, Mail, Phone, Building2, ShoppingBag, Plus, MapPin, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { toastFromCaughtError } from "@/lib/toast-reportable-error"
+import { PageHeader } from "@/components/page-nav"
 
 export function ClientsContent() {
   const [search, setSearch] = useState("")
@@ -101,19 +102,16 @@ export function ClientsContent() {
 
   return (
     <div className="flex flex-col gap-4 md:gap-6 min-w-0">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h1 className="text-xl md:text-2xl font-bold text-foreground tracking-tight text-balance">Clients</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            {isLoading ? "Loading..." : `${clients.length} active clients`}
-          </p>
-        </div>
-        <Button onClick={() => setAddModalOpen(true)} className="w-fit shrink-0">
-          <Plus className="w-4 h-4 mr-2" />
-          Add client
-        </Button>
-      </div>
+      <PageHeader
+        title="Clients"
+        description={isLoading ? "Loading…" : `${clients.length} active clients`}
+        actions={
+          <Button onClick={() => setAddModalOpen(true)} className="w-fit shrink-0">
+            <Plus className="w-4 h-4 mr-2" />
+            Add client
+          </Button>
+        }
+      />
 
       {/* Add client modal */}
       <Dialog

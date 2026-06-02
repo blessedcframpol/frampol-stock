@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useInventoryStore } from "@/lib/inventory-store"
+import { PageHeader } from "@/components/page-nav"
 import { Package, ShieldAlert, Clock, AlertTriangle, ChevronRight } from "lucide-react"
 import { cn, formatDateDDMMYYYY } from "@/lib/utils"
 
@@ -43,14 +44,10 @@ export function AlertsContent() {
 
   return (
     <div className="flex flex-col gap-6 min-w-0">
-      <div>
-        <h1 className="text-xl md:text-2xl font-bold text-foreground tracking-tight text-balance">
-          Alerts
-        </h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Low stock, warranty expiring, and rentals past return date. Take action from here or in Inventory / Stock Movement.
-        </p>
-      </div>
+      <PageHeader
+        title="Alerts"
+        description="Low stock, warranty expiring, and rentals past return date. Take action from here or in Inventory / Stock Movement."
+      />
 
       {total === 0 ? (
         <Card className="border-border">

@@ -31,6 +31,7 @@ import {
   SheetDescription,
 } from "@/components/ui/sheet"
 import { DashboardShell } from "@/components/dashboard-shell"
+import { PageBackLink } from "@/components/page-nav"
 import { useAuth } from "@/lib/auth-context"
 import { canViewFinancials } from "@/lib/permissions"
 import { useInventoryStore } from "@/lib/inventory-store"
@@ -43,7 +44,6 @@ import {
 import { cn, formatDateDDMMYYYY } from "@/lib/utils"
 import {
   FileText,
-  ArrowLeft,
   Mail,
   Phone,
   Building2,
@@ -203,10 +203,8 @@ export default function ClientDetailPage() {
     return (
       <DashboardShell>
         <div className="flex flex-col gap-4 min-w-0">
+          <PageBackLink href="/clients" label="Clients" />
           <p className="text-sm text-muted-foreground">Client not found.</p>
-          <Button variant="outline" asChild>
-            <Link href="/clients">Back to Clients</Link>
-          </Button>
         </div>
       </DashboardShell>
     )
@@ -276,12 +274,7 @@ export default function ClientDetailPage() {
   return (
     <DashboardShell>
       <div className="flex flex-col gap-6 min-w-0">
-        <Button variant="ghost" size="sm" className="w-fit -ml-2" asChild>
-          <Link href="/clients" className="flex items-center gap-1.5">
-            <ArrowLeft className="w-4 h-4" />
-            Back to Clients
-          </Link>
-        </Button>
+        <PageBackLink href="/clients" label="Clients" />
 
         {/* Client header */}
         <Card>

@@ -18,6 +18,7 @@ import type { StockTakeRecord } from "@/lib/data"
 import { formatDateDDMMYYYY } from "@/lib/utils"
 import { toast } from "sonner"
 import { toastFromApiErrorBody, toastFromCaughtError } from "@/lib/toast-reportable-error"
+import { PageHeader } from "@/components/page-nav"
 
 export function StockTakeHistoryContent() {
   const [list, setList] = useState<StockTakeRecord[]>([])
@@ -47,13 +48,12 @@ export function StockTakeHistoryContent() {
   }, [fetchList])
 
   return (
-    <div className="flex flex-col gap-4 md:gap-6 min-w-0 p-4 md:p-6">
-      <div>
-        <h1 className="text-xl md:text-2xl font-bold text-foreground tracking-tight text-balance">Stock take history</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Read-only list of completed stock takes. Open one to see how it went.
-        </p>
-      </div>
+    <div className="flex flex-col gap-4 md:gap-6 min-w-0">
+      <PageHeader
+        title="Stock take history"
+        description="Read-only list of completed stock takes. Open one to see how it went."
+        back={{ href: "/inventory/stock-take", label: "Stock take" }}
+      />
 
       <Card>
         <CardHeader className="pb-3">

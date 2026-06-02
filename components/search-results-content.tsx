@@ -20,6 +20,7 @@ import {
   FileQuestion,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { PageHeader } from "@/components/page-nav"
 
 type FilterTab = "all" | "inventory" | "clients" | "users"
 
@@ -61,14 +62,10 @@ export function SearchResultsContent() {
 
   return (
     <div className="flex flex-col gap-6 min-w-0">
-      <div>
-        <h1 className="text-xl md:text-2xl font-bold text-foreground tracking-tight">
-          Search
-        </h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Search inventory items, clients, and users. Use the filters to narrow results.
-        </p>
-      </div>
+      <PageHeader
+        title="Search"
+        description="Search inventory items, clients, and users. Use the filters to narrow results."
+      />
 
       <form onSubmit={handleSearchSubmit} className="flex gap-2">
         <div className="relative flex-1 max-w-md">

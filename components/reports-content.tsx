@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge"
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart"
 import { salesByEmployee, clients, monthlySales } from "@/lib/data"
 import { buildCsvFilename } from "@/lib/utils"
+import { PageHeader } from "@/components/page-nav"
 import { Download, TrendingUp, Users, DollarSign } from "lucide-react"
 
 const BAR_COLORS = ["#6366f1", "#06b6d4", "#10b981", "#f59e0b"]
@@ -58,17 +59,16 @@ export function ReportsContent() {
 
   return (
     <div className="flex flex-col gap-4 md:gap-6 min-w-0">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h1 className="text-xl md:text-2xl font-bold text-foreground tracking-tight text-balance">Reports & Analytics</h1>
-          <p className="text-sm text-muted-foreground mt-1">Sales performance and stock turnover insights.</p>
-        </div>
-        <Button variant="outline" size="sm" className="text-foreground w-fit" onClick={handleExportCsv}>
-          <Download className="w-4 h-4 mr-1.5" />
-          Export CSV
-        </Button>
-      </div>
+      <PageHeader
+        title="Reports & Analytics"
+        description="Sales performance and stock turnover insights."
+        actions={
+          <Button variant="outline" size="sm" className="text-foreground w-fit" onClick={handleExportCsv}>
+            <Download className="w-4 h-4 mr-1.5" />
+            Export CSV
+          </Button>
+        }
+      />
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4">

@@ -31,7 +31,7 @@ import {
 import { ScrollText, Loader2 } from "lucide-react"
 import { useAuth } from "@/lib/auth-context"
 import { canViewAppLogs } from "@/lib/permissions"
-import Link from "next/link"
+import { PageBackLink, PageHeader } from "@/components/page-nav"
 import { toast } from "sonner"
 import { toastFromApiErrorBody, toastFromCaughtError } from "@/lib/toast-reportable-error"
 import { formatDateDDMMYYYY } from "@/lib/utils"
@@ -148,27 +148,20 @@ export function AppLogsContent() {
 
   if (!allowed) {
     return (
-      <div className="flex flex-col gap-4 min-w-0 p-4 md:p-6">
+      <div className="flex flex-col gap-4 min-w-0">
         <p className="text-sm text-muted-foreground">You do not have access to error logs.</p>
-        <Button variant="outline" asChild>
-          <Link href="/">Back to dashboard</Link>
-        </Button>
+        <PageBackLink href="/" label="Dashboard" />
       </div>
     )
   }
 
   return (
-    <div className="flex flex-col gap-4 md:gap-6 min-w-0 p-4 md:p-6">
-      <div>
-        <h1 className="text-xl md:text-2xl font-bold text-foreground tracking-tight text-balance flex items-center gap-2">
-          <ScrollText className="w-6 h-6 shrink-0" />
-          Error and event logs
-        </h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Persisted operational failures (movement persist, server 5xx). Use request ID to correlate with API
-          responses.
-        </p>
-      </div>
+    <div className="flex flex-col gap-4 md:gap-6 min-w-0">
+      <PageHeader
+        title="Error and event logs"
+        description="Persisted operational failures (movement persist, server 5xx). Use request ID to correlate with API responses."
+        icon={ScrollText}
+      />
 
       <Card>
         <CardHeader className="pb-3">

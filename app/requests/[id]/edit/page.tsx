@@ -1,7 +1,6 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import Link from "next/link"
 import { useParams } from "next/navigation"
 import { DashboardShell } from "@/components/dashboard-shell"
 import { StockRequestForm } from "@/components/stock-request-form"
@@ -10,7 +9,8 @@ import { useAuth } from "@/lib/auth-context"
 import { ADMIN, canCreateStockRequest } from "@/lib/permissions"
 import { getSupabaseClient } from "@/lib/supabase/client"
 import { fetchStockRequestById, type StockRequestWithRelations } from "@/lib/supabase/stock-requests-db"
-import { ArrowLeft, Loader2 } from "lucide-react"
+import { Loader2 } from "lucide-react"
+import { PageBackLink } from "@/components/page-nav"
 import { toastFromCaughtError } from "@/lib/toast-reportable-error"
 
 export default function EditStockRequestPage() {
@@ -65,12 +65,7 @@ export default function EditStockRequestPage() {
     return (
       <DashboardShell>
         <div className="flex flex-col gap-4 max-w-lg">
-          <Button variant="ghost" size="sm" asChild className="w-fit gap-1">
-            <Link href={row ? `/requests/${row.id}` : "/requests"}>
-              <ArrowLeft className="size-4" />
-              Back
-            </Link>
-          </Button>
+          <PageBackLink href={row ? `/requests/${row.id}` : "/requests"} />
           <p className="text-sm text-muted-foreground">
             {!row
               ? "Request not found or you don’t have access."

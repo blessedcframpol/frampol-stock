@@ -8,6 +8,7 @@ import { LatestRequests } from "@/components/latest-requests"
 import { QuickScan } from "@/components/quick-scan"
 import { TransactionsTable } from "@/components/transactions-table"
 import { useInventoryStore } from "@/lib/inventory-store"
+import { PageHeader } from "@/components/page-nav"
 
 export function DashboardContent() {
   const { inventory, getAlerts } = useInventoryStore()
@@ -25,11 +26,10 @@ export function DashboardContent() {
 
   return (
     <div className="flex flex-col gap-4 md:gap-6 min-w-0">
-      {/* Page Header */}
-      <div>
-        <h1 className="text-xl md:text-2xl font-bold text-foreground tracking-tight text-balance">Dashboard Overview</h1>
-        <p className="text-sm text-muted-foreground mt-1">Track inventory, monitor stock movements, and manage operations.</p>
-      </div>
+      <PageHeader
+        title="Dashboard Overview"
+        description="Track inventory, monitor stock movements, and manage operations."
+      />
 
       {/* Stat Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">

@@ -41,7 +41,6 @@ import {
   ChevronRight,
   MoreHorizontal,
   Download,
-  ArrowLeft,
   LayoutList,
   LayoutGrid,
   Layers,
@@ -52,6 +51,7 @@ import { toast } from "sonner"
 import { InventoryItemActionsMenu } from "@/components/inventory-item-actions"
 import { Checkbox } from "@/components/ui/checkbox"
 import { RecordStockMovementDialog } from "@/components/record-stock-movement-dialog"
+import { PageBackLink, pageTitleClass } from "@/components/page-nav"
 
 const statusStyles: Record<ItemStatus, string> = {
   "In Stock": "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
@@ -382,7 +382,7 @@ export function InventoryContent() {
         {kitHistoryCard}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
-            <h1 className="text-xl md:text-2xl font-bold text-foreground tracking-tight text-balance">Inventory</h1>
+            <h1 className={pageTitleClass}>Inventory</h1>
             <p className="text-sm text-muted-foreground mt-1">Select a vendor to view products and items.</p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -557,18 +557,10 @@ export function InventoryContent() {
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div className="flex items-center gap-2 flex-wrap">
             {selectedVendor && selectedVendor !== "__flat__" && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-fit -ml-2 text-muted-foreground hover:text-foreground"
-                onClick={() => setSelectedVendor(null)}
-              >
-                <ArrowLeft className="w-4 h-4 mr-1" />
-                Back
-              </Button>
+              <PageBackLink onClick={() => setSelectedVendor(null)} />
             )}
             <div>
-              <h1 className="text-xl md:text-2xl font-bold text-foreground tracking-tight text-balance">
+              <h1 className={pageTitleClass}>
                 {selectedVendor && selectedVendor !== "__flat__"
                   ? `${VENDOR_LABELS[selectedVendor] ?? selectedVendor} – products`
                   : "Inventory"}
@@ -785,18 +777,13 @@ export function InventoryContent() {
     <div className="flex flex-col gap-4 md:gap-6">
       {kitHistoryCard}
       <div className="flex flex-col gap-3">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="w-fit -ml-2 text-muted-foreground hover:text-foreground"
+        <PageBackLink
           onClick={() => setSelectedGroupName(null)}
-        >
-          <ArrowLeft className="w-4 h-4 mr-1.5" />
-          {selectedVendor && selectedVendor !== "__flat__" ? "Back to products" : "Back to groups"}
-        </Button>
+          label={selectedVendor && selectedVendor !== "__flat__" ? "Products" : "Groups"}
+        />
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
-            <h1 className="text-xl md:text-2xl font-bold text-foreground tracking-tight text-balance">
+            <h1 className={pageTitleClass}>
               {selectedGroup?.name}
             </h1>
             <p className="text-sm text-muted-foreground mt-1">

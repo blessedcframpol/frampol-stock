@@ -18,6 +18,7 @@ import { Badge } from "@/components/ui/badge"
 import { formatDateDDMMYYYY } from "@/lib/utils"
 import { toast } from "sonner"
 import { Loader2, Trash2, RotateCcw, Eraser } from "lucide-react"
+import { PageHeader } from "@/components/page-nav"
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -103,26 +104,22 @@ export function InventoryTrashContent() {
 
   if (!isAdmin) {
     return (
-      <div className="p-6">
-        <p className="text-muted-foreground">You don&apos;t have access to Trash. Administrators only.</p>
-      </div>
+      <p className="text-muted-foreground">You don&apos;t have access to Trash. Administrators only.</p>
     )
   }
 
   return (
-    <div className="flex flex-col gap-6 p-4 md:p-6 max-w-6xl mx-auto">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold text-foreground">Trash</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Deleted items stay here for {INVENTORY_TRASH_RETENTION_DAYS} days, then they can be purged permanently.
-          </p>
-        </div>
-        <Button variant="outline" disabled={expiredCount === 0 || purging} onClick={() => setPurgeOpen(true)}>
-          {purging ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Eraser className="h-4 w-4 mr-2" />}
-          Purge expired ({expiredCount})
-        </Button>
-      </div>
+    <div className="flex flex-col gap-6 max-w-6xl mx-auto">
+      <PageHeader
+        title="Trash"
+        description={`Deleted items stay here for ${INVENTORY_TRASH_RETENTION_DAYS} days, then they can be purged permanently.`}
+        actions={
+          <Button variant="outline" disabled={expiredCount === 0 || purging} onClick={() => setPurgeOpen(true)}>
+            {purging ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Eraser className="h-4 w-4 mr-2" />}
+            Purge expired ({expiredCount})
+          </Button>
+        }
+      />
 
       <Card>
         <CardHeader className="pb-2">

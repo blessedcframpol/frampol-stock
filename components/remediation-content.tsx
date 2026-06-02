@@ -34,6 +34,7 @@ import { useInventoryStore } from "@/lib/inventory-store"
 import { useAuth } from "@/lib/auth-context"
 import { toast } from "sonner"
 import { Loader2 } from "lucide-react"
+import { PageHeader } from "@/components/page-nav"
 
 function normalizeVendor(v: string | undefined): string {
   return (v ?? "").trim() || "General"
@@ -161,13 +162,10 @@ export function RemediationContent() {
 
   return (
     <div className="flex flex-col gap-6 max-w-5xl">
-      <div>
-        <h1 className="text-xl md:text-2xl font-bold text-foreground">Remediation</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Provider RMA chain (Starlink first). Create a case for a faulty unit on <strong>RMA Hold</strong>, then issue a
-          loaner from <strong>Inventory movement → Rem. loaner</strong> using the case ID.
-        </p>
-      </div>
+      <PageHeader
+        title="Remediation"
+        description="Provider RMA chain (Starlink first). Create a case for a faulty unit on RMA Hold, then issue a loaner from Inventory movement → Rem. loaner using the case ID."
+      />
 
       <Card>
         <CardHeader>

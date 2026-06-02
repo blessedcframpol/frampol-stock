@@ -188,7 +188,8 @@ function SidebarNav({
                 {item.href === "/inventory" && isExpanded && (
                   <div className="flex flex-col gap-0.5 mt-0.5 ml-2 pl-4 border-l-2 border-sidebar-border/50">
                     {item.children.map((child) => {
-                      const isChildActive = pathname === child.href
+                      const isChildActive =
+                        pathname === child.href || pathname.startsWith(`${child.href}/`)
                       return (
                         <Link
                           key={child.href}

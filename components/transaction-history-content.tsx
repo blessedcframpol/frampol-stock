@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/dialog"
 import { Separator } from "@/components/ui/separator"
 import Link from "next/link"
+import { PageHeader } from "@/components/page-nav"
 import {
   Command,
   CommandEmpty,
@@ -225,16 +226,11 @@ export function TransactionHistoryContent() {
 
   return (
     <div className="flex flex-col gap-6 min-w-0">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-xl md:text-2xl font-bold text-foreground tracking-tight">
-            Transaction history
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            One row per stock movement batch (same data as <span className="text-foreground font-medium">Recent transactions</span> on the dashboard). Admins can reverse supported quick-scan batches with a reason and return location (Sale, POC Out, Rentals, Dispose, Transfer).
-          </p>
-        </div>
-        {canExport && (
+      <PageHeader
+        title="Transaction history"
+        description="One row per stock movement batch (same data as Recent transactions on the dashboard). Admins can reverse supported quick-scan batches with a reason and return location (Sale, POC Out, Rentals, Dispose, Transfer)."
+        actions={
+          canExport ? (
           <Button
             type="button"
             variant="outline"
@@ -250,8 +246,9 @@ export function TransactionHistoryContent() {
             )}
             Export all transactions
           </Button>
-        )}
-      </div>
+          ) : undefined
+        }
+      />
 
       <Card className="border-border">
         <CardContent className="p-0">

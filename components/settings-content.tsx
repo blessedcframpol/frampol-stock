@@ -30,6 +30,7 @@ import { canManageUsers, isValidRole } from "@/lib/permissions"
 import { useInventoryStore } from "@/lib/inventory-store"
 import { cn } from "@/lib/utils"
 import { Mail, Plus, Trash2, Loader2, HelpCircle, Info } from "lucide-react"
+import { PageHeader } from "@/components/page-nav"
 import { toast } from "sonner"
 import { toastFromApiErrorBody, toastFromCaughtError } from "@/lib/toast-reportable-error"
 
@@ -298,10 +299,10 @@ export function SettingsContent() {
   return (
     <div className="flex w-full min-w-0 flex-col">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold tracking-tight text-foreground md:text-3xl">Settings</h1>
-        <p className="mt-1.5 text-sm text-muted-foreground">
-          Fram-Stock preferences, low-stock email, reorder rules, and user management.
-        </p>
+        <PageHeader
+          title="Settings"
+          description="Fram-Stock preferences, low-stock email, reorder rules, and user management."
+        />
       </div>
 
       <Tabs defaultValue="account" className="w-full gap-6">

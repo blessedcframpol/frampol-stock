@@ -28,7 +28,8 @@ import type { InventoryItem } from "@/lib/data"
 import { formatDateDDMMYYYY } from "@/lib/utils"
 import { toast } from "sonner"
 import { toastFromCaughtError } from "@/lib/toast-reportable-error"
-import { ArrowLeft, CheckCircle2, Loader2, Unlink } from "lucide-react"
+import { CheckCircle2, Loader2, Unlink } from "lucide-react"
+import { PageBackLink, PageHeader } from "@/components/page-nav"
 
 export function StockRequestFulfill({ requestId }: { requestId: string }) {
   const router = useRouter()
@@ -152,12 +153,7 @@ export function StockRequestFulfill({ requestId }: { requestId: string }) {
   if (!row) {
     return (
       <div className="flex flex-col gap-4">
-        <Button variant="ghost" size="sm" asChild className="w-fit gap-1">
-          <Link href="/requests">
-            <ArrowLeft className="size-4" />
-            Requests
-          </Link>
-        </Button>
+        <PageBackLink href="/requests" label="Requests" />
         <p className="text-sm text-muted-foreground">Request not found or not open for fulfillment.</p>
       </div>
     )
@@ -166,12 +162,7 @@ export function StockRequestFulfill({ requestId }: { requestId: string }) {
   if (row.status !== "submitted" && row.status !== "in_progress") {
     return (
       <div className="flex flex-col gap-4 max-w-xl">
-        <Button variant="ghost" size="sm" asChild className="w-fit gap-1">
-          <Link href={`/requests/${row.id}`}>
-            <ArrowLeft className="size-4" />
-            Request detail
-          </Link>
-        </Button>
+        <PageBackLink href={`/requests/${row.id}`} label="Request" />
         <p className="text-sm text-muted-foreground">
           This request is not in a fulfillment state (current: {row.status}). Open the request overview for next steps.
         </p>
@@ -183,20 +174,11 @@ export function StockRequestFulfill({ requestId }: { requestId: string }) {
 
   return (
     <div className="flex flex-col gap-6 max-w-3xl">
-      <div className="flex items-center gap-3">
-        <Button variant="ghost" size="sm" asChild className="shrink-0 -ml-2 gap-1">
-          <Link href={`/requests/${row.id}`}>
-            <ArrowLeft className="size-4" />
-            Back
-          </Link>
-        </Button>
-        <div>
-          <h1 className="text-xl font-bold tracking-tight">Fulfill request</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {row.client ? `${row.client.name} — ${row.client.company}` : row.client_id} · {formatDateDDMMYYYY(row.created_at)}
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        title="Fulfill request"
+        description={`${row.client ? `${row.client.name} — ${row.client.company}` : row.client_id} · ${formatDateDDMMYYYY(row.created_at)}`}
+        back={{ href: `/requests/${row.id}` }}
+      />
 
       <Card>
         <CardHeader className="pb-2">

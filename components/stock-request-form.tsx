@@ -37,7 +37,8 @@ import {
 } from "@/lib/supabase/stock-requests-db"
 import { toast } from "sonner"
 import { toastFromCaughtError } from "@/lib/toast-reportable-error"
-import { ArrowLeft, Loader2, Plus, Trash2, Upload, X } from "lucide-react"
+import { Loader2, Plus, Trash2, Upload, X } from "lucide-react"
+import { PageBackLink } from "@/components/page-nav"
 
 export type LineDraft = {
   id: string
@@ -268,14 +269,7 @@ export function StockRequestForm({
 
   return (
     <div className="flex flex-col gap-6 max-w-3xl">
-      <div className="flex items-center gap-3">
-        <Button variant="ghost" size="sm" asChild className="gap-1 -ml-2">
-          <Link href={onCancelHref}>
-            <ArrowLeft className="size-4" />
-            Back
-          </Link>
-        </Button>
-      </div>
+      <PageBackLink href={onCancelHref} />
 
       <Card>
         <CardHeader className="pb-3">

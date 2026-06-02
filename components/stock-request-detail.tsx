@@ -36,8 +36,9 @@ import { lineRequiresSerialsBeforeInvoice } from "@/lib/stock-request-rules"
 import { formatDateDDMMYYYY } from "@/lib/utils"
 import { toast } from "sonner"
 import { toastFromCaughtError } from "@/lib/toast-reportable-error"
+import { PageBackLink, pageTitleClass } from "@/components/page-nav"
+import { cn } from "@/lib/utils"
 import {
-  ArrowLeft,
   ExternalLink,
   FileUp,
   Loader2,
@@ -198,12 +199,7 @@ export function StockRequestDetail({ requestId }: { requestId: string }) {
   if (!row) {
     return (
       <div className="flex flex-col gap-4">
-        <Button variant="ghost" size="sm" asChild className="w-fit gap-1">
-          <Link href="/requests">
-            <ArrowLeft className="size-4" />
-            Requests
-          </Link>
-        </Button>
+        <PageBackLink href="/requests" label="Requests" />
         <p className="text-sm text-muted-foreground">Request not found or you don’t have access.</p>
       </div>
     )
@@ -212,17 +208,12 @@ export function StockRequestDetail({ requestId }: { requestId: string }) {
   return (
     <div className="flex flex-col gap-6 min-w-0 max-w-4xl">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex items-start gap-3">
-          <Button variant="ghost" size="sm" asChild className="shrink-0 -ml-2 gap-1">
-            <Link href="/requests">
-              <ArrowLeft className="size-4" />
-              Back
-            </Link>
-          </Button>
-          <div>
+        <div className="flex items-start gap-3 min-w-0">
+          <PageBackLink href="/requests" />
+          <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-xl font-bold tracking-tight">Request</h1>
-              <Badge variant="secondary" className={`text-[10px] border-0 ${statusVariant[row.status] ?? ""}`}>
+              <h1 className={pageTitleClass}>Request</h1>
+              <Badge variant="secondary" className={cn("text-[10px] border-0", statusVariant[row.status] ?? "")}>
                 {row.status.replace("_", " ")}
               </Badge>
             </div>

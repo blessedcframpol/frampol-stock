@@ -65,6 +65,7 @@ import {
   NEW_CLIENT_SELECT,
   TRANSACTION_TYPE_CHOICES,
 } from "@/lib/stock-movement-form-logic"
+import { PageHeader } from "@/components/page-nav"
 
 const transactionTypes = TRANSACTION_TYPE_CHOICES
 
@@ -731,12 +732,10 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
     <div className="flex flex-col gap-4 md:gap-6 min-w-0">
       {/* Header */}
       {!isEmbed && (
-        <div>
-          <h1 className="text-xl md:text-2xl font-bold text-foreground tracking-tight text-balance">Inventory Movement</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Record inbound and outbound (sale, POC, rental, transfer) stock transactions.
-          </p>
-        </div>
+        <PageHeader
+          title="Inventory Movement"
+          description="Record inbound and outbound (sale, POC, rental, transfer) stock transactions."
+        />
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">

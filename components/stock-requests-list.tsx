@@ -17,6 +17,7 @@ import { useAuth } from "@/lib/auth-context"
 import { canCreateStockRequest } from "@/lib/permissions"
 import type { StockRequestWithRelations } from "@/lib/supabase/stock-requests-db"
 import { formatDateDDMMYYYY } from "@/lib/utils"
+import { PageHeader } from "@/components/page-nav"
 
 const statusVariant: Record<string, string> = {
   draft: "bg-muted text-foreground",
@@ -33,22 +34,20 @@ export function StockRequestsList({ requests }: { requests: StockRequestWithRela
 
   return (
     <div className="flex flex-col gap-4 md:gap-6 min-w-0">
-      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
-        <div>
-          <h1 className="text-xl md:text-2xl font-bold text-foreground tracking-tight text-balance">Requests</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Sales raise stock requests with quotations; technicians assign serials; accounts invoice.
-          </p>
-        </div>
-        {canCreate && (
-          <Button asChild>
-            <Link href="/requests/new" className="gap-2">
-              <Plus className="size-4" />
-              New request
-            </Link>
-          </Button>
-        )}
-      </div>
+      <PageHeader
+        title="Requests"
+        description="Sales raise stock requests with quotations; technicians assign serials; accounts invoice."
+        actions={
+          canCreate ? (
+            <Button asChild>
+              <Link href="/requests/new" className="gap-2">
+                <Plus className="size-4" />
+                New request
+              </Link>
+            </Button>
+          ) : undefined
+        }
+      />
 
       {requests.length === 0 ? (
         <Card>

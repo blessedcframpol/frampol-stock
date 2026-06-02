@@ -18,6 +18,7 @@ import { useInventoryStore } from "@/lib/inventory-store"
 import type { InventoryItem, ItemStatus, TransactionType } from "@/lib/data"
 import { isDispatchedStatus } from "@/lib/inventory-visibility"
 import { formatDateDDMMYYYY } from "@/lib/utils"
+import { PageHeader } from "@/components/page-nav"
 import { ArrowUpRight, Search } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -136,14 +137,10 @@ export function DispatchedContent() {
 
   return (
     <div className="flex flex-col gap-6 min-w-0">
-      <div>
-        <h1 className="text-xl md:text-2xl font-bold text-foreground tracking-tight">
-          Dispatched
-        </h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Items that have been moved out: sales, POC, rentals, and disposed.
-        </p>
-      </div>
+      <PageHeader
+        title="Dispatched"
+        description="Items that have been moved out: sales, POC, rentals, and disposed."
+      />
 
       <Card className="border-border">
         <CardContent className="p-0">
