@@ -299,6 +299,23 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
     setMainClientSites((prev) => prev.map((s, i) => (i === index ? { ...s, [field]: value } : s)))
   }
 
+  function resetClientFormState() {
+    setClientId("")
+    setMainNewClientName("")
+    setMainNewClientCompany("")
+    setMainNewClientEmail("")
+    setMainNewClientPhone("")
+    setMainClientSites([{ address: "" }])
+    setMainClientSearch("")
+    setNewClientName("")
+    setNewClientCompany("")
+    setNewClientEmail("")
+    setNewClientPhone("")
+    setSites([{ address: "" }])
+    setOutboundClientId("")
+    setOutboundClientSearch("")
+  }
+
   async function doSubmit(
     outboundDetails?: {
       clientId?: string
@@ -419,6 +436,7 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
     if (result.success.length > 0) {
       toast.success(`Recorded ${result.success.length} item(s)`)
       embedMode?.onClose?.()
+      resetClientFormState()
       if (isEmbed) {
         setPendingOutbound(null)
         setIsSubmitting(false)
@@ -724,6 +742,11 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
     setNewClientEmail("")
     setNewClientPhone("")
     setSites([{ address: "" }])
+    setMainNewClientName("")
+    setMainNewClientCompany("")
+    setMainNewClientEmail("")
+    setMainNewClientPhone("")
+    setMainClientSites([{ address: "" }])
   }
 
   const typesForUi = isEmbed ? transactionTypes.filter((t) => t.value !== "Inbound") : transactionTypes

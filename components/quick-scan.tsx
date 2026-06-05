@@ -475,6 +475,13 @@ export function QuickScan() {
         setPendingOutbound(null)
         setOutboundReturnDate("")
         if (pendingOutbound.movementType === "Sale") setAdminSaleDate("")
+        setNewClientName("")
+        setNewClientCompany("")
+        setNewClientEmail("")
+        setNewClientPhone("")
+        setSites([{ address: "" }])
+        setOutboundClientId("")
+        setOutboundClientSearch("")
         void refetchLedger()
       }
       if (result.notFound.length > 0) {
