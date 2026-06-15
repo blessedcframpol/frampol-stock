@@ -332,6 +332,7 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
     setDuplicateSerials(null)
     setCopiedDuplicates(false)
     setIsSubmitting(true)
+    try {
     const cloudKeysBySerial = outboundCloudKeysRef.current
     outboundCloudKeysRef.current = undefined
     const list = pendingOutbound ? pendingOutbound.serials : uniqueSerials
@@ -439,11 +440,9 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
       resetClientFormState()
       if (isEmbed) {
         setPendingOutbound(null)
-        setIsSubmitting(false)
         return
       }
       setSerialNumbers("")
-      setProductName("")
       setInvoiceNumber("")
       setNotes("")
       if (selectedType === "Dispose") {
@@ -476,7 +475,9 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
         .map((r) => r.serial)
       setDuplicateSerials(dupes.length > 0 ? dupes : null)
     }
-    setIsSubmitting(false)
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   async function handleOutboundModalSubmit() {
@@ -1560,7 +1561,15 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
       </Dialog>
 
       {/* Client & site details modal (outbound types) */}
-      <Dialog open={!!pendingOutbound} onOpenChange={(open) => !open && setPendingOutbound(null)}>
+      <Dialog
+        open={!!pendingOutbound}
+        onOpenChange={(open) => {
+          if (!open) {
+            if (isSubmitting) return
+            setPendingOutbound(null)
+          }
+        }}
+      >
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Client & site details</DialogTitle>

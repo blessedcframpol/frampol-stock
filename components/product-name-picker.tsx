@@ -44,7 +44,8 @@ export function ProductNamePicker({
   const [addingNew, setAddingNew] = useState(() => !inCatalog && value !== "")
 
   useEffect(() => {
-    if (options.includes(value)) setAddingNew(false)
+    if (!value.trim()) setAddingNew(false)
+    else if (options.includes(value)) setAddingNew(false)
   }, [value, options])
 
   const selectValue: string | undefined = inCatalog ? value : addingNew ? ADD_NEW : undefined
@@ -59,6 +60,7 @@ export function ProductNamePicker({
         </Label>
       ) : null}
       <Select
+        key={value.trim() || "__empty__"}
         disabled={disabled}
         value={selectValue}
         onValueChange={(v) => {
