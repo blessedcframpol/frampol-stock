@@ -17,6 +17,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/
 import { CheckCircle2, AlertTriangle, Loader2, Copy, Download } from "lucide-react"
 import { PageBackLink, PageHeader } from "@/components/page-nav"
 import type { StockTakeRecord, StockTakeSnapshotItem } from "@/lib/data"
+import { buildStockTakeScopeLabel } from "@/lib/stock-take"
 import { formatDateDDMMYYYY } from "@/lib/utils"
 import { toast } from "sonner"
 import { toastFromApiErrorBody, toastFromCaughtError } from "@/lib/toast-reportable-error"
@@ -48,10 +49,11 @@ async function copySerialLinesToClipboard(serials: string[], toastLabel: string)
 }
 
 function exportStockTakeSectionCsv(
-  section: "matched" | "notInSystem" | "notScanned",
+  section: "matched" | "notInSystem" | "notScanned" | "outOfScope",
   matched: StockTakeSnapshotItem[],
   notInSystem: string[],
   notScanned: StockTakeSnapshotItem[],
+  outOfScope: StockTakeSnapshotItem[],
   completedAtIso: string
 ) {
   const rows: string[][] = []
@@ -61,6 +63,9 @@ function exportStockTakeSectionCsv(
   } else if (section === "notInSystem") {
     rows.push(["Serial", "Result"])
     for (const serial of notInSystem) rows.push([serial, "Not in system"])
+  } else if (section === "outOfScope") {
+    rows.push(["Serial", "Name", "Status", "Location"])
+    for (const item of outOfScope) rows.push([item.serialNumber, item.name, item.status, item.location])
   } else {
     rows.push(["Serial", "Name", "Status", "Location"])
     for (const item of notScanned) rows.push([item.serialNumber, item.name, item.status, item.location])
@@ -71,7 +76,13 @@ function exportStockTakeSectionCsv(
   const a = document.createElement("a")
   a.href = url
   const sectionLabel =
-    section === "matched" ? "matched" : section === "notInSystem" ? "not in system" : "not scanned"
+    section === "matched"
+      ? "matched"
+      : section === "notInSystem"
+        ? "not in system"
+        : section === "outOfScope"
+          ? "out of scope"
+          : "not scanned"
   a.download = buildCsvFilename(["Stock take history", sectionLabel], completedAtIso)
   a.click()
   URL.revokeObjectURL(url)
@@ -123,19 +134,23 @@ export function StockTakeHistoryDetailContent({ id }: { id: string }) {
 
   const s = record.resultSnapshot
   const stockTakeCompletedAt = record.completedAt
+  const scopeLabel = s.scope ? buildStockTakeScopeLabel(s.scope) : "Full warehouse (In Stock)"
+  const outOfScope = s.outOfScope ?? []
 
-  async function handleCopySection(section: "matched" | "notInSystem" | "notScanned") {
+  async function handleCopySection(section: "matched" | "notInSystem" | "notScanned" | "outOfScope") {
     const serials =
       section === "matched"
         ? s.matched.map((i) => i.serialNumber)
         : section === "notInSystem"
           ? s.notInSystem
-          : s.notScanned.map((i) => i.serialNumber)
+          : section === "outOfScope"
+            ? outOfScope.map((i) => i.serialNumber)
+            : s.notScanned.map((i) => i.serialNumber)
     await copySerialLinesToClipboard(serials, `Copied ${serials.length} serial(s)`)
   }
 
-  function handleExportSection(section: "matched" | "notInSystem" | "notScanned") {
-    exportStockTakeSectionCsv(section, s.matched, s.notInSystem, s.notScanned, stockTakeCompletedAt)
+  function handleExportSection(section: "matched" | "notInSystem" | "notScanned" | "outOfScope") {
+    exportStockTakeSectionCsv(section, s.matched, s.notInSystem, s.notScanned, outOfScope, stockTakeCompletedAt)
     toast.success("Section CSV downloaded")
   }
 
@@ -143,9 +158,15 @@ export function StockTakeHistoryDetailContent({ id }: { id: string }) {
     <div className="flex flex-col gap-4 md:gap-6 min-w-0">
       <PageHeader
         title="Stock take"
-        description={`${formatDateDDMMYYYY(record.completedAt.slice(0, 10))} at ${record.completedAt.slice(11, 16)} — read-only`}
+        description={`${scopeLabel} · ${formatDateDDMMYYYY(record.completedAt.slice(0, 10))} at ${record.completedAt.slice(11, 16)} — read-only`}
         back={{ href: "/inventory/stock-take/history", label: "History" }}
       />
+
+      {s.expectedCount != null && (
+        <p className="text-sm text-muted-foreground -mt-2">
+          Expected {s.expectedCount} item{s.expectedCount !== 1 ? "s" : ""} in scope
+        </p>
+      )}
 
       <Card>
         <CardHeader className="pb-3">
@@ -153,7 +174,7 @@ export function StockTakeHistoryDetailContent({ id }: { id: string }) {
         </CardHeader>
         <CardContent>
           <Tabs defaultValue="matched" className="w-full">
-            <TabsList className="grid w-full grid-cols-3">
+            <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 h-auto">
               <TabsTrigger value="matched" className="text-xs sm:text-sm">
                 Matched ({s.matched.length})
               </TabsTrigger>
@@ -162,6 +183,9 @@ export function StockTakeHistoryDetailContent({ id }: { id: string }) {
               </TabsTrigger>
               <TabsTrigger value="notScanned" className="text-xs sm:text-sm">
                 Not scanned ({s.notScanned.length})
+              </TabsTrigger>
+              <TabsTrigger value="outOfScope" className="text-xs sm:text-sm">
+                Out of scope ({outOfScope.length})
               </TabsTrigger>
             </TabsList>
             <TabsContent value="matched" className="mt-3">
@@ -216,7 +240,26 @@ export function StockTakeHistoryDetailContent({ id }: { id: string }) {
                 items={s.notScanned}
                 emptyIcon={<AlertTriangle className="size-6" />}
                 emptyTitle="None missing"
-                emptyDesc="Every inventory item was scanned."
+                emptyDesc="Every in-scope inventory item was scanned."
+                statusStyles={statusStyles}
+              />
+            </TabsContent>
+            <TabsContent value="outOfScope" className="mt-3">
+              <div className="mb-2 flex items-center justify-end gap-2">
+                <Button type="button" size="sm" variant="outline" onClick={() => void handleCopySection("outOfScope")}>
+                  <Copy className="size-4 mr-1" />
+                  Copy serials
+                </Button>
+                <Button type="button" size="sm" variant="outline" onClick={() => handleExportSection("outOfScope")}>
+                  <Download className="size-4 mr-1" />
+                  Export section
+                </Button>
+              </div>
+              <SnapshotResultTable
+                items={outOfScope}
+                emptyIcon={<CheckCircle2 className="size-6" />}
+                emptyTitle="None"
+                emptyDesc="All scanned serials were within this stock take scope."
                 statusStyles={statusStyles}
               />
             </TabsContent>

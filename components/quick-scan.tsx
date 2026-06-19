@@ -43,6 +43,7 @@ import { toastFromCaughtError } from "@/lib/toast-reportable-error"
 import { cn } from "@/lib/utils"
 import { isFortigateProductName, splitDelimitedValues, cloudKeysMapForSerials } from "@/lib/fortigate"
 import { useAuth } from "@/lib/auth-context"
+import { filterClientsForPicker, clientCommandItemValue } from "@/lib/search"
 import { canManageUsers } from "@/lib/permissions"
 
 /** Matches movement-utils / DB: empty vendor → General */
@@ -774,7 +775,7 @@ export function QuickScan() {
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="min-w-[300px] p-0" align="start">
-                    <Command>
+                    <Command shouldFilter={false}>
                       <CommandInput
                         placeholder="Search clients..."
                         value={outboundClientSearch}
@@ -793,21 +794,14 @@ export function QuickScan() {
                             <Plus className="h-4 w-4 mr-2" />
                             Add new client
                           </CommandItem>
-                          {clients
-                            .filter(
-                              (c) =>
-                                !outboundClientSearch.trim() ||
-                                [c.name, c.company, c.email].some((x) =>
-                                  x.toLowerCase().includes(outboundClientSearch.trim().toLowerCase())
-                                )
-                            )
-                            .map((c) => (
+                          {filterClientsForPicker(clients, outboundClientSearch).map((c) => (
                               <CommandItem
                                 key={c.id}
-                                value={c.id}
+                                value={clientCommandItemValue(c)}
                                 onSelect={() => {
                                   setOutboundClientId(c.id)
                                   setOutboundClientOpen(false)
+                                  setOutboundClientSearch("")
                                 }}
                               >
                                 {c.name} – {c.company}

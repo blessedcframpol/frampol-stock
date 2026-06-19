@@ -30,6 +30,7 @@ const statusStyles: Record<string, string> = {
   "Rental Return": "bg-blue-500/10 text-blue-600 dark:text-blue-400",
   Transfer: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
   Dispose: "bg-slate-500/10 text-slate-600 dark:text-slate-400",
+  Reversal: "bg-rose-500/10 text-rose-600 dark:text-rose-400",
 }
 
 export function TransactionsTable() {

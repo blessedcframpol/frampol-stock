@@ -557,6 +557,7 @@ export interface Database {
         Args: {
           p_batch_id: string
           p_entries: Json
+          p_reversal_transactions?: Json
         }
         Returns: Json
       }

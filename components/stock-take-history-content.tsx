@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { History, Loader2, ChevronRight, ClipboardList } from "lucide-react"
 import type { StockTakeRecord } from "@/lib/data"
+import { buildStockTakeScopeLabel } from "@/lib/stock-take"
 import { formatDateDDMMYYYY } from "@/lib/utils"
 import { toast } from "sonner"
 import { toastFromApiErrorBody, toastFromCaughtError } from "@/lib/toast-reportable-error"
@@ -88,6 +89,7 @@ export function StockTakeHistoryContent() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Date</TableHead>
+                  <TableHead>Scope</TableHead>
                   <TableHead className="text-right">Scanned</TableHead>
                   <TableHead className="text-right">Matched</TableHead>
                   <TableHead className="text-right">Not in system</TableHead>
@@ -98,6 +100,7 @@ export function StockTakeHistoryContent() {
               <TableBody>
                 {list.map((record) => {
                   const s = record.resultSnapshot
+                  const scopeLabel = s.scope ? buildStockTakeScopeLabel(s.scope) : "Full warehouse (In Stock)"
                   return (
                     <TableRow key={record.id}>
                       <TableCell className="font-medium">
@@ -105,6 +108,9 @@ export function StockTakeHistoryContent() {
                         <span className="text-muted-foreground text-xs ml-1">
                           {record.completedAt.slice(11, 16)}
                         </span>
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground max-w-[200px] truncate" title={scopeLabel}>
+                        {scopeLabel}
                       </TableCell>
                       <TableCell className="text-right">{s.scannedSerials.length}</TableCell>
                       <TableCell className="text-right">{s.matched.length}</TableCell>

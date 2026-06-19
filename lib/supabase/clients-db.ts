@@ -67,15 +67,29 @@ function getSupabaseIfConfigured() {
   }
 }
 
+const CLIENT_PAGE_SIZE = 1000
+
+async function fetchAllClientRows(supabase: NonNullable<ReturnType<typeof getSupabaseIfConfigured>>): Promise<ClientRow[]> {
+  const rows: ClientRow[] = []
+  for (let from = 0; ; from += CLIENT_PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from("clients")
+      .select("*")
+      .order("company")
+      .range(from, from + CLIENT_PAGE_SIZE - 1)
+    if (error) throw error
+    const page = data ?? []
+    rows.push(...page)
+    if (page.length < CLIENT_PAGE_SIZE) break
+  }
+  return rows
+}
+
 export async function fetchClients(): Promise<Client[]> {
   const supabase = getSupabaseIfConfigured()
   if (!supabase) return staticClients
-  const { data, error } = await supabase
-    .from("clients")
-    .select("*")
-    .order("company")
-  if (error) throw error
-  return (data ?? []).map(rowToClient)
+  const rows = await fetchAllClientRows(supabase)
+  return rows.map(rowToClient)
 }
 
 export async function fetchClientById(id: string): Promise<Client | null> {
@@ -169,12 +183,8 @@ export function useClients(): {
     }
     setIsLoading(true)
     try {
-      const { data, error: err } = await supabase
-        .from("clients")
-        .select("*")
-        .order("company")
-      if (err) throw err
-      setClients((data ?? []).map(rowToClient))
+      const rows = await fetchAllClientRows(supabase)
+      setClients(rows.map(rowToClient))
     } catch (e) {
       setError(e instanceof Error ? e : new Error(String(e)))
       setClients(staticClients)

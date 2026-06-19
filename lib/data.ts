@@ -24,6 +24,7 @@ export type TransactionType =
   | "Inspection Pass"
   | "Inspection Fail"
   | "Remediation Loaner Issue"
+  | "Reversal"
 
 export const LOCATIONS = ["Warehouse A", "Warehouse B", "Service Center", "Client Site", "Delivered"] as const
 export type Location = (typeof LOCATIONS)[number]
@@ -163,14 +164,33 @@ export interface StockTakeSnapshotItem {
   name: string
   status: string
   location: string
+  vendor?: string
+}
+
+export type StockTakeScopePreset = "full" | "vendor" | "vendor_product" | "selected" | "custom"
+
+/** Filters defining which inventory rows are expected during a stock take. */
+export interface StockTakeScope {
+  preset?: StockTakeScopePreset
+  label?: string
+  vendors?: string[]
+  productNames?: string[]
+  locations?: string[]
+  statuses?: ItemStatus[]
+  serialAllowList?: string[]
 }
 
 /** Snapshot of a completed stock take (stored in DB for read-only history) */
 export interface StockTakeSnapshot {
   scannedSerials: string[]
+  /** Scope at time of completion (optional on older records). */
+  scope?: StockTakeScope
+  expectedCount?: number
   matched: StockTakeSnapshotItem[]
   notInSystem: string[]
   notScanned: StockTakeSnapshotItem[]
+  /** Scanned serials in system but outside scope (optional on older records). */
+  outOfScope?: StockTakeSnapshotItem[]
 }
 
 /** Persisted stock take record (from API/DB) */

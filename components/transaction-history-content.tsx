@@ -42,6 +42,7 @@ import { cn } from "@/lib/utils"
 import { formatDateDDMMYYYY } from "@/lib/utils"
 import { toast } from "sonner"
 import { toastFromApiErrorBody, toastFromCaughtError } from "@/lib/toast-reportable-error"
+import { reportAppEvent } from "@/lib/report-app-event"
 import { useAuth } from "@/lib/auth-context"
 import { canExportAllTransactions, canReverseQuickScanBatches, canViewFinancials } from "@/lib/permissions"
 import { isQuickScanStockReversibleMovement } from "@/lib/quick-scan-reversal-inventory"
@@ -104,17 +105,21 @@ export function TransactionHistoryContent() {
     return [...batches].filter((entry) => {
       const dateStr = formatDateDDMMYYYY(entry.date).toLowerCase()
       const movement = (entry.movementType ?? "").toLowerCase()
+      const originalMovement = (entry.originalMovementType ?? "").toLowerCase()
       const product = entry.productLabel.toLowerCase()
       const client = entry.clientDisplay.toLowerCase()
       const reason = (entry.reversalReason ?? "").toLowerCase()
+      const reversesBatch = (entry.reversesBatchId ?? "").toLowerCase()
       const serialMatch = entry.serials.some((s) => s.toLowerCase().includes(q))
       const inv = (entry.invoiceNumber ?? "").toLowerCase()
       return (
         dateStr.includes(q) ||
         movement.includes(q) ||
+        originalMovement.includes(q) ||
         product.includes(q) ||
         client.includes(q) ||
         reason.includes(q) ||
+        reversesBatch.includes(q) ||
         serialMatch ||
         inv.includes(q)
       )
@@ -149,6 +154,17 @@ export function TransactionHistoryContent() {
     const reason = reverseReason.trim()
     if (reason.length < MIN_REASON_LENGTH) {
       toast.error(`Please enter a reason (at least ${MIN_REASON_LENGTH} characters).`)
+      void reportAppEvent({
+        severity: "warn",
+        source: "client",
+        context: "batch_reversal_validation",
+        message: "Batch reversal blocked: reason too short",
+        metadata: {
+          batchId: reverseTarget.reverseBatchId,
+          reasonLength: reason.length,
+          minReasonLength: MIN_REASON_LENGTH,
+        },
+      })
       return
     }
     setReversingBatchKey(reverseTarget.reverseBatchId)
@@ -325,7 +341,12 @@ export function TransactionHistoryContent() {
                           <TableCell className="text-sm text-muted-foreground">
                             <div className="flex flex-col gap-1 items-start">
                               <span>{entry.movementType ?? "—"}</span>
-                              {entry.isReversed && (
+                              {entry.movementType === "Reversal" && entry.originalMovementType && (
+                                <Badge variant="outline" className="text-[10px] font-normal">
+                                  of {entry.originalMovementType}
+                                </Badge>
+                              )}
+                              {entry.isReversed && entry.movementType !== "Reversal" && (
                                 <Badge variant="secondary" className="text-[10px] font-normal">
                                   Reversed
                                 </Badge>
@@ -384,7 +405,9 @@ export function TransactionHistoryContent() {
           <DialogHeader>
             <DialogTitle>
               {viewingBatch
-                ? `${viewingBatch.movementType ?? "—"} — ${viewingBatch.productLabel}`
+                ? viewingBatch.movementType === "Reversal" && viewingBatch.originalMovementType
+                  ? `Reversal of ${viewingBatch.originalMovementType} — ${viewingBatch.productLabel}`
+                  : `${viewingBatch.movementType ?? "—"} — ${viewingBatch.productLabel}`
                 : "Batch items"}
             </DialogTitle>
             {viewingBatch && (
@@ -476,13 +499,21 @@ export function TransactionHistoryContent() {
               )}
               {viewingBatch.notesSummary && (
                 <div className="space-y-0.5 min-w-0 sm:col-span-2 pt-1 border-t border-border">
-                  <p className="text-xs text-muted-foreground font-medium">Notes</p>
+                  <p className="text-xs text-muted-foreground font-medium">
+                    {viewingBatch.movementType === "Reversal" ? "Reversal reason" : "Notes"}
+                  </p>
                   <p className="text-sm text-foreground whitespace-pre-wrap break-words">{viewingBatch.notesSummary}</p>
+                </div>
+              )}
+              {viewingBatch.movementType === "Reversal" && viewingBatch.reversesBatchId && (
+                <div className="space-y-0.5 min-w-0 sm:col-span-2">
+                  <p className="text-xs text-muted-foreground font-medium">Reversed batch</p>
+                  <p className="text-sm font-mono text-foreground break-all">{viewingBatch.reversesBatchId}</p>
                 </div>
               )}
             </div>
           )}
-          {viewingBatch && viewingBatch.isReversed && (
+          {viewingBatch && viewingBatch.isReversed && viewingBatch.movementType !== "Reversal" && (
             <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm space-y-1">
               <p className="font-medium text-foreground">Reversed</p>
               {viewingBatch.reversedAt && (
@@ -561,8 +592,10 @@ export function TransactionHistoryContent() {
             <DialogTitle>Reverse batch</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            For Sale, POC Out, Rentals, and Dispose, items return to{" "}
-            <span className="text-foreground font-medium">In stock</span> at the location you choose. Transfer reversals put each item at the transfer&apos;s origin when it matches; otherwise pick a fallback below.
+            For Inbound, new serials are removed from inventory and existing units return to their prior status
+            (Maintenance or RMA Hold). For Sale, POC Out, Rentals, and Dispose, items return to{" "}
+            <span className="text-foreground font-medium">In stock</span> at the location you choose. Transfer
+            reversals put each item at the transfer&apos;s origin when it matches; otherwise pick a fallback below.
           </p>
           <div className="space-y-2">
             <Label>Return to location</Label>

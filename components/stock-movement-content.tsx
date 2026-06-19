@@ -65,6 +65,7 @@ import {
   NEW_CLIENT_SELECT,
   TRANSACTION_TYPE_CHOICES,
 } from "@/lib/stock-movement-form-logic"
+import { filterClientsForPicker, clientCommandItemValue } from "@/lib/search"
 import { PageHeader } from "@/components/page-nav"
 
 const transactionTypes = TRANSACTION_TYPE_CHOICES
@@ -1133,20 +1134,10 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
                                 <Plus className="h-4 w-4 mr-2" />
                                 Add new client…
                               </CommandItem>
-                              {sortedClients
-                                .filter(
-                                  (c) =>
-                                    !mainClientSearch.trim() ||
-                                    [c.name, c.company, c.email].some(
-                                      (x) =>
-                                        typeof x === "string" &&
-                                        x.toLowerCase().includes(mainClientSearch.trim().toLowerCase())
-                                    )
-                                )
-                                .map((c) => (
+                              {filterClientsForPicker(sortedClients, mainClientSearch).map((c) => (
                                   <CommandItem
                                     key={c.id}
-                                    value={c.id}
+                                    value={clientCommandItemValue(c)}
                                     onSelect={() => {
                                       setClientId(c.id)
                                       setMainClientOpen(false)
@@ -1617,18 +1608,10 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
                             <Plus className="h-4 w-4 mr-2" />
                             Add new client
                           </CommandItem>
-                          {sortedClients
-                            .filter(
-                              (c) =>
-                                !outboundClientSearch.trim() ||
-                                [c.name, c.company, c.email].some(
-                                  (x) => typeof x === "string" && x.toLowerCase().includes(outboundClientSearch.trim().toLowerCase())
-                                )
-                            )
-                            .map((c) => (
+                          {filterClientsForPicker(sortedClients, outboundClientSearch).map((c) => (
                               <CommandItem
                                 key={c.id}
-                                value={c.id}
+                                value={clientCommandItemValue(c)}
                                 onSelect={() => {
                                   setOutboundClientId(c.id)
                                   setOutboundClientOpen(false)

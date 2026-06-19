@@ -212,7 +212,7 @@ export function SearchResultsContent() {
                       {results.clients.map((client) => (
                         <li key={client.id}>
                           <Link
-                            href="/clients"
+                            href={`/clients/${client.id}`}
                             className="flex items-center justify-between gap-4 px-4 py-3 hover:bg-muted/50 transition-colors text-left"
                           >
                             <div className="min-w-0 flex-1">

@@ -57,6 +57,7 @@ export function scheduleApiErrorAppEventLog(input: {
   message: string
   detail?: string | undefined
   logLabel?: string | undefined
+  metadata?: Record<string, unknown> | undefined
 }): void {
   if (input.status < 400) return
   const label = input.logLabel ?? ""
@@ -77,7 +78,11 @@ export function scheduleApiErrorAppEventLog(input: {
         context: label ? label.slice(0, 512) : "api_error",
         message: input.message.slice(0, 8000),
         detail: input.detail ?? null,
-        metadata: { httpStatus: input.status, requestClass: input.status >= 500 ? "server" : "client" } as Json,
+        metadata: {
+          httpStatus: input.status,
+          requestClass: input.status >= 500 ? "server" : "client",
+          ...(input.metadata ?? {}),
+        } as Json,
         requestId: input.requestId,
         userId: user.id,
       })

@@ -25,10 +25,12 @@ function causeToDetail(cause: unknown): string | undefined {
 export function apiErrorResponse(
   status: number,
   message: string,
-  options?: { cause?: unknown; logLabel?: string }
+  options?: { cause?: unknown; logLabel?: string; detail?: string; metadata?: Record<string, unknown> }
 ): NextResponse<ApiErrorPayload> {
   const requestId = randomUUID()
-  const detail = options?.cause != null ? causeToDetail(options.cause) : undefined
+  const detail =
+    options?.detail?.trim() ||
+    (options?.cause != null ? causeToDetail(options.cause) : undefined)
   const payload: ApiErrorPayload = {
     error: message,
     requestId,
@@ -45,6 +47,7 @@ export function apiErrorResponse(
     message,
     detail,
     logLabel: options?.logLabel,
+    metadata: options?.metadata,
   })
   return NextResponse.json(payload, { status })
 }
@@ -55,11 +58,11 @@ export function apiErrorResponse(
 export function apiClientError(
   status: number,
   message: string,
-  options?: { log?: "warn" | "error" | "none"; logLabel?: string }
+  options?: { log?: "warn" | "error" | "none"; logLabel?: string; detail?: string; metadata?: Record<string, unknown> }
 ): NextResponse<ApiErrorPayload> {
   const requestId = randomUUID()
   const log = options?.log ?? "warn"
-  const label = options?.logLabel ?? message
+  const label = options?.detail?.trim() || options?.logLabel || message
   if (log === "warn") console.warn(`[${requestId}] HTTP ${status}:`, label)
   else if (log === "error") console.error(`[${requestId}] HTTP ${status}:`, label)
   if (log !== "none") {
@@ -69,7 +72,15 @@ export function apiClientError(
       message,
       detail: label,
       logLabel: options?.logLabel,
+      metadata: options?.metadata,
     })
   }
-  return NextResponse.json({ error: message, requestId }, { status })
+  return NextResponse.json(
+    {
+      error: message,
+      requestId,
+      ...(options?.detail?.trim() && options.detail.trim() !== message ? { detail: options.detail.trim() } : {}),
+    },
+    { status }
+  )
 }

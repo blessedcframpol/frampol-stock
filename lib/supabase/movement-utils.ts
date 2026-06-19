@@ -287,7 +287,7 @@ export function computeMovementResult(
           authorisedBy: undefined,
           batchId: batchId ?? undefined,
           deliveryNoteUrl: deliveryNoteUrl ?? undefined,
-          metadata: movementMetadata,
+          metadata: mergeRecordMeta(movementMetadata, { inboundCreated: true }),
         })
       } else if (type === "Decommissioned" && inboundCreateDefaults) {
         const d = inboundCreateDefaults
@@ -365,6 +365,15 @@ export function computeMovementResult(
         previousAssignedTo: it.assignedTo ?? null,
         previousPocOutDate: it.pocOutDate ?? null,
         previousReturnDate: it.returnDate ?? null,
+      })
+    }
+    if (type === "Inbound") {
+      txnMetadata = mergeRecordMeta(movementMetadata, {
+        inboundCreated: false,
+        previousStatus: it.status,
+        previousLocation: it.location,
+        previousClient: it.client ?? null,
+        previousAssignedTo: it.assignedTo ?? null,
       })
     }
     if (type === "Inspection Pass") {

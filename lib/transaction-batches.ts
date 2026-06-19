@@ -16,6 +16,10 @@ export type TransactionBatchSummary = {
   isReversed: boolean
   reversalReason?: string
   reversedAt?: string
+  /** When movementType is Reversal: the batch that was undone. */
+  reversesBatchId?: string
+  /** When movementType is Reversal: original movement type (Inbound, Sale, etc.). */
+  originalMovementType?: TransactionType
   invoiceNumber?: string
   hasDeliveryNote: boolean
   /** First delivery note URL in batch (Inbound), if any */
@@ -99,6 +103,51 @@ function clientDisplayFromTransactions(txns: Transaction[]): string {
   return c && c.length > 0 ? c : "—"
 }
 
+type ReversalTxnMeta = {
+  reversedBatchId?: string
+  originalMovementType?: string
+  returnLocation?: string
+  serialNumbers?: string[]
+  itemCount?: number
+}
+
+function parseReversalTxnMeta(metadata: Transaction["metadata"]): ReversalTxnMeta {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return {}
+  const m = metadata as Record<string, unknown>
+  const serialNumbers = Array.isArray(m.serialNumbers)
+    ? m.serialNumbers.filter((s): s is string => typeof s === "string" && s.trim().length > 0)
+    : undefined
+  return {
+    reversedBatchId: typeof m.reversedBatchId === "string" ? m.reversedBatchId : undefined,
+    originalMovementType:
+      typeof m.originalMovementType === "string" ? m.originalMovementType : undefined,
+    returnLocation: typeof m.returnLocation === "string" ? m.returnLocation : undefined,
+    serialNumbers,
+    itemCount: typeof m.itemCount === "number" ? m.itemCount : undefined,
+  }
+}
+
+function asTransactionType(value: string | undefined): TransactionType | undefined {
+  if (!value) return undefined
+  const allowed: TransactionType[] = [
+    "Inbound",
+    "Sale",
+    "POC Out",
+    "POC Return",
+    "Rental Return",
+    "Sale Return",
+    "Transfer",
+    "Dispose",
+    "Rentals",
+    "Decommissioned",
+    "Inspection Pass",
+    "Inspection Fail",
+    "Remediation Loaner Issue",
+    "Reversal",
+  ]
+  return allowed.includes(value as TransactionType) ? (value as TransactionType) : undefined
+}
+
 /**
  * Group flat transaction rows into batch summaries (same rules as client order grouping).
  */
@@ -121,6 +170,16 @@ export function groupTransactionsIntoBatches(
     const first = sorted[0]!
     const batchId = first.batchId ?? null
     const rev = batchId ? reversalByBatchId.get(batchId) : undefined
+    const reversalMeta = first.type === "Reversal" ? parseReversalTxnMeta(first.metadata) : {}
+    const originalMovementType = asTransactionType(reversalMeta.originalMovementType)
+    const reversalSerials =
+      first.type === "Reversal" && reversalMeta.serialNumbers?.length
+        ? [...reversalMeta.serialNumbers].sort()
+        : sorted.map((t) => t.serialNumber)
+    const reversalCount =
+      first.type === "Reversal"
+        ? (reversalMeta.itemCount ?? reversalSerials.length)
+        : sorted.length
     out.push({
       batchKey,
       reverseBatchId: batchId,
@@ -128,11 +187,14 @@ export function groupTransactionsIntoBatches(
       movementType: first.type,
       productLabel: productLabelFromTransactions(sorted),
       clientDisplay: clientDisplayFromTransactions(sorted),
-      count: sorted.length,
-      serials: sorted.map((t) => t.serialNumber),
+      count: reversalCount,
+      serials: reversalSerials,
       isReversed: !!rev,
-      reversalReason: rev?.reversalReason,
+      reversalReason:
+        first.type === "Reversal" ? notesSummaryFromTransactions(sorted) ?? rev?.reversalReason : rev?.reversalReason,
       reversedAt: rev?.reversedAt,
+      reversesBatchId: reversalMeta.reversedBatchId,
+      originalMovementType,
       invoiceNumber: invoiceNumberFromTransactions(sorted),
       hasDeliveryNote: sorted.some((t) => !!t.deliveryNoteUrl),
       deliveryNoteUrl: sorted.find((t) => t.deliveryNoteUrl)?.deliveryNoteUrl,

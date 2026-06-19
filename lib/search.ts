@@ -36,8 +36,21 @@ export function searchClients(clients: Client[], query: string): Client[] {
       matchQuery(c.name, q) ||
       matchQuery(c.company, q) ||
       matchQuery(c.email, q) ||
-      matchQuery(c.phone, q)
+      matchQuery(c.phone, q) ||
+      matchQuery(c.id, q)
   )
+}
+
+/** Client comboboxes in stock movement / quick scan (empty query → full list). */
+export function filterClientsForPicker(clients: Client[], query: string): Client[] {
+  const q = query.trim()
+  if (!q) return clients
+  return searchClients(clients, q)
+}
+
+/** cmdk matches against `value`; include searchable fields, not id alone. */
+export function clientCommandItemValue(client: Client): string {
+  return [client.name, client.company, client.email, client.phone, client.id].filter(Boolean).join(" ")
 }
 
 export function searchUsers(users: AppUser[], query: string): AppUser[] {

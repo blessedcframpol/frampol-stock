@@ -287,8 +287,14 @@ interface InventoryStoreValue {
   trashedInventory: InventoryItem[]
   refetchTrashed: () => Promise<void>
   addItem: (item: Omit<InventoryItem, "id">) => Promise<InventoryItem>
+  reassignInventoryItems: (params: {
+    itemIds: string[]
+    targetGroupName: string
+    targetVendor?: string
+  }) => Promise<{ ok: boolean; updated: number; error?: string }>
   reassignInventoryGroup: (params: {
     sourceGroupName: string
+    sourceVendor?: string
     targetGroupName?: string
     targetVendor?: string
   }) => Promise<{ ok: boolean; updated: number; error?: string }>
@@ -824,17 +830,19 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
     [supabase]
   )
 
-  const reassignInventoryGroup = useCallback(
+  const reassignInventoryItems = useCallback(
     async (params: {
-      sourceGroupName: string
-      targetGroupName?: string
+      itemIds: string[]
+      targetGroupName: string
       targetVendor?: string
     }): Promise<{ ok: boolean; updated: number; error?: string }> => {
-      const source = params.sourceGroupName.trim()
-      if (!source) return { ok: false, updated: 0, error: "Source group is required" }
-      const targetName = params.targetGroupName?.trim() || source
+      const targetName = params.targetGroupName.trim()
+      if (!targetName) return { ok: false, updated: 0, error: "Target group name is required" }
       const targetVendor = params.targetVendor?.trim() || "General"
-      const affected = inventory.filter((item) => item.name === source)
+      const idSet = new Set(params.itemIds.filter(Boolean))
+      if (idSet.size === 0) return { ok: false, updated: 0, error: "No items selected" }
+
+      const affected = inventory.filter((item) => idSet.has(item.id))
       if (affected.length === 0) return { ok: true, updated: 0 }
 
       let updatedItems = affected.map((item) => ({
@@ -859,13 +867,40 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
         for (const item of updatedItems) {
           const { error } = await supabase.from("inventory_items").update(inventoryItemToRow(item)).eq("id", item.id)
           if (error) {
-            return { ok: false, updated: 0, error: error.message || "Failed to update inventory group" }
+            return { ok: false, updated: 0, error: error.message || "Failed to update inventory item(s)" }
           }
         }
       }
       return { ok: true, updated: updatedItems.length }
     },
     [inventory, supabase]
+  )
+
+  const reassignInventoryGroup = useCallback(
+    async (params: {
+      sourceGroupName: string
+      sourceVendor?: string
+      targetGroupName?: string
+      targetVendor?: string
+    }): Promise<{ ok: boolean; updated: number; error?: string }> => {
+      const source = params.sourceGroupName.trim()
+      if (!source) return { ok: false, updated: 0, error: "Source group is required" }
+      const sourceVendor = params.sourceVendor?.trim()
+      const itemIds = inventory
+        .filter((item) => {
+          if (item.name !== source) return false
+          if (!sourceVendor) return true
+          const v = item.vendor?.trim() ? item.vendor.trim() : "General"
+          return v === sourceVendor
+        })
+        .map((item) => item.id)
+      return reassignInventoryItems({
+        itemIds,
+        targetGroupName: params.targetGroupName?.trim() || source,
+        targetVendor: params.targetVendor,
+      })
+    },
+    [inventory, reassignInventoryItems]
   )
 
   const getAlerts = useCallback(
@@ -979,6 +1014,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
       trashedInventory,
       refetchTrashed,
       addItem,
+      reassignInventoryItems,
       reassignInventoryGroup,
       undoTransaction,
       reassignTransaction,
@@ -997,6 +1033,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
       trashedInventory,
       refetchTrashed,
       addItem,
+      reassignInventoryItems,
       reassignInventoryGroup,
       undoTransaction,
       reassignTransaction,

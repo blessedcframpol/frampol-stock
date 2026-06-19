@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect, useMemo, useRef } from "react"
+import { useSearchParams } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
@@ -29,9 +30,10 @@ import {
   Loader2,
   History,
 } from "lucide-react"
-import type { InventoryItem, ItemStatus } from "@/lib/data"
+import type { InventoryItem, ItemStatus, StockTakeScopePreset } from "@/lib/data"
 import { useInventoryStore } from "@/lib/inventory-store"
 import { compareStockTake, buildStockTakeSnapshot } from "@/lib/stock-take"
+import { StockTakeScopePanel, useStockTakeScope } from "@/components/stock-take-scope-panel"
 import Link from "next/link"
 import { PageHeader } from "@/components/page-nav"
 import { toast } from "sonner"
@@ -39,6 +41,14 @@ import { toastFromApiErrorBody, toastFromCaughtError } from "@/lib/toast-reporta
 import { buildCsvFilename, cn } from "@/lib/utils"
 
 const STOCK_TAKE_STORAGE_KEY = "fram-stock-take-scans"
+const STOCK_TAKE_SCOPE_STORAGE_KEY = "fram-stock-take-scope"
+
+type ScopeSession = {
+  preset: StockTakeScopePreset
+  vendor: string
+  productName: string
+  serialAllowList: string[]
+}
 
 const statusStyles: Record<ItemStatus, string> = {
   "In Stock": "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
@@ -70,10 +80,40 @@ function saveSessionToStorage(value: string) {
   }
 }
 
+function loadScopeSession(): ScopeSession | null {
+  if (typeof window === "undefined") return null
+  try {
+    const raw = sessionStorage.getItem(STOCK_TAKE_SCOPE_STORAGE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as ScopeSession
+    if (!parsed || typeof parsed !== "object") return null
+    return {
+      preset: parsed.preset ?? "full",
+      vendor: parsed.vendor ?? "",
+      productName: parsed.productName ?? "",
+      serialAllowList: Array.isArray(parsed.serialAllowList) ? parsed.serialAllowList : [],
+    }
+  } catch {
+    return null
+  }
+}
+
+function saveScopeSession(session: ScopeSession) {
+  if (typeof window === "undefined") return
+  try {
+    sessionStorage.setItem(STOCK_TAKE_SCOPE_STORAGE_KEY, JSON.stringify(session))
+  } catch {
+    // ignore
+  }
+}
+
+type ExportSection = "matched" | "notInSystem" | "notScanned" | "outOfScope"
+
 function exportStockTakeCsv(
   matched: InventoryItem[],
   notInSystem: string[],
-  notScanned: InventoryItem[]
+  notScanned: InventoryItem[],
+  outOfScope: InventoryItem[]
 ) {
   const rows: string[][] = []
   rows.push(["Result", "Serial", "Name", "Status", "Location"])
@@ -86,6 +126,9 @@ function exportStockTakeCsv(
   for (const item of notScanned) {
     rows.push(["Not scanned", item.serialNumber, item.name, item.status, item.location])
   }
+  for (const item of outOfScope) {
+    rows.push(["Out of scope", item.serialNumber, item.name, item.status, item.location])
+  }
   const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n")
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" })
   const url = URL.createObjectURL(blob)
@@ -97,10 +140,11 @@ function exportStockTakeCsv(
 }
 
 function exportStockTakeSectionCsv(
-  section: "matched" | "notInSystem" | "notScanned",
+  section: ExportSection,
   matched: InventoryItem[],
   notInSystem: string[],
-  notScanned: InventoryItem[]
+  notScanned: InventoryItem[],
+  outOfScope: InventoryItem[]
 ) {
   const rows: string[][] = []
   if (section === "matched") {
@@ -109,6 +153,9 @@ function exportStockTakeSectionCsv(
   } else if (section === "notInSystem") {
     rows.push(["Serial", "Result"])
     for (const serial of notInSystem) rows.push([serial, "Not in system"])
+  } else if (section === "outOfScope") {
+    rows.push(["Serial", "Name", "Status", "Location"])
+    for (const item of outOfScope) rows.push([item.serialNumber, item.name, item.status, item.location])
   } else {
     rows.push(["Serial", "Name", "Status", "Location"])
     for (const item of notScanned) rows.push([item.serialNumber, item.name, item.status, item.location])
@@ -119,7 +166,13 @@ function exportStockTakeSectionCsv(
   const a = document.createElement("a")
   a.href = url
   const sectionLabel =
-    section === "matched" ? "matched" : section === "notInSystem" ? "not in system" : "not scanned"
+    section === "matched"
+      ? "matched"
+      : section === "notInSystem"
+        ? "not in system"
+        : section === "outOfScope"
+          ? "out of scope"
+          : "not scanned"
   a.download = buildCsvFilename(["Stock take", sectionLabel], new Date().toISOString())
   a.click()
   URL.revokeObjectURL(url)
@@ -141,8 +194,70 @@ async function copySerialLinesToClipboard(serials: string[], toastLabel: string)
 
 export function StockTakeContent() {
   const { inventory } = useInventoryStore()
+  const searchParams = useSearchParams()
+  const scopeInitDone = useRef(false)
+
   const [serialNumbers, setSerialNumbers] = useState(() => loadSessionFromStorage())
   const [hasCompared, setHasCompared] = useState(false)
+  const [scopePreset, setScopePreset] = useState<StockTakeScopePreset>("full")
+  const [scopeVendor, setScopeVendor] = useState("")
+  const [scopeProduct, setScopeProduct] = useState("")
+  const [serialAllowList, setSerialAllowList] = useState<string[]>([])
+
+  const { scope, scopeLabel } = useStockTakeScope({
+    inventory,
+    preset: scopePreset,
+    vendor: scopeVendor,
+    productName: scopeProduct,
+    serialAllowList,
+  })
+
+  useEffect(() => {
+    if (scopeInitDone.current) return
+    scopeInitDone.current = true
+
+    const vendorParam = searchParams.get("vendor")?.trim()
+    const productParam = searchParams.get("product")?.trim()
+    const serialsParam = searchParams.get("serials")?.trim()
+
+    if (serialsParam) {
+      const list = serialsParam
+        .split(",")
+        .map((s) => decodeURIComponent(s.trim()))
+        .filter(Boolean)
+      setScopePreset("selected")
+      setSerialAllowList(list)
+      return
+    }
+    if (vendorParam && productParam) {
+      setScopePreset("vendor_product")
+      setScopeVendor(decodeURIComponent(vendorParam))
+      setScopeProduct(decodeURIComponent(productParam))
+      return
+    }
+    if (vendorParam) {
+      setScopePreset("vendor")
+      setScopeVendor(decodeURIComponent(vendorParam))
+      return
+    }
+
+    const saved = loadScopeSession()
+    if (saved) {
+      setScopePreset(saved.preset)
+      setScopeVendor(saved.vendor)
+      setScopeProduct(saved.productName)
+      setSerialAllowList(saved.serialAllowList)
+    }
+  }, [searchParams])
+
+  useEffect(() => {
+    saveScopeSession({
+      preset: scopePreset,
+      vendor: scopeVendor,
+      productName: scopeProduct,
+      serialAllowList,
+    })
+  }, [scopePreset, scopeVendor, scopeProduct, serialAllowList])
 
   const serialList = useMemo(
     () =>
@@ -160,9 +275,19 @@ export function StockTakeContent() {
   }, [serialNumbers])
 
   const result = useMemo(
-    () => (uniqueSerials.length > 0 ? compareStockTake(uniqueSerials, inventory) : null),
-    [uniqueSerials, inventory]
+    () => (uniqueSerials.length > 0 ? compareStockTake(uniqueSerials, inventory, scope) : null),
+    [uniqueSerials, inventory, scope]
   )
+
+  function handleScopeVendorChange(next: string) {
+    setScopeVendor(next)
+    if (scopeProduct.trim()) {
+      const names = inventory
+        .filter((i) => (i.vendor?.trim() ? i.vendor.trim() : "General") === next && i.status === "In Stock")
+        .map((i) => i.name)
+      if (!names.includes(scopeProduct)) setScopeProduct("")
+    }
+  }
 
   function handleSerialChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
     const v = e.target.value
@@ -194,7 +319,7 @@ export function StockTakeContent() {
     if (!result || uniqueSerials.length === 0) return
     setIsSaving(true)
     try {
-      const snapshot = buildStockTakeSnapshot(uniqueSerials, result)
+      const snapshot = buildStockTakeSnapshot(uniqueSerials, result, scope)
       const res = await fetch("/api/stock-takes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -227,24 +352,32 @@ export function StockTakeContent() {
 
   const handleExport = () => {
     if (!result) return
-    exportStockTakeCsv(result.matched, result.notInSystem, result.notScanned)
+    exportStockTakeCsv(result.matched, result.notInSystem, result.notScanned, result.outOfScope)
     toast.success("CSV downloaded")
   }
 
-  async function handleCopySection(section: "matched" | "notInSystem" | "notScanned") {
+  async function handleCopySection(section: ExportSection) {
     if (!result) return
     const serials =
       section === "matched"
         ? result.matched.map((i) => i.serialNumber)
         : section === "notInSystem"
           ? result.notInSystem
-          : result.notScanned.map((i) => i.serialNumber)
+          : section === "outOfScope"
+            ? result.outOfScope.map((i) => i.serialNumber)
+            : result.notScanned.map((i) => i.serialNumber)
     await copySerialLinesToClipboard(serials, `Copied ${serials.length} serial(s)`)
   }
 
-  function handleExportSection(section: "matched" | "notInSystem" | "notScanned") {
+  function handleExportSection(section: ExportSection) {
     if (!result) return
-    exportStockTakeSectionCsv(section, result.matched, result.notInSystem, result.notScanned)
+    exportStockTakeSectionCsv(
+      section,
+      result.matched,
+      result.notInSystem,
+      result.notScanned,
+      result.outOfScope
+    )
     toast.success("Section CSV downloaded")
   }
 
@@ -252,7 +385,7 @@ export function StockTakeContent() {
     <div className="flex flex-col gap-4 md:gap-6 min-w-0">
       <PageHeader
         title="Stock take"
-        description="Scan or paste serials, then compare with current inventory to find matches, unknown items, and missing counts."
+        description="Choose a scope, scan serials, then compare against expected inventory to find matches, unknown items, and missing counts."
         actions={
           <Button variant="outline" size="sm" className="gap-2 shrink-0" asChild>
             <Link href="/inventory/stock-take/history">
@@ -261,6 +394,17 @@ export function StockTakeContent() {
             </Link>
           </Button>
         }
+      />
+
+      <StockTakeScopePanel
+        inventory={inventory}
+        preset={scopePreset}
+        onPresetChange={setScopePreset}
+        vendor={scopeVendor}
+        onVendorChange={handleScopeVendorChange}
+        productName={scopeProduct}
+        onProductNameChange={setScopeProduct}
+        serialAllowList={serialAllowList}
       />
 
       <div className="grid gap-6 lg:grid-cols-2">
@@ -321,7 +465,7 @@ export function StockTakeContent() {
               Compare with system
             </Button>
             <p className="text-[11px] text-muted-foreground">
-              Paste or type serial numbers (e.g. from barcode scanner). Use commas or new lines; pasted lines are auto-separated. Then click Compare to see matched, not in system, and not scanned.
+              Scope: {scopeLabel}. Paste or type serial numbers, then compare to see matched, not in system, not scanned, and out-of-scope items.
             </p>
           </CardContent>
         </Card>
@@ -362,7 +506,7 @@ export function StockTakeContent() {
               </Empty>
             ) : (
               <Tabs defaultValue="matched" className="w-full">
-                <TabsList className="grid w-full grid-cols-3">
+                <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 h-auto">
                   <TabsTrigger value="matched" className="text-xs sm:text-sm">
                     Matched ({result.matched.length})
                   </TabsTrigger>
@@ -371,6 +515,9 @@ export function StockTakeContent() {
                   </TabsTrigger>
                   <TabsTrigger value="notScanned" className="text-xs sm:text-sm">
                     Not scanned ({result.notScanned.length})
+                  </TabsTrigger>
+                  <TabsTrigger value="outOfScope" className="text-xs sm:text-sm">
+                    Out of scope ({result.outOfScope.length})
                   </TabsTrigger>
                 </TabsList>
                 <TabsContent value="matched" className="mt-3">
@@ -425,7 +572,26 @@ export function StockTakeContent() {
                     items={result.notScanned}
                     emptyIcon={<AlertTriangle className="size-6" />}
                     emptyTitle="None missing"
-                    emptyDesc="Every inventory item was scanned."
+                    emptyDesc="Every in-scope inventory item was scanned."
+                    statusStyles={statusStyles}
+                  />
+                </TabsContent>
+                <TabsContent value="outOfScope" className="mt-3">
+                  <div className="mb-2 flex items-center justify-end gap-2">
+                    <Button type="button" size="sm" variant="outline" onClick={() => void handleCopySection("outOfScope")}>
+                      <Copy className="size-4 mr-1" />
+                      Copy serials
+                    </Button>
+                    <Button type="button" size="sm" variant="outline" onClick={() => handleExportSection("outOfScope")}>
+                      <Download className="size-4 mr-1" />
+                      Export section
+                    </Button>
+                  </div>
+                  <ResultTable
+                    items={result.outOfScope}
+                    emptyIcon={<CheckCircle2 className="size-6" />}
+                    emptyTitle="None"
+                    emptyDesc="All scanned serials were within this stock take scope."
                     statusStyles={statusStyles}
                   />
                 </TabsContent>

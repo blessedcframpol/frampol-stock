@@ -107,7 +107,7 @@ export function SearchSuggestions({
             {cli.map((client) => (
               <li key={client.id}>
                 <Link
-                  href="/clients"
+                  href={`/clients/${client.id}`}
                   className={cn(
                     "flex items-center justify-between gap-2 rounded-md transition-colors text-left",
                     compact

@@ -65,7 +65,7 @@ CREATE TABLE IF NOT EXISTS public.transactions (
   CONSTRAINT transactions_type_check
     CHECK (type IN (
       'Inbound', 'Sale', 'POC Out', 'POC Return', 'Rental Return', 'Transfer', 'Dispose', 'Rentals', 'Sale Return',
-      'Decommissioned', 'Inspection Pass', 'Inspection Fail', 'Remediation Loaner Issue'
+      'Inspection Pass', 'Inspection Fail', 'Remediation Loaner Issue', 'Reversal'
     ))
 );
 

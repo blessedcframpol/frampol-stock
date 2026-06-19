@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useMemo, useEffect } from "react"
+import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import {
   Table,
@@ -51,6 +52,8 @@ import { toast } from "sonner"
 import { InventoryItemActionsMenu } from "@/components/inventory-item-actions"
 import { Checkbox } from "@/components/ui/checkbox"
 import { RecordStockMovementDialog } from "@/components/record-stock-movement-dialog"
+import { MoveItemsDialog } from "@/components/move-items-dialog"
+import { buildStockTakeUrl } from "@/lib/stock-take"
 import { PageBackLink, pageTitleClass } from "@/components/page-nav"
 
 const statusStyles: Record<ItemStatus, string> = {
@@ -109,7 +112,7 @@ const VENDOR_LABELS: Record<string, string> = {
 
 export function InventoryContent() {
   const searchParams = useSearchParams()
-  const { inventory, transactions, addItem, reassignInventoryGroup } = useInventoryStore()
+  const { inventory, transactions, addItem } = useInventoryStore()
   const onHandInventory = useMemo(() => filterOnHandInventory(inventory), [inventory])
   const { role } = useAuth()
   const isAdmin = canEditInventory(role)
@@ -136,9 +139,8 @@ export function InventoryContent() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
   const [movementDialogOpen, setMovementDialogOpen] = useState(false)
   const [movementItems, setMovementItems] = useState<InventoryItem[]>([])
-  const [moveGroupOpen, setMoveGroupOpen] = useState(false)
-  const [moveTargetGroupName, setMoveTargetGroupName] = useState("")
-  const [moveTargetVendor, setMoveTargetVendor] = useState("General")
+  const [moveItemsOpen, setMoveItemsOpen] = useState(false)
+  const [moveItems, setMoveItems] = useState<InventoryItem[]>([])
 
   useEffect(() => {
     if (groupFromUrl?.trim()) setSelectedGroupName(groupFromUrl.trim())
@@ -297,20 +299,20 @@ export function InventoryContent() {
     </Card>
   )
 
-  async function handleMoveGroup() {
-    if (!selectedGroup?.name) return
-    const result = await reassignInventoryGroup({
-      sourceGroupName: selectedGroup.name,
-      targetGroupName: moveTargetGroupName.trim() || selectedGroup.name,
-      targetVendor: moveTargetVendor.trim() || "General",
-    })
-    if (!result.ok) {
-      toast.error(result.error ?? "Failed to move group")
+  function openMoveItems(items: InventoryItem[]) {
+    if (items.length === 0) {
+      toast.error("Select at least one item")
       return
     }
-    toast.success(`Moved ${result.updated} item(s)`)
-    setMoveGroupOpen(false)
-    setMoveTargetGroupName("")
+    setMoveItems(items)
+    setMoveItemsOpen(true)
+  }
+
+  function itemsForGroupMove(group: ItemGroup): InventoryItem[] {
+    if (selectedVendor && selectedVendor !== "__flat__") {
+      return group.items.filter((i) => (i.vendor?.trim() ? i.vendor.trim() : "General") === selectedVendor)
+    }
+    return group.items
   }
 
   function handleExportVendorsCsv() {
@@ -738,7 +740,7 @@ export function InventoryContent() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
           {filteredGroups.map((group) => (
             <Card
-              key={group.name}
+              key={`${group.vendor}\0${group.name}`}
               className="cursor-pointer border-border hover:border-primary/50 hover:bg-muted/30 transition-colors"
               onClick={() => setSelectedGroupName(group.name)}
             >
@@ -756,6 +758,37 @@ export function InventoryContent() {
                 <p className="text-xs text-muted-foreground">
                   {group.count === 1 ? "item" : "items"}
                 </p>
+                {isAdmin && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="mt-3 mr-2 text-foreground"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      openMoveItems(itemsForGroupMove(group))
+                    }}
+                  >
+                    Move group
+                  </Button>
+                )}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="mt-3 text-foreground"
+                  asChild
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <Link
+                    href={buildStockTakeUrl({
+                      vendor: selectedVendor && selectedVendor !== "__flat__" ? selectedVendor : group.vendor,
+                      product: group.name,
+                    })}
+                  >
+                    Stock take
+                  </Link>
+                </Button>
               </CardContent>
             </Card>
           ))}
@@ -790,45 +823,31 @@ export function InventoryContent() {
               {selectedGroup?.vendor} · {itemsInGroup.length} in stock
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            {isAdmin && selectedGroup && (
-              <Dialog
-                open={moveGroupOpen}
-                onOpenChange={(open) => {
-                  setMoveGroupOpen(open)
-                  if (open) {
-                    setMoveTargetGroupName(selectedGroup.name)
-                    setMoveTargetVendor(selectedVendor && selectedVendor !== "__flat__" ? selectedVendor : selectedGroup.vendor)
-                  }
-                }}
+          <div className="flex items-center gap-2 flex-wrap">
+            {isAdmin && selectedGroup && itemsInGroup.length > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-foreground"
+                onClick={() => openMoveItems(itemsInGroup)}
               >
-                <DialogTrigger asChild>
-                  <Button variant="outline" size="sm" className="text-foreground">
-                    Move group
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="bg-card text-card-foreground max-w-[calc(100vw-2rem)] sm:max-w-lg">
-                  <DialogHeader>
-                    <DialogTitle className="text-foreground">Move Group (Admin)</DialogTitle>
-                  </DialogHeader>
-                  <div className="flex flex-col gap-3 py-2">
-                    <div className="text-xs text-muted-foreground">
-                      Moving all items in <strong>{selectedGroup.name}</strong>.
-                    </div>
-                    <div className="flex flex-col gap-1.5">
-                      <Label>Group name</Label>
-                      <Input value={moveTargetGroupName} onChange={(e) => setMoveTargetGroupName(e.target.value)} />
-                    </div>
-                    <div className="flex flex-col gap-1.5">
-                      <Label>Vendor</Label>
-                      <Input value={moveTargetVendor} onChange={(e) => setMoveTargetVendor(e.target.value)} />
-                    </div>
-                    <div className="flex justify-end">
-                      <Button onClick={() => void handleMoveGroup()}>Apply move</Button>
-                    </div>
-                  </div>
-                </DialogContent>
-              </Dialog>
+                Move group
+              </Button>
+            )}
+            {selectedGroup && itemsInGroup.length > 0 && (
+              <Button variant="outline" size="sm" className="text-foreground" asChild>
+                <Link
+                  href={buildStockTakeUrl({
+                    vendor:
+                      selectedVendor && selectedVendor !== "__flat__"
+                        ? selectedVendor
+                        : selectedGroup.vendor,
+                    product: selectedGroup.name,
+                  })}
+                >
+                  Stock take group
+                </Link>
+              </Button>
             )}
             <div className="flex rounded-md border border-border overflow-hidden">
               <Button
@@ -878,6 +897,22 @@ export function InventoryContent() {
           <Button size="sm" type="button" onClick={() => openRecordMovement(selectedInFiltered)}>
             Record movement ({selectedInFiltered.length})
           </Button>
+          {isAdmin && (
+            <Button size="sm" type="button" variant="outline" onClick={() => openMoveItems(selectedInFiltered)}>
+              Move to vendor/group ({selectedInFiltered.length})
+            </Button>
+          )}
+          {selectedInFiltered.length > 0 && (
+            <Button size="sm" type="button" variant="outline" asChild>
+              <Link
+                href={buildStockTakeUrl({
+                  serials: selectedInFiltered.map((i) => i.serialNumber),
+                })}
+              >
+                Stock take ({selectedInFiltered.length})
+              </Link>
+            </Button>
+          )}
           <Button size="sm" type="button" variant="ghost" onClick={() => setSelectedIds(new Set())}>
             Clear
           </Button>
@@ -942,6 +977,7 @@ export function InventoryContent() {
                       <InventoryItemActionsMenu
                         item={item}
                         onRecordMovement={(it) => openRecordMovement([it])}
+                        onMoveToGroup={isAdmin ? (it) => openMoveItems([it]) : undefined}
                         menuTrigger={
                           <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground">
                             <MoreHorizontal className="w-4 h-4" />
@@ -1021,6 +1057,7 @@ export function InventoryContent() {
                 <InventoryItemActionsMenu
                   item={item}
                   onRecordMovement={(it) => openRecordMovement([it])}
+                  onMoveToGroup={isAdmin ? (it) => openMoveItems([it]) : undefined}
                   menuTrigger={
                     <Button variant="outline" size="sm" className="w-full mt-2 text-foreground">
                       <MoreHorizontal className="w-4 h-4 mr-1.5" />
@@ -1048,6 +1085,16 @@ export function InventoryContent() {
           if (!open) setMovementItems([])
         }}
         items={movementItems}
+      />
+
+      <MoveItemsDialog
+        open={moveItemsOpen}
+        onOpenChange={(open) => {
+          setMoveItemsOpen(open)
+          if (!open) setMoveItems([])
+        }}
+        items={moveItems}
+        onMoved={() => setSelectedIds(new Set())}
       />
     </div>
   )

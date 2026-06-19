@@ -73,9 +73,10 @@ type Props = {
   item: InventoryItem
   menuTrigger: ReactNode
   onRecordMovement?: (item: InventoryItem) => void
+  onMoveToGroup?: (item: InventoryItem) => void
 }
 
-export function InventoryItemActionsMenu({ item, menuTrigger, onRecordMovement }: Props) {
+export function InventoryItemActionsMenu({ item, menuTrigger, onRecordMovement, onMoveToGroup }: Props) {
   const { transactions, updateItem, softDeleteItem, applyMovement, refetchLedger } = useInventoryStore()
   const { role } = useAuth()
   const isAdmin = canEditInventory(role)
@@ -216,6 +217,9 @@ export function InventoryItemActionsMenu({ item, menuTrigger, onRecordMovement }
           )}
           {isAdmin && (
             <>
+              {onMoveToGroup && (
+                <DropdownMenuItem onSelect={() => onMoveToGroup(item)}>Move to vendor/group…</DropdownMenuItem>
+              )}
               <DropdownMenuItem onSelect={() => setEditOpen(true)}>Edit</DropdownMenuItem>
               <DropdownMenuItem className="text-destructive" onSelect={() => setDeleteOpen(true)}>
                 Delete
