@@ -1,6 +1,5 @@
 import type { QuickScanRecord, Transaction, TransactionType } from "@/lib/data"
-import type { SupabaseClient } from "@supabase/supabase-js"
-import type { Database } from "./database.types"
+import type { AppSupabaseClient } from "./app-client"
 import { transactionToRow } from "./inventory-db"
 
 /** Movements that log inventory + transactions client-side via applyMovement + recordQuickScan(ledgerSynced). */
@@ -15,7 +14,7 @@ export function shouldAppendLedgerFromQuickScan(movementType: string, ledgerSync
  * Inserts `transactions` rows for quick-scan log-only movements so ledger matches the movement batch.
  */
 export async function insertTransactionsForQuickScanRecords(
-  supabase: SupabaseClient<Database>,
+  supabase: AppSupabaseClient,
   records: QuickScanRecord[],
   movementType: TransactionType
 ): Promise<{ ok: true } | { ok: false; message: string }> {

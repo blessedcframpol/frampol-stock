@@ -48,7 +48,7 @@ Separate **who can change stock**, **who can fulfill requests**, **who can invoi
 
 ### Edge cases
 
-- **New user after OAuth:** Profile row may exist with `role = null` or `active = false` → user lands on **`/pending-role`** until an admin sets role + active in **Settings → Users**.
+- **New user after OAuth:** Profile row may exist with `role = null` or `active = false` → user lands on **`/pending-role`** until an admin sets role + active in **User management**.
 
 ---
 
@@ -471,11 +471,12 @@ Per-user profile, local notification preferences, inventory thresholds, and **ad
 - **Default reorder level** — Applies to any product without an override.
 - **Per-product overrides** — Table of product names (from current inventory name set) with individual thresholds. Drives **low stock** alerts and dashboard stat.
 
-### Users tab (admin)
+### User management (`/users`, admin)
 
-- Lists **`profiles`**: email, display name, role, active.
-- Change **role** (admin/sales/accounts/technicians) and **active** flag via **`/api/admin/profiles`**.
+- Lists **`profiles`**: name, email, role, active status, joined date.
+- Search and filter by role / status; create users and edit name, role, and active flag via **`/api/admin/profiles`**.
 - New OAuth users appear here with **no role** until admin assigns one (see **Pending role** page).
+- Settings → Users links admins to this page.
 
 ### Theme
 

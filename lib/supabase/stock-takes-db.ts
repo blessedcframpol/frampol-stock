@@ -1,9 +1,9 @@
-import type { SupabaseClient } from "@supabase/supabase-js"
-import type { Database } from "./database.types"
+import type { Json } from "./database.types"
+import type { AppSupabaseClient } from "./app-client"
 import { getSupabaseClient } from "@/lib/supabase/client"
 import type { StockTakeRecord, StockTakeSnapshot } from "@/lib/data"
 
-function getClient(serverClient?: SupabaseClient<Database> | null) {
+function getClient(serverClient?: AppSupabaseClient | null) {
   return serverClient ?? getSupabaseClient()
 }
 
@@ -21,7 +21,7 @@ function isTableNotFound(error: { code?: string; message?: string } | null): boo
   return (error?.code === "PGRST205") || (error?.message?.includes("Could not find the table") ?? false)
 }
 
-export async function getAllStockTakes(serverClient?: SupabaseClient<Database> | null): Promise<StockTakeRecord[]> {
+export async function getAllStockTakes(serverClient?: AppSupabaseClient | null): Promise<StockTakeRecord[]> {
   const supabase = getClient(serverClient)
   const { data, error } = await supabase
     .from("stock_takes")
@@ -34,7 +34,7 @@ export async function getAllStockTakes(serverClient?: SupabaseClient<Database> |
   return (data ?? []).map(rowToRecord)
 }
 
-export async function getStockTakeById(id: string, serverClient?: SupabaseClient<Database> | null): Promise<StockTakeRecord | null> {
+export async function getStockTakeById(id: string, serverClient?: AppSupabaseClient | null): Promise<StockTakeRecord | null> {
   const supabase = getClient(serverClient)
   const { data, error } = await supabase
     .from("stock_takes")
@@ -54,13 +54,13 @@ export function isStockTakesTableMissingError(error: unknown): boolean {
   return (e?.code === "PGRST205") || (e?.message?.includes("Could not find the table") ?? false)
 }
 
-export async function createStockTake(snapshot: StockTakeSnapshot, serverClient?: SupabaseClient<Database> | null): Promise<StockTakeRecord> {
+export async function createStockTake(snapshot: StockTakeSnapshot, serverClient?: AppSupabaseClient | null): Promise<StockTakeRecord> {
   const supabase = getClient(serverClient)
   const id = `ST-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
   const completedAt = new Date().toISOString()
   const { data, error } = await supabase
     .from("stock_takes")
-    .insert({ id, completed_at: completedAt, result_snapshot: snapshot as unknown })
+    .insert({ id, completed_at: completedAt, result_snapshot: snapshot as unknown as Json })
     .select("id, completed_at, result_snapshot")
     .single()
   if (error) throw error

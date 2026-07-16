@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect } from "react"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -26,25 +26,13 @@ import {
   setReorderLevelOverrides,
 } from "@/lib/settings"
 import { useAuth } from "@/lib/auth-context"
-import { canManageUsers, isValidRole } from "@/lib/permissions"
+import { canManageUsers } from "@/lib/permissions"
 import { useInventoryStore } from "@/lib/inventory-store"
 import { cn } from "@/lib/utils"
-import { Mail, Plus, Trash2, Loader2, HelpCircle, Info } from "lucide-react"
+import { Mail, Plus, Trash2, HelpCircle, Info, UsersRound, ArrowRight } from "lucide-react"
 import { PageHeader } from "@/components/page-nav"
 import { toast } from "sonner"
-import { toastFromApiErrorBody, toastFromCaughtError } from "@/lib/toast-reportable-error"
-
-type ProfileRow = {
-  id: string
-  email: string
-  display_name: string | null
-  role: string | null
-  active: boolean
-  created_at?: string
-}
-
-/** Radix Select needs a dedicated value for rows with no role yet */
-const ADMIN_ROLE_PLACEHOLDER = "__role_pending__"
+import Link from "next/link"
 
 const tabPill = cn(
   "rounded-full border border-border/70 bg-muted/50 px-5 py-2.5 text-sm font-medium text-muted-foreground shadow-none transition-all",
@@ -116,43 +104,11 @@ export function SettingsContent() {
   const [newEmail, setNewEmail] = useState("")
   const [reorderDefault, setReorderDefaultState] = useState(2)
   const [overrides, setOverridesState] = useState<Record<string, number>>({})
-  const [profiles, setProfiles] = useState<ProfileRow[]>([])
-  const [profilesLoading, setProfilesLoading] = useState(false)
-  const [createEmail, setCreateEmail] = useState("")
-  const [createPassword, setCreatePassword] = useState("")
-  const [createDisplayName, setCreateDisplayName] = useState("")
-  const [createRole, setCreateRole] = useState<string>("technicians")
-  const [creating, setCreating] = useState(false)
-  const [updatingId, setUpdatingId] = useState<string | null>(null)
 
   const displayName = (profile?.display_name ?? "").trim()
   const nameParts = displayName ? displayName.split(/\s+/).filter(Boolean) : []
   const firstName = nameParts[0] ?? ""
   const lastName = nameParts.slice(1).join(" ")
-
-  const fetchProfiles = useCallback(async () => {
-    if (!isAdmin) return
-    setProfilesLoading(true)
-    try {
-      const res = await fetch("/api/admin/profiles")
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        toastFromApiErrorBody(data, "Could not load users")
-        setProfiles([])
-        return
-      }
-      setProfiles(Array.isArray(data) ? data : [])
-    } catch (e) {
-      toastFromCaughtError(e, "Could not load users")
-      setProfiles([])
-    } finally {
-      setProfilesLoading(false)
-    }
-  }, [isAdmin])
-
-  useEffect(() => {
-    fetchProfiles()
-  }, [fetchProfiles])
 
   useEffect(() => {
     setEmailsEnabledState(getLowStockEmailsEnabled())
@@ -220,64 +176,6 @@ export function SettingsContent() {
     toast.success("Using default reorder level for this product")
   }
 
-  async function handleCreateUser(e: React.FormEvent) {
-    e.preventDefault()
-    if (!createEmail.trim() || !createPassword) {
-      toast.error("Email and password required")
-      return
-    }
-    setCreating(true)
-    try {
-      const res = await fetch("/api/admin/profiles", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: createEmail.trim(),
-          password: createPassword,
-          display_name: createDisplayName.trim() || undefined,
-          role: createRole,
-        }),
-      })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        toastFromApiErrorBody(data, "Failed to create user")
-        return
-      }
-      toast.success("User created")
-      setCreateEmail("")
-      setCreatePassword("")
-      setCreateDisplayName("")
-      setCreateRole("technicians")
-      fetchProfiles()
-    } catch (err) {
-      toastFromCaughtError(err, "Failed to create user")
-    } finally {
-      setCreating(false)
-    }
-  }
-
-  async function handleUpdateProfile(id: string, updates: { role?: string; active?: boolean }) {
-    setUpdatingId(id)
-    try {
-      const res = await fetch(`/api/admin/profiles/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updates),
-      })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        toastFromApiErrorBody(data, "Update failed")
-        return
-      }
-      toast.success("Updated")
-      fetchProfiles()
-    } catch (err) {
-      toastFromCaughtError(err, "Update failed")
-    } finally {
-      setUpdatingId(null)
-    }
-  }
-
   const profileAside = (
     <>
       <Avatar className="size-28 border-2 border-border">
@@ -301,7 +199,7 @@ export function SettingsContent() {
       <div className="mb-6">
         <PageHeader
           title="Settings"
-          description="Fram-Stock preferences, low-stock email, reorder rules, and user management."
+          description="Fram-Stock preferences, low-stock email, and reorder rules."
         />
       </div>
 
@@ -517,7 +415,7 @@ export function SettingsContent() {
                 ) : (
                   <div className="mt-2 grid w-full grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
                     {productNames.map((name) => {
-                      const value = overrides[name] ?? ""
+                      const value = overrides[name]
                       return (
                         <div
                           key={name}
@@ -531,7 +429,7 @@ export function SettingsContent() {
                             min={0}
                             className="h-9 w-16 rounded-md border-input bg-background text-sm"
                             placeholder={String(reorderDefault)}
-                            value={value === "" ? "" : value}
+                            value={value ?? ""}
                             onChange={(e) => {
                               const v = e.target.value
                               if (v === "") {
@@ -553,7 +451,7 @@ export function SettingsContent() {
                               }
                             }}
                           />
-                          {name in overrides ? (
+                          {value !== undefined ? (
                             <Button
                               type="button"
                               variant="ghost"
@@ -603,123 +501,24 @@ export function SettingsContent() {
           {isAdmin ? (
             <SettingsSection
               title="Users"
-              description="Create sign-ins and assign roles (admin, sales, accounts, technicians). Only admins can change this list."
+              description="Create sign-ins and assign roles from the dedicated User management page."
             >
-              <div className="flex flex-col gap-6">
-                <form onSubmit={handleCreateUser} className="flex flex-col gap-4 rounded-xl border border-border/60 bg-muted/10 p-4">
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    <div className="space-y-2">
-                      <Label className="text-xs text-muted-foreground">Email</Label>
-                      <Input
-                        type="email"
-                        placeholder="user@example.com"
-                        value={createEmail}
-                        onChange={(e) => setCreateEmail(e.target.value)}
-                        className="h-11 rounded-lg bg-background"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label className="text-xs text-muted-foreground">Password</Label>
-                      <Input
-                        type="password"
-                        placeholder="••••••••"
-                        value={createPassword}
-                        onChange={(e) => setCreatePassword(e.target.value)}
-                        className="h-11 rounded-lg bg-background"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label className="text-xs text-muted-foreground">Display name</Label>
-                      <Input
-                        placeholder="Optional"
-                        value={createDisplayName}
-                        onChange={(e) => setCreateDisplayName(e.target.value)}
-                        className="h-11 rounded-lg bg-background"
-                      />
-                    </div>
-                    <div className="space-y-2 sm:col-span-2 lg:col-span-1">
-                      <Label className="text-xs text-muted-foreground">Role</Label>
-                      <Select value={createRole} onValueChange={setCreateRole}>
-                        <SelectTrigger className="h-11 rounded-lg bg-background">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="admin">Admin</SelectItem>
-                          <SelectItem value="sales">Sales</SelectItem>
-                          <SelectItem value="accounts">Accounts</SelectItem>
-                          <SelectItem value="technicians">Technicians</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                  <Button type="submit" disabled={creating} className="w-fit rounded-lg">
-                    {creating ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
-                    <span className="ml-2">{creating ? "Creating…" : "Create user"}</span>
-                  </Button>
-                </form>
-                <div>
-                  <Label className="text-sm font-medium text-muted-foreground">Users</Label>
-                  {profilesLoading ? (
-                    <p className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
-                      <Loader2 className="size-4 animate-spin" /> Loading…
+              <div className="flex flex-col gap-4 rounded-xl border border-border/60 bg-muted/20 p-5 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex gap-3 min-w-0">
+                  <UsersRound className="mt-0.5 size-5 shrink-0 text-primary" />
+                  <div className="space-y-1 text-sm min-w-0">
+                    <p className="font-medium text-foreground">User management</p>
+                    <p className="text-muted-foreground">
+                      Search, filter, add, and edit team members and their roles in one place.
                     </p>
-                  ) : profiles.length === 0 ? (
-                    <p className="mt-4 text-sm text-muted-foreground">No users loaded.</p>
-                  ) : (
-                    <div className="mt-3 overflow-hidden rounded-xl border border-border">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="border-b border-border bg-muted/40">
-                            <th className="p-3 text-left font-medium">Email</th>
-                            <th className="p-3 text-left font-medium">Name</th>
-                            <th className="p-3 text-left font-medium">Role</th>
-                            <th className="p-3 text-left font-medium">Active</th>
-                            <th className="p-3 text-right font-medium" />
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {profiles.map((p) => (
-                            <tr key={p.id} className="border-b border-border/60 last:border-0">
-                              <td className="p-3">{p.email}</td>
-                              <td className="p-3 text-muted-foreground">{p.display_name || "—"}</td>
-                              <td className="p-3">
-                                <Select
-                                  value={p.role && isValidRole(p.role) ? p.role : ADMIN_ROLE_PLACEHOLDER}
-                                  onValueChange={(value) => {
-                                    if (value === ADMIN_ROLE_PLACEHOLDER) return
-                                    handleUpdateProfile(p.id, { role: value })
-                                  }}
-                                  disabled={updatingId === p.id}
-                                >
-                                  <SelectTrigger className="h-9 min-w-[10.5rem] rounded-lg bg-background">
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value={ADMIN_ROLE_PLACEHOLDER}>Assign role…</SelectItem>
-                                    <SelectItem value="admin">Admin</SelectItem>
-                                    <SelectItem value="sales">Sales</SelectItem>
-                                    <SelectItem value="accounts">Accounts</SelectItem>
-                                    <SelectItem value="technicians">Technicians</SelectItem>
-                                  </SelectContent>
-                                </Select>
-                              </td>
-                              <td className="p-3">
-                                <Switch
-                                  checked={p.active}
-                                  onCheckedChange={(checked) => handleUpdateProfile(p.id, { active: checked })}
-                                  disabled={updatingId === p.id}
-                                />
-                              </td>
-                              <td className="p-3 text-right">
-                                {updatingId === p.id && <Loader2 className="inline size-4 animate-spin" />}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
+                  </div>
                 </div>
+                <Button asChild className="rounded-lg shrink-0 w-fit">
+                  <Link href="/users">
+                    Open
+                    <ArrowRight className="size-4" />
+                  </Link>
+                </Button>
               </div>
             </SettingsSection>
           ) : (
@@ -728,7 +527,8 @@ export function SettingsContent() {
               description="Fram-Stock is an internal inventory app for your organisation."
             >
               <p className="text-sm text-muted-foreground">
-                User accounts and roles are managed by an admin under the <strong className="font-medium text-foreground">Users</strong> tab.
+                User accounts and roles are managed by an admin under{" "}
+                <strong className="font-medium text-foreground">User management</strong>.
                 If you need access changes, ask your Fram-Stock administrator.
               </p>
             </SettingsSection>
@@ -746,7 +546,8 @@ export function SettingsContent() {
                 <div className="space-y-1 text-sm">
                   <p className="font-medium text-foreground">Roles & access</p>
                   <p className="text-muted-foreground">
-                    Your profile role controls screens and actions. Admins manage people under the <strong className="font-medium text-foreground">Users</strong> tab.
+                    Your profile role controls screens and actions. Admins manage people under{" "}
+                    <strong className="font-medium text-foreground">User management</strong>.
                   </p>
                 </div>
               </div>

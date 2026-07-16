@@ -1,7 +1,6 @@
-import type { SupabaseClient } from "@supabase/supabase-js"
-import type { Database } from "./database.types"
+import type { AppSupabaseClient } from "./app-client"
 
-type SB = SupabaseClient<Database>
+type SB = AppSupabaseClient
 
 /** Resolves or creates a product_lines row; matches migration normalization (empty vendor → General). */
 export async function ensureProductLine(sb: SB, productName: string, vendor?: string | null): Promise<string> {

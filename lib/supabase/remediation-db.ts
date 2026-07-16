@@ -1,7 +1,7 @@
-import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "./database.types"
+import type { AppSupabaseClient } from "./app-client"
 
-type SB = SupabaseClient<Database>
+type SB = AppSupabaseClient
 
 export type RemediationProviderRow = Database["public"]["Tables"]["remediation_providers"]["Row"]
 export type RemediationCaseRow = Database["public"]["Tables"]["remediation_cases"]["Row"]

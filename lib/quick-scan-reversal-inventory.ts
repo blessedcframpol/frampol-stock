@@ -1,4 +1,4 @@
-import type { SupabaseClient } from "@supabase/supabase-js"
+import type { AppSupabaseClient } from "@/lib/supabase/app-client"
 import type { Database } from "@/lib/supabase/database.types"
 import type { InternalLocation, InventoryItem, ItemStatus, JsonValue } from "@/lib/data"
 import {
@@ -37,7 +37,7 @@ export type QuickScanBatchTxn = {
 
 /** Load every active transaction row for a batch (not reversed). */
 export async function fetchActiveBatchTransactions(
-  supabase: SupabaseClient<Database>,
+  supabase: AppSupabaseClient,
   batchId: string
 ): Promise<QuickScanBatchTxn[] | null> {
   const { data: rev } = await supabase.from("batch_reversals").select("batch_id").eq("batch_id", batchId).maybeSingle()
@@ -70,7 +70,7 @@ export async function fetchActiveBatchTransactions(
 
 /** @deprecated Use fetchActiveBatchTransactions */
 export async function fetchActiveMovementBatchRows(
-  supabase: SupabaseClient<Database>,
+  supabase: AppSupabaseClient,
   batchId: string
 ): Promise<QuickScanBatchRow[] | null> {
   const txns = await fetchActiveBatchTransactions(supabase, batchId)
@@ -192,7 +192,7 @@ function inferPriorStateFromTxn(
 }
 
 async function hasSubsequentMovement(
-  supabase: SupabaseClient<Database>,
+  supabase: AppSupabaseClient,
   serial: string,
   inboundTxnId: string,
   inboundDate: string,
@@ -267,7 +267,7 @@ function duplicateSerialsInBatch(batchTxns: QuickScanBatchTxn[]): string[] {
 }
 
 async function planInboundEntry(
-  supabase: SupabaseClient<Database>,
+  supabase: AppSupabaseClient,
   txn: QuickScanBatchTxn,
   batchId: string,
   returnLocation: InternalLocation,
@@ -417,7 +417,7 @@ function buildReversalLedgerRow(options: {
  * Two-phase: plan all changes first; apply only if every serial passes validation.
  */
 export async function revertInventoryAndTransactionsForQuickScan(
-  supabase: SupabaseClient<Database>,
+  supabase: AppSupabaseClient,
   options: {
     batchId: string
     batchTxns: QuickScanBatchTxn[]
@@ -692,7 +692,7 @@ export type BatchReversalCompleteness = {
  * This is independent of in-the-moment reverse request to verify completeness after the fact.
  */
 export async function getQuickScanBatchReversalCompleteness(
-  supabase: SupabaseClient<Database>,
+  supabase: AppSupabaseClient,
   batchId: string
 ): Promise<BatchReversalCompleteness | null> {
   const { data: rev, error: revErr } = await supabase

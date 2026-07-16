@@ -1,8 +1,8 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "./database.types"
+import type { AppSupabaseClient } from "./app-client"
 import { getSupabaseClient } from "./client"
 import { notifyRequestServicedByEmail } from "@/lib/notify-request-email"
 import { rowToClient } from "./clients-db"
@@ -10,7 +10,7 @@ import type { Client } from "@/lib/data"
 import { rowToInventoryItem, INVENTORY_ITEM_SELECT } from "./inventory-db"
 import type { InventoryItem } from "@/lib/data"
 
-type SB = SupabaseClient<Database>
+type SB = AppSupabaseClient
 
 export type StockRequestStatus =
   | "draft"

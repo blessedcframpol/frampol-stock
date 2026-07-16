@@ -40,6 +40,7 @@ export interface Database {
           user_id?: string | null
           request_id?: string | null
         }
+        Relationships: []
       }
       inventory_items: {
         Row: {
@@ -99,6 +100,15 @@ export interface Database {
           cloud_key?: string | null
           deleted_at?: string | null
         }
+        Relationships: [
+          {
+            foreignKeyName: "inventory_items_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "product_lines"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       product_lines: {
         Row: {
@@ -119,6 +129,7 @@ export interface Database {
           vendor?: string
           created_at?: string
         }
+        Relationships: []
       }
       stock_requests: {
         Row: {
@@ -166,6 +177,15 @@ export interface Database {
           created_at?: string
           updated_at?: string
         }
+        Relationships: [
+          {
+            foreignKeyName: "stock_requests_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       stock_request_lines: {
         Row: {
@@ -189,6 +209,15 @@ export interface Database {
           quantity_requested?: number
           sort_order?: number
         }
+        Relationships: [
+          {
+            foreignKeyName: "stock_request_lines_request_id_fkey"
+            columns: ["request_id"]
+            isOneToOne: false
+            referencedRelation: "stock_requests"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       notifications: {
         Row: {
@@ -221,6 +250,7 @@ export interface Database {
           metadata?: Json
           created_at?: string
         }
+        Relationships: []
       }
       transactions: {
         Row: {
@@ -283,6 +313,7 @@ export interface Database {
           metadata?: Json | null
           created_by?: string | null
         }
+        Relationships: []
       }
       kit_inspections: {
         Row: {
@@ -324,6 +355,7 @@ export interface Database {
           created_by?: string | null
           created_at?: string
         }
+        Relationships: []
       }
       remediation_providers: {
         Row: {
@@ -344,6 +376,7 @@ export interface Database {
           display_name?: string
           created_at?: string
         }
+        Relationships: []
       }
       remediation_cases: {
         Row: {
@@ -400,6 +433,7 @@ export interface Database {
           created_at?: string
           updated_at?: string
         }
+        Relationships: []
       }
       outbound_batches: {
         Row: {
@@ -435,6 +469,7 @@ export interface Database {
           invoice_number?: string | null
           created_at?: string
         }
+        Relationships: []
       }
       clients: {
         Row: {
@@ -473,6 +508,7 @@ export interface Database {
           total_spent?: number
           last_order?: string | null
         }
+        Relationships: []
       }
       batch_reversals: {
         Row: {
@@ -493,6 +529,7 @@ export interface Database {
           reversal_reason?: string | null
           reversed_by?: string | null
         }
+        Relationships: []
       }
       stock_takes: {
         Row: {
@@ -510,6 +547,7 @@ export interface Database {
           completed_at?: string
           result_snapshot?: Json
         }
+        Relationships: []
       }
       profiles: {
         Row: {
@@ -539,9 +577,74 @@ export interface Database {
           created_at?: string
           updated_at?: string
         }
+        Relationships: []
+      }
+      stock_request_events: {
+        Row: {
+          id: string
+          request_id: string
+          created_at: string
+          actor_id: string | null
+          event_type: string
+          from_status: string | null
+          to_status: string | null
+          payload: Json
+          idempotency_key: string | null
+        }
+        Insert: {
+          id?: string
+          request_id: string
+          created_at?: string
+          actor_id?: string | null
+          event_type: string
+          from_status?: string | null
+          to_status?: string | null
+          payload?: Json
+          idempotency_key?: string | null
+        }
+        Update: {
+          id?: string
+          request_id?: string
+          created_at?: string
+          actor_id?: string | null
+          event_type?: string
+          from_status?: string | null
+          to_status?: string | null
+          payload?: Json
+          idempotency_key?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stock_request_events_request_id_fkey"
+            columns: ["request_id"]
+            isOneToOne: false
+            referencedRelation: "stock_requests"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
+    Views: {
+      [_ in never]: never
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
     Functions: {
+      log_stock_request_event: {
+        Args: {
+          p_request_id: string
+          p_event_type: string
+          p_from_status?: string | null
+          p_to_status?: string | null
+          p_payload?: Json
+          p_actor_id?: string | null
+        }
+        Returns: undefined
+      }
       apply_stock_movement: {
         Args: {
           p_inventory_upserts: Json

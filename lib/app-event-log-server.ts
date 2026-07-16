@@ -1,5 +1,5 @@
-import type { SupabaseClient } from "@supabase/supabase-js"
-import type { Database, Json } from "@/lib/supabase/database.types"
+import type { AppSupabaseClient } from "@/lib/supabase/app-client"
+import type { Json } from "@/lib/supabase/database.types"
 
 export type AppEventSeverity = "error" | "warn" | "info"
 export type AppEventSource = "client" | "api"
@@ -30,7 +30,7 @@ function truncateMetadata(meta: InsertAppEventInput["metadata"]): Json | null {
 
 /** Insert one row. Returns false on DB error (logs to console). */
 export async function insertAppEventLogRow(
-  supabase: SupabaseClient<Database>,
+  supabase: AppSupabaseClient,
   input: InsertAppEventInput
 ): Promise<boolean> {
   const { error } = await supabase.from("app_event_logs").insert({

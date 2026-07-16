@@ -1,9 +1,8 @@
-import type { SupabaseClient } from "@supabase/supabase-js"
-import type { Database } from "./database.types"
+import type { AppSupabaseClient } from "./app-client"
 
 /** Record that a transaction batch was reversed (admin audit). */
 export async function insertBatchReversal(
-  supabase: SupabaseClient<Database>,
+  supabase: AppSupabaseClient,
   batchId: string,
   reason: string,
   reversedByUserId: string

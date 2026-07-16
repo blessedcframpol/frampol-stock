@@ -26,6 +26,7 @@ import {
   History,
   Loader2,
   ScrollText,
+  UsersRound,
 } from "lucide-react"
 import { cn, formatDateDDMMYYYY } from "@/lib/utils"
 import { Input } from "@/components/ui/input"
@@ -54,6 +55,7 @@ import {
   canAccessReports,
   canAccessRequests,
   canEditInventory,
+  canManageUsers,
   canViewAppLogs,
   type AppRole,
 } from "@/lib/permissions"
@@ -98,13 +100,18 @@ type BottomNavEntry = {
 }
 
 const bottomNavItems: BottomNavEntry[] = [
+  { href: "/users", label: "User management", icon: UsersRound, adminOnly: true },
   { href: "/logs", label: "Error logs", icon: ScrollText, adminOnly: true },
   { href: "/settings", label: "Settings", icon: Settings },
 ]
 
 function filterBottomNavForRole(role: string | null | undefined): BottomNavEntry[] {
   const r = role as AppRole | null | undefined
-  return bottomNavItems.filter((item) => !item.adminOnly || canViewAppLogs(r))
+  return bottomNavItems.filter((item) => {
+    if (!item.adminOnly) return true
+    if (item.href === "/users") return canManageUsers(r)
+    return canViewAppLogs(r)
+  })
 }
 
 function filterNavByRole(items: NavItem[], role: string | null | undefined): NavItem[] {
