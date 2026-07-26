@@ -6,7 +6,7 @@ import { createAdminClient, isAdminApiConfigured } from "@/lib/supabase/admin"
 function adminConfigError() {
   return apiClientError(
     503,
-    "Admin features need SUPABASE_SERVICE_ROLE_KEY in .env.local (Supabase Dashboard → Settings → API → service_role). Restart next dev after adding it."
+    "Admin features need SUPABASE_SERVICE_ROLE_KEY on the server (Supabase Dashboard → Project Settings → API → service_role). Add it to .env.local for local, or your host’s environment variables for production, then redeploy/restart."
   )
 }
 

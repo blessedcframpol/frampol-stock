@@ -207,9 +207,9 @@ export function StockRequestDetail({ requestId }: { requestId: string }) {
 
   return (
     <div className="flex flex-col gap-6 min-w-0 max-w-4xl">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex items-start gap-3 min-w-0">
-          <PageBackLink href="/requests" />
+      <div className="flex flex-col gap-2 min-w-0 items-start">
+        <PageBackLink href="/requests" label="Requests" />
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between w-full min-w-0">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <h1 className={pageTitleClass}>Request</h1>
@@ -228,8 +228,7 @@ export function StockRequestDetail({ requestId }: { requestId: string }) {
               · Created {formatDateDDMMYYYY(row.created_at)}
             </p>
           </div>
-        </div>
-        <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2 shrink-0">
           {canEditDraft && (
             <Button variant="outline" size="sm" asChild className="gap-1">
               <Link href={`/requests/${row.id}/edit`}>
@@ -272,6 +271,7 @@ export function StockRequestDetail({ requestId }: { requestId: string }) {
               Cancel
             </Button>
           )}
+          </div>
         </div>
       </div>
 

@@ -23,7 +23,7 @@ export function PageBackLink({ href, onClick, label = "Back", className }: PageB
       {label}
     </>
   )
-  const buttonClass = cn("gap-1 -ml-2 shrink-0", className)
+  const buttonClass = cn("gap-1 -ml-2 shrink-0 self-start", className)
 
   if (href) {
     return (
@@ -51,42 +51,32 @@ type PageHeaderProps = {
 
 /** Page title block used across dashboard routes (with optional back link). */
 export function PageHeader({ title, description, back, icon: Icon, actions, className }: PageHeaderProps) {
-  const titleBlock = (
-    <div className="min-w-0">
-      <div className="flex flex-wrap items-center gap-2">
-        {Icon ? <Icon className="size-6 shrink-0 text-foreground" aria-hidden /> : null}
-        <h1 className={pageTitleClass}>{title}</h1>
+  const titleRow = (
+    <div
+      className={cn(
+        "flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between min-w-0",
+        !back && className
+      )}
+    >
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          {Icon ? <Icon className="size-6 shrink-0 text-foreground" aria-hidden /> : null}
+          <h1 className={pageTitleClass}>{title}</h1>
+        </div>
+        {description ? <p className="text-sm text-muted-foreground mt-1">{description}</p> : null}
       </div>
-      {description ? <p className="text-sm text-muted-foreground mt-1">{description}</p> : null}
+      {actions ? <div className="flex flex-wrap gap-2 shrink-0">{actions}</div> : null}
     </div>
   )
 
   if (back) {
     return (
-      <div
-        className={cn(
-          "flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between min-w-0",
-          className
-        )}
-      >
-        <div className="flex items-start gap-3 min-w-0">
-          <PageBackLink {...back} />
-          {titleBlock}
-        </div>
-        {actions ? <div className="flex flex-wrap gap-2 shrink-0">{actions}</div> : null}
+      <div className={cn("flex flex-col gap-2 min-w-0 items-start", className)}>
+        <PageBackLink {...back} />
+        {titleRow}
       </div>
     )
   }
 
-  return (
-    <div
-      className={cn(
-        "flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between min-w-0",
-        className
-      )}
-    >
-      {titleBlock}
-      {actions ? <div className="flex flex-wrap gap-2 shrink-0">{actions}</div> : null}
-    </div>
-  )
+  return titleRow
 }

@@ -290,9 +290,9 @@ export function UsersContent() {
 
   if (!allowed) {
     return (
-      <div className="flex flex-col gap-4 min-w-0">
-        <p className="text-sm text-muted-foreground">You do not have access to user management.</p>
+      <div className="flex flex-col gap-4 min-w-0 items-start">
         <PageBackLink href="/" label="Dashboard" />
+        <p className="text-sm text-muted-foreground">You do not have access to user management.</p>
       </div>
     )
   }

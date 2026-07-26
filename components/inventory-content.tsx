@@ -556,12 +556,12 @@ export function InventoryContent() {
     return (
       <div className="flex flex-col gap-4 md:gap-6">
         {kitHistoryCard}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+          <div className="flex flex-col gap-2 items-start min-w-0">
             {selectedVendor && selectedVendor !== "__flat__" && (
               <PageBackLink onClick={() => setSelectedVendor(null)} />
             )}
-            <div>
+            <div className="min-w-0">
               <h1 className={pageTitleClass}>
                 {selectedVendor && selectedVendor !== "__flat__"
                   ? `${VENDOR_LABELS[selectedVendor] ?? selectedVendor} – products`
