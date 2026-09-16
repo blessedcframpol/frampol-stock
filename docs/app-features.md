@@ -36,20 +36,43 @@ Separate **who can change stock**, **who can fulfill requests**, **who can invoi
 
 | Role | Typical use |
 |------|-------------|
-| **admin** | Full operational control + user/role management + batch reversal + inventory trash. |
-| **sales** | Create/submit stock requests; view clients and inventory appropriate to their job. |
-| **technicians** | Create requests; **fulfill** (assign hardware, move request through in_progress → serviced). |
-| **accounts** | **Reports**; **billing/invoicing** on stock requests after serviced. |
+| **admin** | Full operational control + user/role management + batch reversal + inventory trash + stock movements. |
+| **sales** | Create/submit stock requests; view clients and inventory (read). Create clients. No stock writes. |
+| **technicians** | Create requests; **fulfill** (assign hardware); **record stock movements**; undo/reassign own ledger rows. |
+| **accounts** | **Reports**; **billing/invoicing** on stock requests after serviced. Inventory/ledger read only. |
+
+### Stock write matrix (UI + RLS, migration 047)
+
+| Action | Who |
+|--------|-----|
+| **Stock movements** (Quick Scan, Inventory Movement) | admin + technicians (`canRecordStockMovement`) |
+| **Per-transaction undo / reassign** | creator (technician who recorded it) or any admin (`canAmendTransaction`) |
+| **Batch reversal** | admin only — enforced in the DB function body (`reverse_quick_scan_batch`), not only at the API route (`canReverseQuickScanBatches`) |
+| **Inventory add / edit / trash** | admin only (`canEditInventory`) — deliberately stricter than RLS write policies on `inventory_items` |
+
+`requireAdmin()` (`lib/require-admin.ts`) is **application-only** — no schema change. It extracted the shared admin-auth preamble and closed a missing `profiles.active` check on GET/POST `/api/admin/profiles` and PATCH `/api/admin/profiles/[id]`: a deactivated admin previously passed those handlers because they checked role only, while `get_my_role()` and `/api/quick-scan/reverse` already required `active`. Covered by `scripts/verify-050-admin-auth.mjs`.
+
+Migration **050 does not exist**. The later sequence is 047, 048, 049, 051, 052, 053. Numbers are ordered, not contiguous. The verify-050 script name is the admin-auth gate, not a missing SQL file.
+
+### Serial-tracked products (`requires_serial`, migration 051)
+
+`product_lines.requires_serial` is the DB gate for full serial assignment before a request can be marked **serviced**. There is **no UI** yet. Flag a new serial-tracked product with:
+
+```sql
+UPDATE public.product_lines SET requires_serial = true WHERE id = '<product_line_id>';
+```
+
+until a product-lines admin screen exists. 20 Starlink catalog rows were backfilled so this matches the previous `%starlink%` predicate (mechanism change, not gating). App gates (`lib/stock-request-rules.ts`) read `requires_serial` from the catalog join on the request fetch.
 
 ### Where it is enforced
 
-- **UI:** `lib/permissions.ts` — `canEditInventory`, `canFulfillStockRequests`, `canInvoiceStockRequests`, `canAccessReports`, `canReverseQuickScanBatches`, etc. Components hide or disable actions based on these.
-- **Server / DB:** RLS on tables (e.g. `profiles`, `inventory_items`, `transactions`, `stock_requests`). The UI is not sufficient alone for security.
+- **UI:** `lib/permissions.ts` — `canRecordStockMovement`, `canAmendTransaction`, `canEditInventory`, `canFulfillStockRequests`, `canInvoiceStockRequests`, `canAccessReports`, `canReverseQuickScanBatches`, etc. Components hide or disable actions based on these.
+- **Server / DB:** RLS on tables (e.g. `profiles`, `inventory_items`, `transactions`, `stock_requests`) and the admin guard inside `reverse_quick_scan_batch`. The UI is not sufficient alone for security.
 
 ### Edge cases
 
 - **New user after OAuth:** Profile row may exist with `role = null` or `active = false` → user lands on **`/pending-role`** until an admin sets role + active in **User management**.
-
+- **Orphan ledger rows** (`transactions.created_by` IS NULL): only admins can undo/reassign after 047.
 ---
 
 ## 3. Application shell and navigation
@@ -128,6 +151,16 @@ Operational snapshot: how much is sellable, what is out, whether reorder is need
 
 - Subscribes to auth state; loads **`profiles`** row for signed-in user (`id`, `email`, `display_name`, `role`, `active`).
 - Exposes `user`, `profile`, `role`, `refetch`, `signOut`.
+
+### Session cookies (HTTP 431) — closed
+
+Measured on production (`frampol-stock.vercel.app`, signed in): two `sb-<ref>-auth-token` chunks, 3216 B and 2442 B, ~5.7 KB total including `_vercel_*` cookies, against a 16 KB per-header cap. No orphan `.N` chunks, no duplicate scopes; `Secure` unset on both and no second scoped copy.
+
+Chunking in `@supabase/ssr` **0.5.2** works; that version already emits leftover-chunk deletes. The JWT is small: **role** and **active** come from `profiles` via `get_my_role()`, not token claims. Azure `user_metadata` is under 700 B, no group claims.
+
+431 never appears in `app_event_logs` because the platform rejects it before any app code runs, so there is no record of when it last occurred. Most likely a localhost artifact from repeated login cycles across dev-server restarts.
+
+**Known, not fixed:** `lib/supabase/browser.ts` passes `secure` from `window.location.protocol` while `proxy.ts` and `lib/supabase/server.ts` pass no `cookieOptions`. Inconsistent, but not producing duplicate cookies in production. Do not change cookie attributes on a working auth flow. Revisit only if a 431 recurs in production.
 
 ### Pending role (`/pending-role`)
 
@@ -424,7 +457,7 @@ Sales-driven workflow: quote → submit → technician fulfills with real serial
 ### Fulfill (`/requests/[id]/fulfill`)
 
 - Map **In Stock** inventory items to **request lines**; may set **`reservedForRequestLineId`** on items in DB.
-- **Starlink rule:** Product names containing “starlink” (case-insensitive) require **all requested units** on that line to have assigned serials before **invoiced** is allowed (`lib/stock-request-rules.ts`). Prevents billing kits without traceable serials.
+- **Serial rule:** Catalog rows with `product_lines.requires_serial` require **all requested units** on that line to have assigned serials before **serviced** (051/052 trigger) and before **invoiced** (`lib/stock-request-rules.ts`). There is no UI to toggle `requires_serial` yet — see the stock-write matrix note.
 
 ### Billing (`/requests/[id]/billing`)
 
@@ -488,7 +521,7 @@ Per-user profile, local notification preferences, inventory thresholds, and **ad
 
 ### Purpose
 
-Normalize **product name + vendor** so every inventory row points at one catalog row (foreign key `product_id` in Supabase).
+Normalize **product name + vendor** so every inventory row and stock-request line points at one catalog row (foreign key `product_id` in Supabase). `stock_request_lines.product_name` is deprecated display text.
 
 ### Behaviour
 
