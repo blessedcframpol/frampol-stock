@@ -215,7 +215,6 @@ async function main() {
     )
   }
 
-  const actorForSerial = tech?.id || sales.id
   // Tech/admin for assign RPC
   const assignActor = tech?.role === "technicians" || tech?.role === "admin" ? tech.id : adminUser.id
   await asUser(assignActor, async (c) => {
