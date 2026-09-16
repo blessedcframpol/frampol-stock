@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo, useEffect } from "react"
+import { useState, useMemo } from "react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import {
@@ -116,16 +116,26 @@ export function InventoryContent() {
   const onHandInventory = useMemo(() => filterOnHandInventory(inventory), [inventory])
   const { role } = useAuth()
   const isAdmin = canEditInventory(role)
-  const [search, setSearch] = useState("")
-
   const serialFromUrl = searchParams.get("serial")
-  const groupFromUrl = searchParams.get("group")
-  useEffect(() => {
-    if (serialFromUrl) setSearch(serialFromUrl)
-  }, [serialFromUrl])
+  const groupFromUrl = searchParams.get("group")?.trim() ?? ""
+  const [search, setSearch] = useState(serialFromUrl ?? "")
+  const [seenSerial, setSeenSerial] = useState(serialFromUrl)
+  if (serialFromUrl && serialFromUrl !== seenSerial) {
+    setSeenSerial(serialFromUrl)
+    setSearch(serialFromUrl)
+  } else if (serialFromUrl !== seenSerial) {
+    setSeenSerial(serialFromUrl)
+  }
   const [vendorFilter, setVendorFilter] = useState<string>("all")
   const [selectedVendor, setSelectedVendor] = useState<string | null>(null)
-  const [selectedGroupName, setSelectedGroupName] = useState<string | null>(null)
+  const [selectedGroupName, setSelectedGroupName] = useState<string | null>(groupFromUrl || null)
+  const [seenGroup, setSeenGroup] = useState(groupFromUrl)
+  if (groupFromUrl && groupFromUrl !== seenGroup) {
+    setSeenGroup(groupFromUrl)
+    setSelectedGroupName(groupFromUrl)
+  } else if (groupFromUrl !== seenGroup) {
+    setSeenGroup(groupFromUrl)
+  }
   const [itemView, setItemView] = useState<"list" | "card">("list")
   const [groupSearch, setGroupSearch] = useState("")
   const [addSerial, setAddSerial] = useState("")
@@ -137,17 +147,15 @@ export function InventoryContent() {
   const [addWarrantyEnd, setAddWarrantyEnd] = useState("")
   const [addDialogOpen, setAddDialogOpen] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
+  const [selectionGroup, setSelectionGroup] = useState(selectedGroupName)
+  if (selectedGroupName !== selectionGroup) {
+    setSelectionGroup(selectedGroupName)
+    setSelectedIds(new Set())
+  }
   const [movementDialogOpen, setMovementDialogOpen] = useState(false)
   const [movementItems, setMovementItems] = useState<InventoryItem[]>([])
   const [moveItemsOpen, setMoveItemsOpen] = useState(false)
   const [moveItems, setMoveItems] = useState<InventoryItem[]>([])
-
-  useEffect(() => {
-    if (groupFromUrl?.trim()) setSelectedGroupName(groupFromUrl.trim())
-  }, [groupFromUrl])
-  useEffect(() => {
-    setSelectedIds(new Set())
-  }, [selectedGroupName])
 
   const vendorsFromInventory = useMemo(
     () => [...new Set(onHandInventory.map((i) => (i.vendor?.trim() ? i.vendor : "General")))].sort() as string[],
@@ -249,7 +257,6 @@ export function InventoryContent() {
 
   const showVendorsView = vendors.length > 0 && selectedVendor === null && selectedGroupName === null
   const showProductsView = (vendors.length === 0 || selectedVendor !== null) && selectedGroupName === null
-  const showItemsView = selectedGroupName !== null
 
   const serialFromUrlForHistory = searchParams.get("serial")
   const kitHistoryForSerial = useMemo(() => {

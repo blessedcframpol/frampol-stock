@@ -19,15 +19,20 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Undo2, MoreHorizontal, ArrowRightLeft, Loader2 } from "lucide-react"
 import { useInventoryStore } from "@/lib/inventory-store"
+import { useAuth } from "@/lib/auth-context"
+import { canAmendTransaction } from "@/lib/permissions"
 import { toast } from "sonner"
+
 interface TransactionActionsProps {
   transaction: Transaction
   /** Compact mode: icon-only trigger for dashboard table */
   compact?: boolean
 }
 
-export function TransactionActions({ transaction, compact }: TransactionActionsProps) {
+export function TransactionActions({ transaction }: TransactionActionsProps) {
   const { undoTransaction, reassignTransaction, inventory } = useInventoryStore()
+  const { user, role } = useAuth()
+  const canAmend = canAmendTransaction(role, transaction.createdBy, user?.id)
   const [reassignOpen, setReassignOpen] = useState(false)
   const [reassignName, setReassignName] = useState(transaction.itemName)
   const [busy, setBusy] = useState(false)
@@ -37,6 +42,10 @@ export function TransactionActions({ transaction, compact }: TransactionActionsP
     inventory.forEach((item) => names.add(item.name))
     return Array.from(names).sort()
   }, [inventory])
+
+  const showUndo = canAmend && transaction.type !== "Dispose"
+  const showReassign = canAmend
+  const hasMenuItems = showUndo || showReassign
 
   async function handleUndo() {
     setBusy(true)
@@ -83,6 +92,8 @@ export function TransactionActions({ transaction, compact }: TransactionActionsP
     setReassignOpen(true)
   }
 
+  if (!hasMenuItems) return null
+
   return (
     <>
       <DropdownMenu>
@@ -102,16 +113,18 @@ export function TransactionActions({ transaction, compact }: TransactionActionsP
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          {transaction.type !== "Dispose" && (
+          {showUndo && (
             <DropdownMenuItem onClick={handleUndo} disabled={busy}>
               <Undo2 className="mr-2 h-4 w-4" />
               Undo
             </DropdownMenuItem>
           )}
-          <DropdownMenuItem onClick={openReassign} disabled={busy}>
-            <ArrowRightLeft className="mr-2 h-4 w-4" />
-            Reassign to another product
-          </DropdownMenuItem>
+          {showReassign && (
+            <DropdownMenuItem onClick={openReassign} disabled={busy}>
+              <ArrowRightLeft className="mr-2 h-4 w-4" />
+              Reassign to another product
+            </DropdownMenuItem>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
 

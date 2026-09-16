@@ -1,7 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
-import Link from "next/link"
+import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -24,10 +23,16 @@ import {
   uploadInvoiceDocumentForRequest,
   type StockRequestWithRelations,
 } from "@/lib/supabase/stock-requests-db"
-import { canMarkRequestInvoiced, lineRequiresSerialsBeforeInvoice } from "@/lib/stock-request-rules"
+import { canMarkRequestInvoiced, lineRequiresSerialAssignment } from "@/lib/stock-request-rules"
 import { formatDateDDMMYYYY } from "@/lib/utils"
 import { toast } from "sonner"
 import { toastFromCaughtError } from "@/lib/toast-reportable-error"
+import {
+  isAuthFailure,
+  loadErrorFromCaught,
+  notifySessionExpired,
+  signedOutLoadError,
+} from "@/lib/unauthorized"
 import { AlertCircle, ExternalLink, Loader2 } from "lucide-react"
 import { PageBackLink, PageHeader } from "@/components/page-nav"
 
@@ -37,36 +42,61 @@ export function StockRequestBilling({ requestId }: { requestId: string }) {
   const [row, setRow] = useState<StockRequestWithRelations | null>(null)
   const [assigned, setAssigned] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [loadedForId, setLoadedForId] = useState(requestId)
+  if (requestId !== loadedForId) {
+    setLoadedForId(requestId)
+    setLoading(true)
+    setLoadError(null)
+    setRow(null)
+    setAssigned({})
+  }
   const [invoiceNumber, setInvoiceNumber] = useState("")
   const [busy, setBusy] = useState(false)
   const [file, setFile] = useState<File | null>(null)
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const sb = getSupabaseClient()
-      const r = await fetchStockRequestById(sb, requestId)
-      setRow(r)
-      if (r?.stock_request_lines?.length) {
-        const asg = await fetchAssignedCountsByLineId(
-          sb,
-          r.stock_request_lines.map((l) => l.id)
-        )
-        setAssigned(asg)
-      } else {
-        setAssigned({})
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const sb = getSupabaseClient()
+        const r = await fetchStockRequestById(sb, requestId)
+        if (cancelled) return
+        if (!r) {
+          const sessionErr = await signedOutLoadError(sb)
+          if (cancelled) return
+          if (sessionErr) {
+            setLoadError(sessionErr)
+            setRow(null)
+            return
+          }
+        }
+        setLoadError(null)
+        setRow(r)
+        if (r?.stock_request_lines?.length) {
+          const asg = await fetchAssignedCountsByLineId(
+            sb,
+            r.stock_request_lines.map((l) => l.id)
+          )
+          if (!cancelled) setAssigned(asg)
+        } else {
+          setAssigned({})
+        }
+      } catch (e) {
+        if (!cancelled) {
+          if (isAuthFailure(e)) notifySessionExpired()
+          else toastFromCaughtError(e, "Could not load request")
+          setLoadError(loadErrorFromCaught(e, "Could not load this request."))
+          setRow(null)
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
       }
-    } catch (e) {
-      toastFromCaughtError(e, "Could not load request")
-      setRow(null)
-    } finally {
-      setLoading(false)
+    })()
+    return () => {
+      cancelled = true
     }
   }, [requestId])
-
-  useEffect(() => {
-    void load()
-  }, [load])
 
   const gate =
     row && row.status === "serviced"
@@ -128,6 +158,17 @@ export function StockRequestBilling({ requestId }: { requestId: string }) {
     )
   }
 
+  if (loadError) {
+    return (
+      <div className="flex flex-col gap-4">
+        <PageBackLink href="/requests" label="Requests" />
+        <p role="alert" className="text-sm text-destructive">
+          {loadError}
+        </p>
+      </div>
+    )
+  }
+
   if (!row) {
     return (
       <div className="flex flex-col gap-4">
@@ -184,13 +225,13 @@ export function StockRequestBilling({ requestId }: { requestId: string }) {
             <TableBody>
               {(row.stock_request_lines ?? []).map((l) => {
                 const g = assigned[l.id] ?? 0
-                const star = lineRequiresSerialsBeforeInvoice(l.product_name)
+                const star = lineRequiresSerialAssignment(l)
                 return (
                   <TableRow key={l.id}>
                     <TableCell>
                       {l.product_name}
                       {star ? (
-                        <span className="block text-xs text-muted-foreground">Starlink — needs full serials to invoice</span>
+                        <span className="block text-xs text-muted-foreground">Serial-tracked — needs full serials to invoice</span>
                       ) : null}
                     </TableCell>
                     <TableCell className="text-right">{l.quantity_requested}</TableCell>

@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useEffect, useMemo, useRef } from "react"
+import { useState, useEffect, useMemo } from "react"
+import { useIsClient } from "@/hooks/use-is-client"
 import { useSearchParams } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -96,6 +97,40 @@ function loadScopeSession(): ScopeSession | null {
   } catch {
     return null
   }
+}
+
+function scopeFromSearchParams(searchParams: { get(name: string): string | null }): ScopeSession | null {
+  const vendorParam = searchParams.get("vendor")?.trim()
+  const productParam = searchParams.get("product")?.trim()
+  const serialsParam = searchParams.get("serials")?.trim()
+  if (serialsParam) {
+    return {
+      preset: "selected",
+      vendor: "",
+      productName: "",
+      serialAllowList: serialsParam
+        .split(",")
+        .map((s) => decodeURIComponent(s.trim()))
+        .filter(Boolean),
+    }
+  }
+  if (vendorParam && productParam) {
+    return {
+      preset: "vendor_product",
+      vendor: decodeURIComponent(vendorParam),
+      productName: decodeURIComponent(productParam),
+      serialAllowList: [],
+    }
+  }
+  if (vendorParam) {
+    return {
+      preset: "vendor",
+      vendor: decodeURIComponent(vendorParam),
+      productName: "",
+      serialAllowList: [],
+    }
+  }
+  return null
 }
 
 function saveScopeSession(session: ScopeSession) {
@@ -195,14 +230,28 @@ async function copySerialLinesToClipboard(serials: string[], toastLabel: string)
 export function StockTakeContent() {
   const { inventory } = useInventoryStore()
   const searchParams = useSearchParams()
-  const scopeInitDone = useRef(false)
+  const isClient = useIsClient()
+  const [urlScope] = useState(() => scopeFromSearchParams(searchParams))
 
   const [serialNumbers, setSerialNumbers] = useState(() => loadSessionFromStorage())
   const [hasCompared, setHasCompared] = useState(false)
-  const [scopePreset, setScopePreset] = useState<StockTakeScopePreset>("full")
-  const [scopeVendor, setScopeVendor] = useState("")
-  const [scopeProduct, setScopeProduct] = useState("")
-  const [serialAllowList, setSerialAllowList] = useState<string[]>([])
+  const [scopePreset, setScopePreset] = useState<StockTakeScopePreset>(urlScope?.preset ?? "full")
+  const [scopeVendor, setScopeVendor] = useState(urlScope?.vendor ?? "")
+  const [scopeProduct, setScopeProduct] = useState(urlScope?.productName ?? "")
+  const [serialAllowList, setSerialAllowList] = useState<string[]>(urlScope?.serialAllowList ?? [])
+  // URL scope wins and is read once. Session restore only when the URL had no scope,
+  // and only after hydration so sessionStorage is available.
+  const [sessionScopeApplied, setSessionScopeApplied] = useState(urlScope != null)
+  if (isClient && !sessionScopeApplied) {
+    setSessionScopeApplied(true)
+    const saved = loadScopeSession()
+    if (saved) {
+      setScopePreset(saved.preset)
+      setScopeVendor(saved.vendor)
+      setScopeProduct(saved.productName)
+      setSerialAllowList(saved.serialAllowList)
+    }
+  }
 
   const { scope, scopeLabel } = useStockTakeScope({
     inventory,
@@ -213,51 +262,14 @@ export function StockTakeContent() {
   })
 
   useEffect(() => {
-    if (scopeInitDone.current) return
-    scopeInitDone.current = true
-
-    const vendorParam = searchParams.get("vendor")?.trim()
-    const productParam = searchParams.get("product")?.trim()
-    const serialsParam = searchParams.get("serials")?.trim()
-
-    if (serialsParam) {
-      const list = serialsParam
-        .split(",")
-        .map((s) => decodeURIComponent(s.trim()))
-        .filter(Boolean)
-      setScopePreset("selected")
-      setSerialAllowList(list)
-      return
-    }
-    if (vendorParam && productParam) {
-      setScopePreset("vendor_product")
-      setScopeVendor(decodeURIComponent(vendorParam))
-      setScopeProduct(decodeURIComponent(productParam))
-      return
-    }
-    if (vendorParam) {
-      setScopePreset("vendor")
-      setScopeVendor(decodeURIComponent(vendorParam))
-      return
-    }
-
-    const saved = loadScopeSession()
-    if (saved) {
-      setScopePreset(saved.preset)
-      setScopeVendor(saved.vendor)
-      setScopeProduct(saved.productName)
-      setSerialAllowList(saved.serialAllowList)
-    }
-  }, [searchParams])
-
-  useEffect(() => {
+    if (!sessionScopeApplied) return
     saveScopeSession({
       preset: scopePreset,
       vendor: scopeVendor,
       productName: scopeProduct,
       serialAllowList,
     })
-  }, [scopePreset, scopeVendor, scopeProduct, serialAllowList])
+  }, [sessionScopeApplied, scopePreset, scopeVendor, scopeProduct, serialAllowList])
 
   const serialList = useMemo(
     () =>
@@ -327,7 +339,7 @@ export function StockTakeContent() {
       })
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
-        toastFromApiErrorBody(data, "Failed to save stock take")
+        toastFromApiErrorBody(data, "Failed to save stock take", res.status)
         return
       }
       setSerialNumbers("")

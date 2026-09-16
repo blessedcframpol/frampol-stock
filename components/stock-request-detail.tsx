@@ -16,26 +16,38 @@ import {
 } from "@/components/ui/table"
 import { useAuth } from "@/lib/auth-context"
 import {
-  canCreateStockRequest,
   canFulfillStockRequests,
   canInvoiceStockRequests,
+  canCreateStockRequest,
 } from "@/lib/permissions"
 import { getSupabaseClient } from "@/lib/supabase/client"
 import {
   cancelStockRequest,
   fetchAssignedCountsByLineId,
-  fetchAvailabilityByProductNames,
+  fetchAvailabilityByProductIds,
   fetchStockRequestById,
   markRequestInProgress,
+  revertStockRequestToDraft,
   submitStockRequest,
   updateDraftRequest,
   uploadQuotationForRequest,
   type StockRequestWithRelations,
 } from "@/lib/supabase/stock-requests-db"
-import { lineRequiresSerialsBeforeInvoice } from "@/lib/stock-request-rules"
+import { lineRequiresSerialAssignment } from "@/lib/stock-request-rules"
+import {
+  allowedTransitions,
+  isStockRequestStatus,
+  type StockRequestStatus,
+} from "@/lib/stock-request-statuses"
 import { formatDateDDMMYYYY } from "@/lib/utils"
 import { toast } from "sonner"
 import { toastFromCaughtError } from "@/lib/toast-reportable-error"
+import {
+  isAuthFailure,
+  loadErrorFromCaught,
+  notifySessionExpired,
+  signedOutLoadError,
+} from "@/lib/unauthorized"
 import { PageBackLink, pageTitleClass } from "@/components/page-nav"
 import { cn } from "@/lib/utils"
 import {
@@ -48,6 +60,8 @@ import {
   Ban,
   Send,
   Play,
+  RotateCcw,
+  Undo2,
 } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -66,63 +80,123 @@ export function StockRequestDetail({ requestId }: { requestId: string }) {
   const { user, role } = useAuth()
   const [row, setRow] = useState<StockRequestWithRelations | null>(null)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [avail, setAvail] = useState<Record<string, number>>({})
   const [assigned, setAssigned] = useState<Record<string, number>>({})
   const [busy, setBusy] = useState(false)
   const [quoteUploading, setQuoteUploading] = useState(false)
+  const [loadedForId, setLoadedForId] = useState(requestId)
+  if (requestId !== loadedForId) {
+    setLoadedForId(requestId)
+    setLoading(true)
+    setLoadError(null)
+    setRow(null)
+    setAvail({})
+    setAssigned({})
+  }
+
+  const fetchRequestBundle = useCallback(async () => {
+    const sb = getSupabaseClient()
+    const r = await fetchStockRequestById(sb, requestId)
+    if (!r?.stock_request_lines?.length) {
+      return { r, avail: {} as Record<string, number>, assigned: {} as Record<string, number> }
+    }
+    const productIds = r.stock_request_lines.map((l) => l.product_id)
+    const [a, asg] = await Promise.all([
+      fetchAvailabilityByProductIds(sb, productIds),
+      fetchAssignedCountsByLineId(
+        sb,
+        r.stock_request_lines.map((l) => l.id)
+      ),
+    ])
+    return { r, avail: a, assigned: asg }
+  }, [requestId])
 
   const load = useCallback(async () => {
-    setLoading(true)
     try {
-      const sb = getSupabaseClient()
-      const r = await fetchStockRequestById(sb, requestId)
-      setRow(r)
-      if (r?.stock_request_lines?.length) {
-        const names = r.stock_request_lines.map((l) => l.product_name)
-        const [a, asg] = await Promise.all([
-          fetchAvailabilityByProductNames(sb, names),
-          fetchAssignedCountsByLineId(
-            sb,
-            r.stock_request_lines.map((l) => l.id)
-          ),
-        ])
-        setAvail(a)
-        setAssigned(asg)
-      } else {
-        setAvail({})
-        setAssigned({})
+      const bundle = await fetchRequestBundle()
+      if (!bundle.r) {
+        const sessionErr = await signedOutLoadError(getSupabaseClient())
+        if (sessionErr) {
+          setLoadError(sessionErr)
+          setRow(null)
+          return
+        }
       }
+      setLoadError(null)
+      setRow(bundle.r)
+      setAvail(bundle.avail)
+      setAssigned(bundle.assigned)
     } catch (e) {
-      toastFromCaughtError(e, "Could not load request")
+      if (isAuthFailure(e)) notifySessionExpired()
+      else toastFromCaughtError(e, "Could not load request")
+      setLoadError(loadErrorFromCaught(e, "Could not load this request."))
       setRow(null)
     } finally {
       setLoading(false)
     }
-  }, [requestId])
+  }, [fetchRequestBundle])
 
   useEffect(() => {
-    void load()
-  }, [load])
+    let cancelled = false
+    void (async () => {
+      try {
+        const bundle = await fetchRequestBundle()
+        if (cancelled) return
+        if (!bundle.r) {
+          const sessionErr = await signedOutLoadError(getSupabaseClient())
+          if (cancelled) return
+          if (sessionErr) {
+            setLoadError(sessionErr)
+            setRow(null)
+            return
+          }
+        }
+        setLoadError(null)
+        setRow(bundle.r)
+        setAvail(bundle.avail)
+        setAssigned(bundle.assigned)
+      } catch (e) {
+        if (!cancelled) {
+          if (isAuthFailure(e)) notifySessionExpired()
+          else toastFromCaughtError(e, "Could not load request")
+          setLoadError(loadErrorFromCaught(e, "Could not load this request."))
+          setRow(null)
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [fetchRequestBundle])
 
   const isOwner = Boolean(user?.id && row?.created_by === user.id)
+  const status: StockRequestStatus | null =
+    row && isStockRequestStatus(row.status) ? row.status : null
+  const transitions = status ? allowedTransitions(status, role, isOwner) : []
+
   const canEditDraft = row?.status === "draft" && isOwner && canCreateStockRequest(role)
+  const canSubmitDraft = transitions.includes("submitted")
+  const canReturnDraft = transitions.includes("draft") && status === "submitted"
   const canCancel =
-    row &&
-    (row.status === "draft" || row.status === "submitted") &&
-    isOwner &&
-    canCreateStockRequest(role)
-  const canSubmitDraft = row?.status === "draft" && isOwner && canCreateStockRequest(role)
+    transitions.includes("cancelled") &&
+    (status === "draft" || status === "submitted" || status === "in_progress")
+  const canStartWork = transitions.includes("in_progress") && status === "submitted"
+  const canReopenWork = transitions.includes("in_progress") && status === "serviced"
   const showFulfill =
     row &&
     (row.status === "submitted" || row.status === "in_progress") &&
     canFulfillStockRequests(role)
   const showBilling =
-    row && (row.status === "serviced" || row.status === "invoiced") && canInvoiceStockRequests(role)
-  const canStartWork =
-    row?.status === "submitted" && canFulfillStockRequests(role)
+    row &&
+    ((row.status === "serviced" && transitions.includes("invoiced")) ||
+      row.status === "invoiced") &&
+    canInvoiceStockRequests(role)
 
   async function onSubmitDraft() {
-    if (!row) return
+    if (!row || !canSubmitDraft) return
     setBusy(true)
     try {
       const sb = getSupabaseClient()
@@ -137,12 +211,29 @@ export function StockRequestDetail({ requestId }: { requestId: string }) {
     }
   }
 
-  async function onCancel() {
-    if (!row) return
+  async function onReturnDraft() {
+    if (!row || !canReturnDraft) return
     setBusy(true)
     try {
       const sb = getSupabaseClient()
-      await cancelStockRequest(sb, row.id)
+      await revertStockRequestToDraft(sb, row.id)
+      toast.success("Returned to draft.")
+      await load()
+      router.refresh()
+    } catch (e) {
+      toastFromCaughtError(e, "Could not return to draft")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function onCancel() {
+    if (!row || !canCancel || !status) return
+    if (status !== "draft" && status !== "submitted" && status !== "in_progress") return
+    setBusy(true)
+    try {
+      const sb = getSupabaseClient()
+      await cancelStockRequest(sb, row.id, status)
       toast.success("Request cancelled.")
       await load()
       router.refresh()
@@ -154,16 +245,32 @@ export function StockRequestDetail({ requestId }: { requestId: string }) {
   }
 
   async function onStartWork() {
-    if (!row) return
+    if (!row || !canStartWork) return
     setBusy(true)
     try {
       const sb = getSupabaseClient()
-      await markRequestInProgress(sb, row.id)
+      await markRequestInProgress(sb, row.id, "submitted")
       toast.success("Marked in progress.")
       await load()
       router.refresh()
     } catch (e) {
       toastFromCaughtError(e, "Could not update status")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function onReopenWork() {
+    if (!row || !canReopenWork) return
+    setBusy(true)
+    try {
+      const sb = getSupabaseClient()
+      await markRequestInProgress(sb, row.id, "serviced")
+      toast.success("Reopened for fulfillment.")
+      await load()
+      router.refresh()
+    } catch (e) {
+      toastFromCaughtError(e, "Could not reopen request")
     } finally {
       setBusy(false)
     }
@@ -192,6 +299,17 @@ export function StockRequestDetail({ requestId }: { requestId: string }) {
       <div className="flex items-center justify-center py-20 text-muted-foreground gap-2">
         <Loader2 className="size-5 animate-spin" />
         Loading…
+      </div>
+    )
+  }
+
+  if (loadError) {
+    return (
+      <div className="flex flex-col gap-4">
+        <PageBackLink href="/requests" label="Requests" />
+        <p role="alert" className="text-sm text-destructive">
+          {loadError}
+        </p>
       </div>
     )
   }
@@ -243,10 +361,22 @@ export function StockRequestDetail({ requestId }: { requestId: string }) {
               Submit
             </Button>
           )}
+          {canReturnDraft && (
+            <Button variant="outline" size="sm" className="gap-1" disabled={busy} onClick={() => void onReturnDraft()}>
+              <Undo2 className="size-3.5" />
+              Return to draft
+            </Button>
+          )}
           {canStartWork && (
             <Button variant="secondary" size="sm" className="gap-1" disabled={busy} onClick={() => void onStartWork()}>
               <Play className="size-3.5" />
               Start work
+            </Button>
+          )}
+          {canReopenWork && (
+            <Button variant="secondary" size="sm" className="gap-1" disabled={busy} onClick={() => void onReopenWork()}>
+              <RotateCcw className="size-3.5" />
+              Reopen for work
             </Button>
           )}
           {showFulfill && (
@@ -345,8 +475,8 @@ export function StockRequestDetail({ requestId }: { requestId: string }) {
             </TableHeader>
             <TableBody>
               {(row.stock_request_lines ?? []).map((l) => {
-                const needSerial = lineRequiresSerialsBeforeInvoice(l.product_name)
-                const a = avail[l.product_name] ?? 0
+                const needSerial = lineRequiresSerialAssignment(l)
+                const a = avail[l.product_id] ?? 0
                 const g = assigned[l.id] ?? 0
                 return (
                   <TableRow key={l.id}>
@@ -357,7 +487,7 @@ export function StockRequestDetail({ requestId }: { requestId: string }) {
                       {g}/{l.quantity_requested}
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">
-                      {needSerial ? "Starlink: full serial count before invoice" : "Optional before invoice"}
+                      {needSerial ? "Serial-tracked: full serial count before serviced" : "Optional before serviced"}
                     </TableCell>
                   </TableRow>
                 )

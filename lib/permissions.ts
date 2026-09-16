@@ -25,11 +25,32 @@ export function canReverseQuickScanBatches(role: AppRole | null | undefined): bo
   return role === ADMIN
 }
 
+/** Record stock movements (Quick Scan, Inventory Movement). Mirrors RLS in 047. */
+export function canRecordStockMovement(role: AppRole | null | undefined): boolean {
+  return role === ADMIN || role === TECHNICIANS
+}
+
+/** Undo or reassign a ledger row: its creator, or any admin. Mirrors RLS in 047. */
+export function canAmendTransaction(
+  role: AppRole | null | undefined,
+  transactionCreatedBy: string | null | undefined,
+  currentUserId: string | null | undefined
+): boolean {
+  if (role === ADMIN) return true
+  if (role !== TECHNICIANS) return false
+  return Boolean(transactionCreatedBy && currentUserId && transactionCreatedBy === currentUserId)
+}
+
 /** Export full transaction ledger (admin only). */
 export function canExportAllTransactions(role: AppRole | null | undefined): boolean {
   return role === ADMIN
 }
 
+/**
+ * Inventory page add / edit / trash only — deliberately stricter than RLS.
+ * Stock movements use canRecordStockMovement (admin + technicians); do not "fix"
+ * this to match write policies on inventory_items.
+ */
 export function canEditInventory(role: AppRole | null | undefined): boolean {
   return role === ADMIN
 }

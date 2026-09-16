@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useCallback, useEffect, useState } from "react"
+import { useEffect, useState } from "react"
 import {
   Table,
   TableBody,
@@ -18,6 +18,8 @@ import { canViewFinancials } from "@/lib/permissions"
 import type { TransactionBatchSummary } from "@/lib/transaction-batches"
 import { cn, formatDateDDMMYYYY } from "@/lib/utils"
 import { FileText, Loader2 } from "lucide-react"
+import { toastFromApiErrorBody, toastFromCaughtError } from "@/lib/toast-reportable-error"
+import { SESSION_EXPIRED_MESSAGE } from "@/lib/unauthorized"
 
 const RECENT_BATCH_LIMIT = 10
 
@@ -36,25 +38,46 @@ const statusStyles: Record<string, string> = {
 export function TransactionsTable() {
   const [batches, setBatches] = useState<TransactionBatchSummary[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const { role } = useAuth()
   const showFinancials = canViewFinancials(role)
 
-  const fetchBatches = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch("/api/transaction-batches")
-      const data = await res.json().catch(() => [])
-      setBatches(Array.isArray(data) ? data : [])
-    } catch {
-      setBatches([])
-    } finally {
-      setLoading(false)
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await fetch("/api/transaction-batches")
+        if (cancelled) return
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}))
+          toastFromApiErrorBody(data, "Failed to load recent transactions", res.status)
+          setLoadError(
+            res.status === 401 ? SESSION_EXPIRED_MESSAGE : "Could not load recent transactions."
+          )
+          return
+        }
+        const data = await res.json().catch(() => null)
+        if (cancelled) return
+        if (!Array.isArray(data)) {
+          toastFromApiErrorBody(data, "Failed to load recent transactions", res.status)
+          setLoadError("Could not load recent transactions.")
+          return
+        }
+        setLoadError(null)
+        setBatches(data as TransactionBatchSummary[])
+      } catch (e) {
+        if (!cancelled) {
+          toastFromCaughtError(e, "Failed to load recent transactions")
+          setLoadError("Could not load recent transactions.")
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
     }
   }, [])
-
-  useEffect(() => {
-    void fetchBatches()
-  }, [fetchBatches])
 
   const recent = batches.slice(0, RECENT_BATCH_LIMIT)
 
@@ -71,6 +94,10 @@ export function TransactionsTable() {
           <div className="flex items-center justify-center py-16 text-muted-foreground">
             <Loader2 className="w-8 h-8 animate-spin" />
           </div>
+        ) : loadError ? (
+          <p role="alert" className="text-sm text-destructive py-8 text-center">
+            {loadError}
+          </p>
         ) : recent.length === 0 ? (
           <p className="text-sm text-muted-foreground py-8 text-center">No transactions yet.</p>
         ) : (

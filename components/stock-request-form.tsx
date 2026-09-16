@@ -1,7 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
-import Link from "next/link"
+import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -54,6 +53,16 @@ function newLine(): LineDraft {
   }
 }
 
+function linesFromRequest(request: StockRequestWithRelations): LineDraft[] {
+  const rows = request.stock_request_lines ?? []
+  if (rows.length === 0) return [newLine()]
+  return rows.map((l) => ({
+    id: l.id,
+    productName: l.product_name,
+    quantity: l.quantity_requested,
+  }))
+}
+
 export function StockRequestForm({
   mode,
   initialRequest,
@@ -68,9 +77,15 @@ export function StockRequestForm({
   const { clients, refetch: refetchClients } = useClients()
   const { inventory } = useInventoryStore()
 
-  const [clientId, setClientId] = useState("")
-  const [notes, setNotes] = useState("")
-  const [lines, setLines] = useState<LineDraft[]>([newLine()])
+  const [clientId, setClientId] = useState(() =>
+    mode === "edit" && initialRequest ? initialRequest.client_id : ""
+  )
+  const [notes, setNotes] = useState(() =>
+    mode === "edit" && initialRequest ? (initialRequest.notes ?? "") : ""
+  )
+  const [lines, setLines] = useState<LineDraft[]>(() =>
+    mode === "edit" && initialRequest ? linesFromRequest(initialRequest) : [newLine()]
+  )
   const [quoteFile, setQuoteFile] = useState<File | null>(null)
   const [busy, setBusy] = useState(false)
   const [newClientOpen, setNewClientOpen] = useState(false)
@@ -88,22 +103,6 @@ export function StockRequestForm({
   const productOptions = useMemo(() => [...productNames], [productNames])
 
   const requestId = mode === "edit" && initialRequest ? initialRequest.id : null
-
-  useEffect(() => {
-    if (mode !== "edit" || !initialRequest) return
-    setClientId(initialRequest.client_id)
-    setNotes(initialRequest.notes ?? "")
-    setLines(
-      (initialRequest.stock_request_lines ?? []).length === 0
-        ? [newLine()]
-        : (initialRequest.stock_request_lines ?? []).map((l) => ({
-            id: l.id,
-            productName: l.product_name,
-            quantity: l.quantity_requested,
-          }))
-    )
-    setQuoteFile(null)
-  }, [mode, initialRequest])
 
   async function ensureClient(): Promise<string | null> {
     if (clientId) return clientId

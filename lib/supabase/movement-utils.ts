@@ -7,16 +7,36 @@ import type { InventoryItem, ItemStatus, JsonValue, Transaction, TransactionType
 /** Default rental period (days from out date) when returnDate not provided */
 const DEFAULT_RENTAL_DAYS = 30
 
-/** YYYY-MM-DD or parseable ISO → transaction `date` string; missing/invalid → fallback */
-function resolveSaleTransactionDate(input: string | undefined, fallbackIso: string): string {
-  const raw = input?.trim()
-  if (!raw) return fallbackIso
-  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
-    const d = new Date(`${raw}T00:00:00.000Z`)
-    return Number.isNaN(d.getTime()) ? fallbackIso : d.toISOString()
+const SALE_DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/
+const SALE_DATE_YEAR_MIN = 2020
+const SALE_DATE_YEAR_MAX = 2100
+
+/**
+ * Parse an admin catch-up sale date override (YYYY-MM-DD from `<input type="date">`).
+ * Rejects anything that is not a strict 4-digit year in 2020..2100 — never use `new Date(raw)`,
+ * which parses 5-digit years as local midnight and emits expanded-year ISO via toISOString().
+ */
+export function parseSaleDateOverride(
+  input: string
+): { ok: true; iso: `${string}T00:00:00.000Z` } | { ok: false; error: string } {
+  const raw = input.trim()
+  if (!SALE_DATE_ONLY_RE.test(raw)) {
+    return { ok: false, error: "Sale date must be a valid calendar day (YYYY-MM-DD)." }
   }
-  const d = new Date(raw)
-  return Number.isNaN(d.getTime()) ? fallbackIso : d.toISOString()
+  const year = Number(raw.slice(0, 4))
+  if (year < SALE_DATE_YEAR_MIN || year > SALE_DATE_YEAR_MAX) {
+    return {
+      ok: false,
+      error: `Sale date year must be between ${SALE_DATE_YEAR_MIN} and ${SALE_DATE_YEAR_MAX}.`,
+    }
+  }
+  const iso = `${raw}T00:00:00.000Z` as `${string}T00:00:00.000Z`
+  const d = new Date(iso)
+  // Reject non-calendar days (e.g. 2026-02-31 → rolls forward in Date, ISO changes)
+  if (Number.isNaN(d.getTime()) || d.toISOString() !== iso) {
+    return { ok: false, error: "Sale date is not a valid calendar day." }
+  }
+  return { ok: true, iso }
 }
 
 /** Outbound types where FortiGate cloud keys are applied to inventory rows */
@@ -210,6 +230,8 @@ export function computeMovementResult(
   rejected: MovementRejection[]
   updatedItems: InventoryItem[]
   newTransactions: Transaction[]
+  /** Set when Sale override date is present but malformed / out of range — no work done. */
+  saleDateError?: string
 } {
   const {
     type,
@@ -235,7 +257,28 @@ export function computeMovementResult(
     clientDirectory,
   } = params
   const nowIso = new Date().toISOString()
-  const date = type === "Sale" ? resolveSaleTransactionDate(saleTransactionDateIso, nowIso) : nowIso
+  let date: string
+  if (type === "Sale") {
+    const raw = saleTransactionDateIso?.trim()
+    if (!raw) {
+      date = nowIso
+    } else {
+      const parsed = parseSaleDateOverride(raw)
+      if (!parsed.ok) {
+        return {
+          success: [],
+          notFound: [],
+          rejected: [],
+          updatedItems: [],
+          newTransactions: [],
+          saleDateError: parsed.error,
+        }
+      }
+      date = parsed.iso
+    }
+  } else {
+    date = nowIso
+  }
   const defaultReturnDate = (() => {
     const d = new Date()
     d.setDate(d.getDate() + DEFAULT_RENTAL_DAYS)
@@ -526,4 +569,70 @@ export function computeMovementResult(
     }
   )
   return { success, notFound, rejected, updatedItems, newTransactions }
+}
+
+/** Revert state for one inventory item when undoing a transaction */
+export function getRevertUpdatesForTransaction(txn: Transaction): Partial<InventoryItem> {
+  switch (txn.type) {
+    case "Inbound":
+      return {}
+    case "Sale":
+      return {
+        status: "In Stock",
+        location: "Warehouse A",
+        client: undefined,
+        assignedTo: undefined,
+      }
+    case "POC Out":
+      return {
+        status: "In Stock",
+        location: "Warehouse A",
+        client: undefined,
+        assignedTo: undefined,
+        pocOutDate: undefined,
+      }
+    case "POC Return":
+      return {
+        status: "POC",
+        location: "Client Site",
+        client: undefined,
+        assignedTo: undefined,
+      }
+    case "Rental Return":
+      return {
+        status: "Rented",
+        location: "Client Site",
+        client: undefined,
+        assignedTo: undefined,
+        pocOutDate: undefined,
+        returnDate: undefined,
+      }
+    case "Sale Return":
+      return {
+        status: "Sold",
+        location: "Delivered",
+        client: txn.client || undefined,
+        assignedTo: (txn.assignedTo ?? txn.client) || undefined,
+      }
+    case "Rentals":
+      return {
+        status: "In Stock",
+        location: "Warehouse A",
+        client: undefined,
+        assignedTo: undefined,
+        pocOutDate: undefined,
+        returnDate: undefined,
+      }
+    case "Transfer":
+      return txn.fromLocation ? { location: txn.fromLocation } : {}
+    case "Dispose":
+      return {
+        status: "In Stock",
+        location: "Warehouse A",
+        client: undefined,
+        assignedTo: undefined,
+      }
+    default:
+      return {}
+  }
 }

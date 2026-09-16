@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -69,25 +69,49 @@ export function RemediationContent() {
     [inventory]
   )
 
-  async function load() {
-    if (!supabase) return
-    setLoading(true)
+  const fetchRemediationData = useCallback(async () => {
+    if (!supabase) return null
+    const [p, c] = await Promise.all([fetchRemediationProviders(supabase), fetchRemediationCases(supabase)])
+    return { providers: p, cases: c }
+  }, [supabase])
+
+  const load = useCallback(async () => {
     try {
-      const [p, c] = await Promise.all([fetchRemediationProviders(supabase), fetchRemediationCases(supabase)])
-      setProviders(p)
-      setCases(c)
-      if (p.length && !providerId) setProviderId(p[0]!.id)
+      const data = await fetchRemediationData()
+      if (!data) return
+      setProviders(data.providers)
+      setCases(data.cases)
+      setProviderId((prev) => (data.providers.length && !prev ? data.providers[0]!.id : prev))
     } catch (e) {
       console.error(e)
       toast.error("Could not load remediation data")
     } finally {
       setLoading(false)
     }
-  }
+  }, [fetchRemediationData])
 
   useEffect(() => {
-    void load()
-  }, [supabase])
+    let cancelled = false
+    void (async () => {
+      try {
+        const data = await fetchRemediationData()
+        if (cancelled || !data) return
+        setProviders(data.providers)
+        setCases(data.cases)
+        setProviderId((prev) => (data.providers.length && !prev ? data.providers[0]!.id : prev))
+      } catch (e) {
+        if (!cancelled) {
+          console.error(e)
+          toast.error("Could not load remediation data")
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [fetchRemediationData])
 
   async function handleCreateCase(e: React.FormEvent) {
     e.preventDefault()

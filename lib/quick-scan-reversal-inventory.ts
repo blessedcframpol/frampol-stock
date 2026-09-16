@@ -571,13 +571,31 @@ export async function revertInventoryAndTransactionsForQuickScan(
     p_batch_id: batchId,
     p_entries: rpcEntries,
     p_reversal_transactions: [reversalLedgerRow],
+    p_reason: reversalReason,
   })
   if (error) {
+    const msg = error.message ?? ""
+    if (/reverse_quick_scan_batch:\s*forbidden/i.test(msg)) {
+      return {
+        ok: false,
+        status: 403,
+        error: "Only admins can reverse scan batches",
+        detail: [msg],
+      }
+    }
+    if (/reason must be at least/i.test(msg)) {
+      return {
+        ok: false,
+        status: 400,
+        error: "Reason must be at least 15 characters",
+        detail: [msg],
+      }
+    }
     return {
       ok: false,
       status: 500,
       error: "Failed to reverse batch atomically.",
-      detail: [error.message],
+      detail: [msg],
     }
   }
 

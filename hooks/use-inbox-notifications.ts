@@ -33,11 +33,11 @@ export function useInboxNotifications(): {
   const refetch = useCallback(async () => {
     const sb = getSb()
     if (!sb) {
+      await Promise.resolve()
       setUnread([])
       setLoading(false)
       return
     }
-    setLoading(true)
     try {
       const rows = await fetchUnreadNotifications(sb)
       setUnread(rows)
@@ -49,8 +49,30 @@ export function useInboxNotifications(): {
   }, [])
 
   useEffect(() => {
-    void refetch()
-  }, [refetch, pathname])
+    let cancelled = false
+    void (async () => {
+      const sb = getSb()
+      if (!sb) {
+        await Promise.resolve()
+        if (!cancelled) {
+          setUnread([])
+          setLoading(false)
+        }
+        return
+      }
+      try {
+        const rows = await fetchUnreadNotifications(sb)
+        if (!cancelled) setUnread(rows)
+      } catch {
+        if (!cancelled) setUnread([])
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [pathname])
 
   const markRead = useCallback(async (ids: string[]) => {
     const sb = getSb()

@@ -1,13 +1,13 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useMemo, useState } from "react"
 import Link from "next/link"
 import { useSearchParams, useRouter } from "next/navigation"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useInventoryStore } from "@/lib/inventory-store"
 import { clients, appUsers } from "@/lib/data"
 import { runSearch, type SearchResults } from "@/lib/search"
@@ -30,10 +30,11 @@ export function SearchResultsContent() {
   const qFromUrl = searchParams.get("q") ?? ""
   const [filter, setFilter] = useState<FilterTab>("all")
   const [localQuery, setLocalQuery] = useState(qFromUrl)
-
-  useEffect(() => {
+  const [localQueryForUrl, setLocalQueryForUrl] = useState(qFromUrl)
+  if (qFromUrl !== localQueryForUrl) {
+    setLocalQueryForUrl(qFromUrl)
     setLocalQuery(qFromUrl)
-  }, [qFromUrl])
+  }
 
   const { inventory } = useInventoryStore()
 

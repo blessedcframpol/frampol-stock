@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { apiClientError, apiErrorResponse } from "@/lib/api-error-response"
-import { createServerSupabaseClient } from "@/lib/supabase/server"
+import { requireAdmin } from "@/lib/require-admin"
 import { createAdminClient, isAdminApiConfigured } from "@/lib/supabase/admin"
 
 function adminConfigError() {
@@ -19,19 +19,8 @@ export async function PATCH(
     if (!id) {
       return apiClientError(400, "id required")
     }
-    const supabase = await createServerSupabaseClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
-      return apiClientError(401, "Unauthorized", { log: "warn" })
-    }
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("role")
-      .eq("id", user.id)
-      .single()
-    if (profile?.role !== "admin") {
-      return apiClientError(403, "Forbidden", { log: "warn" })
-    }
+    const auth = await requireAdmin()
+    if (!auth.ok) return auth.response
     if (!isAdminApiConfigured()) {
       return adminConfigError()
     }

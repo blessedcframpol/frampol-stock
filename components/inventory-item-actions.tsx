@@ -1,13 +1,13 @@
 "use client"
 
-import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { useMemo, useState, type ReactNode } from "react"
 import type { InventoryItem } from "@/lib/data"
 import { INTERNAL_LOCATIONS, LOCATIONS } from "@/lib/data"
 import { useInventoryStore, INVENTORY_TRASH_RETENTION_DAYS } from "@/lib/inventory-store"
 import { Textarea } from "@/components/ui/textarea"
 import { Loader2 } from "lucide-react"
 import { useAuth } from "@/lib/auth-context"
-import { canEditInventory } from "@/lib/permissions"
+import { canEditInventory, canRecordStockMovement } from "@/lib/permissions"
 import { formatDateDDMMYYYY } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import {
@@ -76,46 +76,18 @@ type Props = {
   onMoveToGroup?: (item: InventoryItem) => void
 }
 
-export function InventoryItemActionsMenu({ item, menuTrigger, onRecordMovement, onMoveToGroup }: Props) {
-  const { transactions, updateItem, softDeleteItem, applyMovement, refetchLedger } = useInventoryStore()
-  const { role } = useAuth()
-  const isAdmin = canEditInventory(role)
+function vendorSeed(item: InventoryItem): string {
+  return item.vendor != null && String(item.vendor).trim() ? String(item.vendor) : ""
+}
 
-  const [viewOpen, setViewOpen] = useState(false)
-  const [editOpen, setEditOpen] = useState(false)
-  const [deleteOpen, setDeleteOpen] = useState(false)
-  const [deleting, setDeleting] = useState(false)
-
-  const [editName, setEditName] = useState("")
-  const [editVendor, setEditVendor] = useState("")
-  const [editLocation, setEditLocation] = useState("")
-  const [editNotes, setEditNotes] = useState("")
-  const [editPurchase, setEditPurchase] = useState("")
-  const [editWarranty, setEditWarranty] = useState("")
-
-  const [inspectOpen, setInspectOpen] = useState(false)
-  const [inspectionOutcome, setInspectionOutcome] = useState<"available" | "faulty">("available")
-  const [inspectorName, setInspectorName] = useState("")
-  const [conditionNotes, setConditionNotes] = useState("")
-  const [inspectionToLocation, setInspectionToLocation] = useState("Warehouse A")
-  const [inspectionSubmitting, setInspectionSubmitting] = useState(false)
-
-  const recentTxns = useMemo(() => {
-    return transactions
-      .filter((t) => t.serialNumber === item.serialNumber)
-      .sort((a, b) => b.date.localeCompare(a.date))
-      .slice(0, HISTORY_LIMIT)
-  }, [transactions, item.serialNumber])
-
-  useEffect(() => {
-    if (!editOpen) return
-    setEditName(item.name)
-    setEditVendor(item.vendor != null && String(item.vendor).trim() ? String(item.vendor) : "")
-    setEditLocation(item.location)
-    setEditNotes(item.notes ?? "")
-    setEditPurchase(dateToInputValue(item.purchaseDate))
-    setEditWarranty(dateToInputValue(item.warrantyEndDate))
-  }, [editOpen, item])
+function EditItemForm({ item, onClose }: { item: InventoryItem; onClose: () => void }) {
+  const { updateItem } = useInventoryStore()
+  const [editName, setEditName] = useState(item.name)
+  const [editVendor, setEditVendor] = useState(() => vendorSeed(item))
+  const [editLocation, setEditLocation] = useState(item.location)
+  const [editNotes, setEditNotes] = useState(item.notes ?? "")
+  const [editPurchase, setEditPurchase] = useState(() => dateToInputValue(item.purchaseDate))
+  const [editWarranty, setEditWarranty] = useState(() => dateToInputValue(item.warrantyEndDate))
 
   async function handleSaveEdit() {
     const nameTrim = editName.trim()
@@ -133,11 +105,93 @@ export function InventoryItemActionsMenu({ item, menuTrigger, onRecordMovement, 
         warrantyEndDate: editWarranty.trim() || undefined,
       })
       toast.success("Item updated")
-      setEditOpen(false)
+      onClose()
     } catch {
       toast.error("Could not update item")
     }
   }
+
+  return (
+    <>
+      <div className="grid gap-3 py-2">
+        <div className="flex flex-col gap-1.5">
+          <Label className="text-foreground">Serial</Label>
+          <Input className="bg-muted/50 font-mono text-sm" value={item.serialNumber} readOnly disabled />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label className="text-foreground">Product name</Label>
+          <Input className="bg-card" value={editName} onChange={(e) => setEditName(e.target.value)} />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label className="text-foreground">Vendor</Label>
+          <Input className="bg-card" value={editVendor} onChange={(e) => setEditVendor(e.target.value)} />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label className="text-foreground">Location</Label>
+          <Select value={editLocation} onValueChange={setEditLocation}>
+            <SelectTrigger className="bg-card">
+              <SelectValue placeholder="Location…" />
+            </SelectTrigger>
+            <SelectContent>
+              {LOCATIONS.map((loc) => (
+                <SelectItem key={loc} value={loc}>
+                  {loc}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label className="text-foreground">Notes</Label>
+          <Input className="bg-card" value={editNotes} onChange={(e) => setEditNotes(e.target.value)} />
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-foreground">Purchase date</Label>
+            <Input type="date" className="bg-card" value={editPurchase} onChange={(e) => setEditPurchase(e.target.value)} />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-foreground">Warranty end</Label>
+            <Input type="date" className="bg-card" value={editWarranty} onChange={(e) => setEditWarranty(e.target.value)} />
+          </div>
+        </div>
+      </div>
+      <DialogFooter className="gap-2 sm:gap-0">
+        <Button type="button" variant="outline" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button type="button" onClick={() => void handleSaveEdit()}>
+          Save
+        </Button>
+      </DialogFooter>
+    </>
+  )
+}
+
+export function InventoryItemActionsMenu({ item, menuTrigger, onRecordMovement, onMoveToGroup }: Props) {
+  const { transactions, softDeleteItem, applyMovement, refetchLedger } = useInventoryStore()
+  const { role } = useAuth()
+  const isAdmin = canEditInventory(role)
+  const canMove = canRecordStockMovement(role)
+
+  const [viewOpen, setViewOpen] = useState(false)
+  const [editOpen, setEditOpen] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+
+  const [inspectOpen, setInspectOpen] = useState(false)
+  const [inspectionOutcome, setInspectionOutcome] = useState<"available" | "faulty">("available")
+  const [inspectorName, setInspectorName] = useState("")
+  const [conditionNotes, setConditionNotes] = useState("")
+  const [inspectionToLocation, setInspectionToLocation] = useState("Warehouse A")
+  const [inspectionSubmitting, setInspectionSubmitting] = useState(false)
+
+  const recentTxns = useMemo(() => {
+    return transactions
+      .filter((t) => t.serialNumber === item.serialNumber)
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, HISTORY_LIMIT)
+  }, [transactions, item.serialNumber])
 
   async function handleInspectionSubmit() {
     if (!inspectorName.trim()) {
@@ -209,7 +263,7 @@ export function InventoryItemActionsMenu({ item, menuTrigger, onRecordMovement, 
         <DropdownMenuTrigger asChild>{menuTrigger}</DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           <DropdownMenuItem onSelect={() => setViewOpen(true)}>View Details</DropdownMenuItem>
-          {onRecordMovement && (
+          {onRecordMovement && canMove && (
             <DropdownMenuItem onSelect={() => onRecordMovement(item)}>Record movement…</DropdownMenuItem>
           )}
           {item.status === "Pending Inspection" && (
@@ -287,57 +341,7 @@ export function InventoryItemActionsMenu({ item, menuTrigger, onRecordMovement, 
           <DialogHeader>
             <DialogTitle className="text-foreground">Edit item</DialogTitle>
           </DialogHeader>
-          <div className="grid gap-3 py-2">
-            <div className="flex flex-col gap-1.5">
-              <Label className="text-foreground">Serial</Label>
-              <Input className="bg-muted/50 font-mono text-sm" value={item.serialNumber} readOnly disabled />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label className="text-foreground">Product name</Label>
-              <Input className="bg-card" value={editName} onChange={(e) => setEditName(e.target.value)} />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label className="text-foreground">Vendor</Label>
-              <Input className="bg-card" value={editVendor} onChange={(e) => setEditVendor(e.target.value)} />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label className="text-foreground">Location</Label>
-              <Select value={editLocation} onValueChange={setEditLocation}>
-                <SelectTrigger className="bg-card">
-                  <SelectValue placeholder="Location…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {LOCATIONS.map((loc) => (
-                    <SelectItem key={loc} value={loc}>
-                      {loc}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label className="text-foreground">Notes</Label>
-              <Input className="bg-card" value={editNotes} onChange={(e) => setEditNotes(e.target.value)} />
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="flex flex-col gap-1.5">
-                <Label className="text-foreground">Purchase date</Label>
-                <Input type="date" className="bg-card" value={editPurchase} onChange={(e) => setEditPurchase(e.target.value)} />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label className="text-foreground">Warranty end</Label>
-                <Input type="date" className="bg-card" value={editWarranty} onChange={(e) => setEditWarranty(e.target.value)} />
-              </div>
-            </div>
-          </div>
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button type="button" variant="outline" onClick={() => setEditOpen(false)}>
-              Cancel
-            </Button>
-            <Button type="button" onClick={handleSaveEdit}>
-              Save
-            </Button>
-          </DialogFooter>
+          {editOpen ? <EditItemForm key={item.id} item={item} onClose={() => setEditOpen(false)} /> : null}
         </DialogContent>
       </Dialog>
 

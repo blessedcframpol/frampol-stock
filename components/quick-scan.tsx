@@ -38,6 +38,7 @@ import type { TransactionType, ClientSite } from "@/lib/data"
 import { INTERNAL_LOCATIONS } from "@/lib/data"
 import { useClients, insertClient } from "@/lib/supabase/clients-db"
 import { useInventoryStore } from "@/lib/inventory-store"
+import { parseSaleDateOverride } from "@/lib/supabase/movement-utils"
 import { toast } from "sonner"
 import { toastFromCaughtError } from "@/lib/toast-reportable-error"
 import { cn } from "@/lib/utils"
@@ -115,6 +116,7 @@ export function QuickScan() {
   const [outboundReturnDate, setOutboundReturnDate] = useState("")
   /** TEMPORARY (admin): optional sale ledger date until stock-requests workflow */
   const [adminSaleDate, setAdminSaleDate] = useState("")
+  const [adminSaleDateError, setAdminSaleDateError] = useState<string | null>(null)
 
   // When some serials are not in inventory for outbound: offer to add them first
   const [missingSerialsState, setMissingSerialsState] = useState<MissingSerialsState | null>(null)
@@ -453,6 +455,18 @@ export function QuickScan() {
           : outboundDetails.clientName && outboundDetails.clientCompany
             ? `${outboundDetails.clientName} - ${outboundDetails.clientCompany}`
             : undefined
+      let saleTransactionDateIso: string | undefined
+      if (pendingOutbound.movementType === "Sale" && isAdmin && adminSaleDate.trim()) {
+        const parsed = parseSaleDateOverride(adminSaleDate.trim())
+        if (!parsed.ok) {
+          setAdminSaleDateError(parsed.error)
+          toast.error("Invalid sale date", { description: parsed.error })
+          setIsSubmitting(false)
+          return
+        }
+        saleTransactionDateIso = adminSaleDate.trim()
+      }
+
       const result = await applyMovement({
         type: pendingOutbound.movementType,
         serialNumbers: pendingOutbound.serials,
@@ -461,10 +475,7 @@ export function QuickScan() {
         assignedTo,
         returnDate,
         cloudKeysBySerial,
-        saleTransactionDateIso:
-          pendingOutbound.movementType === "Sale" && isAdmin && adminSaleDate.trim()
-            ? adminSaleDate.trim()
-            : undefined,
+        saleTransactionDateIso,
         expectedProductName: pendingOutbound.productName.trim(),
         expectedVendor: normalizeInventoryVendor(pendingOutbound.vendor),
         clientDirectory,
@@ -831,13 +842,23 @@ export function QuickScan() {
                   <Label className="text-xs font-medium">Sale date (optional)</Label>
                   <Input
                     type="date"
+                    min="2020-01-01"
+                    max="2100-12-31"
                     value={adminSaleDate}
-                    onChange={(e) => setAdminSaleDate(e.target.value)}
+                    onChange={(e) => {
+                      setAdminSaleDate(e.target.value)
+                      setAdminSaleDateError(null)
+                    }}
                     className="h-9 max-w-xs"
+                    aria-invalid={Boolean(adminSaleDateError)}
                   />
-                  <p className="text-xs text-muted-foreground">
-                    Leave empty for today. Temporary admin tool until stock requests handle this.
-                  </p>
+                  {adminSaleDateError ? (
+                    <p className="text-xs text-destructive">{adminSaleDateError}</p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      Leave empty for today. Temporary admin tool until stock requests handle this.
+                    </p>
+                  )}
                 </div>
               )}
 

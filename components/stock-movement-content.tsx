@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo, useRef, useEffect } from "react"
+import { useState, useMemo, useRef } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -56,10 +56,10 @@ import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import { toastFromCaughtError } from "@/lib/toast-reportable-error"
 import { getSupabaseClient } from "@/lib/supabase/client"
-import type { InboundCreateDefaults } from "@/lib/supabase/movement-utils"
+import { parseSaleDateOverride, type InboundCreateDefaults } from "@/lib/supabase/movement-utils"
 import { isFortigateProductName, splitDelimitedValues, cloudKeysMapForSerials } from "@/lib/fortigate"
 import { useAuth } from "@/lib/auth-context"
-import { canManageUsers } from "@/lib/permissions"
+import { canManageUsers, canRecordStockMovement } from "@/lib/permissions"
 import {
   OUTBOUND_LIKE_MOVEMENTS,
   NEW_CLIENT_SELECT,
@@ -93,15 +93,27 @@ export type StockMovementEmbedMode = {
   onClose?: () => void
 }
 
+function initialEmbedMovementType(embedMode: StockMovementEmbedMode | undefined): string {
+  if (!embedMode) return "Inbound"
+  const allowed = TRANSACTION_TYPE_CHOICES.filter((t) => t.value !== "Inbound").map((t) => t.value)
+  const init = embedMode.initialMovementType
+  return init && allowed.includes(init) ? init : "Transfer"
+}
+
 export function StockMovementContent({ embedMode }: { embedMode?: StockMovementEmbedMode }) {
   const isEmbed = Boolean(embedMode)
-  const { inventory, applyMovement, addItem, refetchLedger } = useInventoryStore()
+  const { inventory, applyMovement, addItem } = useInventoryStore()
   const { clients, refetch: refetchClients } = useClients()
-  const { role } = useAuth()
+  const { role, loading: authLoading } = useAuth()
   const isAdmin = canManageUsers(role)
-  const [selectedType, setSelectedType] = useState<string>("Inbound")
-  const [serialNumbers, setSerialNumbers] = useState("")
-  const [productName, setProductName] = useState("")
+  const canMove = canRecordStockMovement(role)
+  // Dialog already keys this component on serials + product name, so embed
+  // fields are read once here rather than copied again in an effect.
+  const [selectedType, setSelectedType] = useState(() => initialEmbedMovementType(embedMode))
+  const [serialNumbers, setSerialNumbers] = useState(() =>
+    embedMode ? embedMode.fixedSerials.join(", ") : ""
+  )
+  const [productName, setProductName] = useState(() => embedMode?.fixedProductName ?? "")
   const [clientId, setClientId] = useState<string>("")
   const [invoiceNumber, setInvoiceNumber] = useState("")
   const [notes, setNotes] = useState("")
@@ -128,7 +140,11 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
   const [addingToInventory, setAddingToInventory] = useState(false)
   const [deliveryNoteFile, setDeliveryNoteFile] = useState<File | null>(null)
   const [inboundReceiveLocation, setInboundReceiveLocation] = useState<string>("Warehouse A")
-  const [scanVendor, setScanVendor] = useState<string>("General")
+  const [scanVendor, setScanVendor] = useState(() =>
+    embedMode?.expectedVendor !== undefined
+      ? normalizeInventoryVendor(embedMode.expectedVendor)
+      : "General"
+  )
   const outboundCloudKeysRef = useRef<Record<string, string> | undefined>(undefined)
   const [cloudKeysInput, setCloudKeysInput] = useState("")
   const [mainNewClientName, setMainNewClientName] = useState("")
@@ -140,22 +156,11 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
   const [mainClientSearch, setMainClientSearch] = useState("")
   /** TEMPORARY (admin): optional sale ledger date until stock-requests workflow */
   const [adminSaleDate, setAdminSaleDate] = useState("")
+  const [adminSaleDateError, setAdminSaleDateError] = useState<string | null>(null)
   const [decommissionReason, setDecommissionReason] = useState("")
   const [decommissionReceivedDate, setDecommissionReceivedDate] = useState("")
   const [decommissionDocFile, setDecommissionDocFile] = useState<File | null>(null)
   const [remediationCaseId, setRemediationCaseId] = useState("")
-
-  useEffect(() => {
-    if (!embedMode) return
-    setSerialNumbers(embedMode.fixedSerials.join(", "))
-    setProductName(embedMode.fixedProductName)
-    if (embedMode.expectedVendor !== undefined) {
-      setScanVendor(normalizeInventoryVendor(embedMode.expectedVendor))
-    }
-    const allowed = TRANSACTION_TYPE_CHOICES.filter((t) => t.value !== "Inbound").map((t) => t.value)
-    const init = embedMode.initialMovementType
-    setSelectedType(init && allowed.includes(init) ? init : "Transfer")
-  }, [embedMode])
 
   const serialsList = useMemo(
     () =>
@@ -396,6 +401,18 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
           : undefined
         : normalizeInventoryVendor(scanVendor)
 
+    setAdminSaleDateError(null)
+    let saleTransactionDateIso: string | undefined
+    if (selectedType === "Sale" && isAdmin && adminSaleDate.trim()) {
+      const parsed = parseSaleDateOverride(adminSaleDate.trim())
+      if (!parsed.ok) {
+        setAdminSaleDateError(parsed.error)
+        toast.error("Invalid sale date", { description: parsed.error })
+        return
+      }
+      saleTransactionDateIso = adminSaleDate.trim()
+    }
+
     const result = await applyMovement({
       type: selectedType as TransactionType,
       serialNumbers: list,
@@ -424,8 +441,7 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
       deliveryNoteUrl: selectedType === "Inbound" ? deliveryNoteUrl : undefined,
       inboundCreateDefaults: inboundDefaults,
       cloudKeysBySerial,
-      saleTransactionDateIso:
-        selectedType === "Sale" && isAdmin && adminSaleDate.trim() ? adminSaleDate.trim() : undefined,
+      saleTransactionDateIso,
       movementMetadata,
       remediationCaseLoanerLink,
       clientDirectory,
@@ -752,6 +768,36 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
   }
 
   const typesForUi = isEmbed ? transactionTypes.filter((t) => t.value !== "Inbound") : transactionTypes
+
+  if (authLoading) {
+    return (
+      <div className="flex flex-col gap-4 md:gap-6 min-w-0">
+        {!isEmbed && (
+          <PageHeader
+            title="Inventory Movement"
+            description="Record inbound and outbound (sale, POC, rental, transfer) stock transactions."
+          />
+        )}
+        <p className="text-sm text-muted-foreground">Checking access…</p>
+      </div>
+    )
+  }
+
+  if (!canMove) {
+    return (
+      <div className="flex flex-col gap-4 md:gap-6 min-w-0">
+        {!isEmbed && (
+          <PageHeader
+            title="Inventory Movement"
+            description="Record inbound and outbound (sale, POC, rental, transfer) stock transactions."
+          />
+        )}
+        <p className="text-sm text-muted-foreground">
+          You do not have permission to record stock movements. Only admins and technicians can use this page.
+        </p>
+      </div>
+    )
+  }
 
   return (
     <div className="flex flex-col gap-4 md:gap-6 min-w-0">
@@ -1293,13 +1339,24 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
                   <Label className="text-foreground">Sale date (optional)</Label>
                   <Input
                     type="date"
+                    min="2020-01-01"
+                    max="2100-12-31"
                     className="bg-card text-foreground border-border max-w-xs"
                     value={adminSaleDate}
-                    onChange={(e) => setAdminSaleDate(e.target.value)}
+                    onChange={(e) => {
+                      setAdminSaleDate(e.target.value)
+                      setAdminSaleDateError(null)
+                    }}
+                    aria-invalid={Boolean(adminSaleDateError)}
                   />
-                  <p className="text-xs text-muted-foreground">
-                    Leave empty to use today. Set when recording a past sale (temporary admin tool until stock requests handle this).
-                  </p>
+                  {adminSaleDateError ? (
+                    <p className="text-xs text-destructive">{adminSaleDateError}</p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      Leave empty to use today. Set when recording a past sale (temporary admin tool until stock
+                      requests handle this).
+                    </p>
+                  )}
                 </div>
               )}
               {selectedType === "Transfer" && (

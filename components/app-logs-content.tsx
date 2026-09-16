@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import {
   Table,
   TableBody,
@@ -32,7 +32,6 @@ import { ScrollText, Loader2 } from "lucide-react"
 import { useAuth } from "@/lib/auth-context"
 import { canViewAppLogs } from "@/lib/permissions"
 import { PageBackLink, PageHeader } from "@/components/page-nav"
-import { toast } from "sonner"
 import { toastFromApiErrorBody, toastFromCaughtError } from "@/lib/toast-reportable-error"
 import { formatDateDDMMYYYY } from "@/lib/utils"
 import { cn } from "@/lib/utils"
@@ -73,9 +72,13 @@ export function AppLogsContent() {
   const [severity, setSeverity] = useState<string>("all")
   const [contextPrefix, setContextPrefix] = useState("")
   const [detailRow, setDetailRow] = useState<AppEventLogRow | null>(null)
+  // A replace fetch bumps this. A slower replace or append must not apply after it.
+  const fetchGen = useRef(0)
 
   const fetchPage = useCallback(
-    async (opts: { append: boolean; before?: string }) => {
+    async (opts: { append: boolean; before?: string; isStale?: () => boolean }): Promise<"applied" | "stale"> => {
+      const gen = opts.append ? fetchGen.current : ++fetchGen.current
+      const stale = () => (opts.isStale?.() ?? false) || fetchGen.current !== gen
       const params = new URLSearchParams()
       params.set("limit", String(PAGE_SIZE))
       if (opts.before) params.set("before", opts.before)
@@ -84,31 +87,31 @@ export function AppLogsContent() {
       if (ctx) params.set("context", ctx)
       const res = await fetch(`/api/app-logs?${params.toString()}`)
       const data = await res.json().catch(() => ({}))
+      if (stale()) return "stale"
       if (!res.ok) {
-        toastFromApiErrorBody(data, "Failed to load event logs")
+        toastFromApiErrorBody(data, "Failed to load event logs", res.status)
         if (!opts.append) setRows([])
-        return
+        return "applied"
       }
       const list = Array.isArray(data) ? (data as AppEventLogRow[]) : []
+      if (stale()) return "stale"
       if (opts.append) {
         setRows((prev) => [...prev, ...list])
       } else {
         setRows(list)
       }
+      return "applied"
     },
     [severity, contextPrefix]
   )
 
   useEffect(() => {
-    if (!allowed) {
-      setLoading(false)
-      return
-    }
+    if (!allowed) return
     let cancelled = false
-    setLoading(true)
     void (async () => {
       try {
-        await fetchPage({ append: false })
+        const result = await fetchPage({ append: false, isStale: () => cancelled })
+        if (result === "stale") return
       } catch (e) {
         if (!cancelled) toastFromCaughtError(e, "Failed to load event logs")
       } finally {
@@ -123,12 +126,14 @@ export function AppLogsContent() {
   async function applyFilters() {
     if (!allowed) return
     setLoading(true)
+    let ownsLoading = true
     try {
-      await fetchPage({ append: false })
+      const result = await fetchPage({ append: false })
+      ownsLoading = result !== "stale"
     } catch (e) {
       toastFromCaughtError(e, "Failed to load event logs")
     } finally {
-      setLoading(false)
+      if (ownsLoading) setLoading(false)
     }
   }
 

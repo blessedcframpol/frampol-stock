@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server"
-import { apiClientError, apiErrorResponse } from "@/lib/api-error-response"
+import { apiErrorResponse } from "@/lib/api-error-response"
+import { requireAdmin } from "@/lib/require-admin"
 import { buildCsvFilename } from "@/lib/utils"
 import { rowToTransaction } from "@/lib/supabase/inventory-db"
-import { createServerSupabaseClient } from "@/lib/supabase/server"
 
 function csvEscape(value: unknown): string {
   if (value == null) return ""
@@ -15,26 +15,12 @@ function toCsv(rows: string[][]): string {
 
 export async function GET() {
   try {
-    const supabase = await createServerSupabaseClient()
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-    if (!user) {
-      return apiClientError(401, "Unauthorized", { log: "warn", logLabel: "admin transactions export GET" })
-    }
-
-    const { data: profileRow } = await supabase
-      .from("profiles")
-      .select("role, active")
-      .eq("id", user.id)
-      .single()
-    const profile = profileRow as { role: string | null; active: boolean } | null
-    if (!profile?.active || profile.role !== "admin") {
-      return apiClientError(403, "Only admins can export all transactions", {
-        log: "warn",
-        logLabel: "admin transactions export GET",
-      })
-    }
+    const auth = await requireAdmin({
+      logLabel: "admin transactions export GET",
+      forbiddenMessage: "Only admins can export all transactions",
+    })
+    if (!auth.ok) return auth.response
+    const { supabase } = auth
 
     const { data: txnRows, error: txnError } = await supabase
       .from("transactions")

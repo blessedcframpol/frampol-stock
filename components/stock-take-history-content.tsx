@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect } from "react"
 import Link from "next/link"
 import {
   Table,
@@ -17,7 +17,6 @@ import { History, Loader2, ChevronRight, ClipboardList } from "lucide-react"
 import type { StockTakeRecord } from "@/lib/data"
 import { buildStockTakeScopeLabel } from "@/lib/stock-take"
 import { formatDateDDMMYYYY } from "@/lib/utils"
-import { toast } from "sonner"
 import { toastFromApiErrorBody, toastFromCaughtError } from "@/lib/toast-reportable-error"
 import { PageHeader } from "@/components/page-nav"
 
@@ -25,28 +24,32 @@ export function StockTakeHistoryContent() {
   const [list, setList] = useState<StockTakeRecord[]>([])
   const [loading, setLoading] = useState(true)
 
-  const fetchList = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch("/api/stock-takes")
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        toastFromApiErrorBody(data, "Failed to load stock take history")
-        setList([])
-        return
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await fetch("/api/stock-takes")
+        const data = await res.json().catch(() => ({}))
+        if (cancelled) return
+        if (!res.ok) {
+          toastFromApiErrorBody(data, "Failed to load stock take history", res.status)
+          setList([])
+          return
+        }
+        setList(Array.isArray(data) ? data : [])
+      } catch (e) {
+        if (!cancelled) {
+          toastFromCaughtError(e, "Failed to load stock take history")
+          setList([])
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
       }
-      setList(Array.isArray(data) ? data : [])
-    } catch (e) {
-      toastFromCaughtError(e, "Failed to load stock take history")
-      setList([])
-    } finally {
-      setLoading(false)
+    })()
+    return () => {
+      cancelled = true
     }
   }, [])
-
-  useEffect(() => {
-    fetchList()
-  }, [fetchList])
 
   return (
     <div className="flex flex-col gap-4 md:gap-6 min-w-0">

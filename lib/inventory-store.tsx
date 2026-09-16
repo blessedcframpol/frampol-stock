@@ -15,11 +15,13 @@ import {
 import { ensureProductLine } from "./supabase/product-lines"
 import {
   computeMovementResult,
+  getRevertUpdatesForTransaction,
   type InboundCreateDefaults,
   type MovementRejection,
 } from "./supabase/movement-utils"
 import { useAuth } from "./auth-context"
 import { reportAppEvent } from "./report-app-event"
+import { humanizeStockDbError } from "./parse-api-error"
 import { toast } from "sonner"
 import type { Database } from "./supabase/database.types"
 
@@ -203,72 +205,6 @@ function getAlertsFromInventory(
   return { lowStock, warrantyExpiring, pocOverdue, pocApproaching, rentalOverdue, rentalApproaching }
 }
 
-/** Revert state for one inventory item when undoing a transaction */
-function getRevertUpdatesForTransaction(txn: Transaction): Partial<InventoryItem> {
-  switch (txn.type) {
-    case "Inbound":
-      return {}
-    case "Sale":
-      return {
-        status: "In Stock",
-        location: "Warehouse A",
-        client: undefined,
-        assignedTo: undefined,
-      }
-    case "POC Out":
-      return {
-        status: "In Stock",
-        location: "Warehouse A",
-        client: undefined,
-        assignedTo: undefined,
-        pocOutDate: undefined,
-      }
-    case "POC Return":
-      return {
-        status: "POC",
-        location: "Client Site",
-        client: undefined,
-        assignedTo: undefined,
-      }
-    case "Rental Return":
-      return {
-        status: "Rented",
-        location: "Client Site",
-        client: undefined,
-        assignedTo: undefined,
-        pocOutDate: undefined,
-        returnDate: undefined,
-      }
-    case "Sale Return":
-      return {
-        status: "Sold",
-        location: "Delivered",
-        client: txn.client || undefined,
-        assignedTo: (txn.assignedTo ?? txn.client) || undefined,
-      }
-    case "Rentals":
-      return {
-        status: "In Stock",
-        location: "Warehouse A",
-        client: undefined,
-        assignedTo: undefined,
-        pocOutDate: undefined,
-        returnDate: undefined,
-      }
-    case "Transfer":
-      return txn.fromLocation ? { location: txn.fromLocation } : {}
-    case "Dispose":
-      return {
-        status: "In Stock",
-        location: "Warehouse A",
-        client: undefined,
-        assignedTo: undefined,
-      }
-    default:
-      return {}
-  }
-}
-
 interface InventoryStoreValue {
   inventory: InventoryItem[]
   transactions: Transaction[]
@@ -315,6 +251,18 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
     supabase ? [] : deepClone(initialTransactions)
   )
   const [trashedInventory, setTrashedInventory] = useState<InventoryItem[]>([])
+
+  // Logout must drop the in-memory ledger. Doing it here, when the session id
+  // changes, clears before paint without an effect setState. Same id (token
+  // refresh) does not reset.
+  const sessionUserId = user?.id
+  const [ledgerUserId, setLedgerUserId] = useState<string | undefined>(sessionUserId)
+  if (supabase && sessionUserId !== ledgerUserId) {
+    setLedgerUserId(sessionUserId)
+    setInventory([])
+    setTransactions([])
+    setTrashedInventory([])
+  }
 
   const refetchLedger = useCallback(
     async (opts?: { isStale?: () => boolean }) => {
@@ -375,13 +323,14 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
   useEffect(() => {
     if (!supabase) return
     if (authLoading) return
-    if (!user) {
-      setInventory([])
-      setTransactions([])
-      setTrashedInventory([])
-      return
-    }
+    // Body reads user?.id, not the User object — do not add `user` to the deps.
+    // refetchLedger does not read user; attribution uses user?.id in applyMovement.
+    if (!user?.id) return
     let cancelled = false
+    // setState inside refetchLedger runs only after its awaits. The rule still
+    // flags the call site; restructuring the ledger fetch would be worse than
+    // leaving this mount/session refetch as-is.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- ledger refetch is async; setState is after await
     void refetchLedger({ isStale: () => cancelled })
     return () => {
       cancelled = true
@@ -450,6 +399,19 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
         movementMetadata,
       })
 
+      if (result.saleDateError) {
+        toast.error("Invalid sale date", {
+          description: result.saleDateError,
+          duration: 12_000,
+        })
+        return {
+          success: [],
+          notFound: [],
+          rejected: [],
+          movementBatchId: undefined,
+        }
+      }
+
       if (result.rejected.length > 0) {
         const preview = result.rejected.slice(0, 3)
         const more =
@@ -517,10 +479,12 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
           batchId: newBatchId,
           serialNumbers: [...serialNumbers],
         })
-        const reportFail = (step: string, error: { message: string } | null) => {
+        const reportFail = (step: string, error: { code?: string; message: string } | null) => {
           if (!error) return false
+          const friendly = humanizeStockDbError(error)
+          const description = friendly ?? `${step}: ${error.message}`
           toast.error("Could not save stock movement", {
-            description: `${step}: ${error.message}`,
+            description,
             duration: 20_000,
           })
           void reportAppEvent({
@@ -529,7 +493,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
             context: "movement_persist",
             message: `Stock movement persist failed: ${step}`,
             detail: error.message,
-            metadata: { step, ...persistMeta() },
+            metadata: { step, ...persistMeta(), friendly: friendly ?? null },
           })
           return true
         }
@@ -700,7 +664,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
         movementBatchId: newBatchId,
       }
     },
-    [inventory, supabase, refetchLedger, user?.id]
+    [inventory, supabase, refetchLedger, user]
   )
 
   const updateItem = useCallback(

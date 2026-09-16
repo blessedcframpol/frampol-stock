@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { apiClientError, apiErrorResponse } from "@/lib/api-error-response"
-import { createServerSupabaseClient } from "@/lib/supabase/server"
+import { requireAdmin } from "@/lib/require-admin"
 import { createAdminClient, isAdminApiConfigured } from "@/lib/supabase/admin"
+
+const MIN_PASSWORD_LENGTH = 12
 
 function adminConfigError() {
   return apiClientError(
@@ -12,19 +14,8 @@ function adminConfigError() {
 
 export async function GET() {
   try {
-    const supabase = await createServerSupabaseClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
-      return apiClientError(401, "Unauthorized", { log: "warn" })
-    }
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("role")
-      .eq("id", user.id)
-      .single()
-    if (profile?.role !== "admin") {
-      return apiClientError(403, "Forbidden", { log: "warn" })
-    }
+    const auth = await requireAdmin()
+    if (!auth.ok) return auth.response
     if (!isAdminApiConfigured()) {
       return adminConfigError()
     }
@@ -47,26 +38,19 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createServerSupabaseClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
-      return apiClientError(401, "Unauthorized", { log: "warn" })
-    }
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("role")
-      .eq("id", user.id)
-      .single()
-    if (profile?.role !== "admin") {
-      return apiClientError(403, "Forbidden", { log: "warn" })
-    }
+    const auth = await requireAdmin()
+    if (!auth.ok) return auth.response
     if (!isAdminApiConfigured()) {
       return adminConfigError()
     }
     const body = await request.json() as { email: string; password: string; display_name?: string; role?: string }
-    const { email, password, display_name, role } = body
-    if (!email?.trim() || !password) {
+    const { email, display_name, role } = body
+    const password = typeof body.password === "string" ? body.password : ""
+    if (!email?.trim() || !password.trim()) {
       return apiClientError(400, "email and password required")
+    }
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      return apiClientError(400, `password must be at least ${MIN_PASSWORD_LENGTH} characters`)
     }
     const validRoles = ["admin", "sales", "accounts", "technicians"] as const
     const appRole = role && validRoles.includes(role as (typeof validRoles)[number])

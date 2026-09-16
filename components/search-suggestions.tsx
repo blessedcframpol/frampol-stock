@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { runSearch, type SearchResults } from "@/lib/search"
+import type { SearchResults } from "@/lib/search"
 import { Package, Users, User, ChevronRight } from "lucide-react"
 import { cn } from "@/lib/utils"
 

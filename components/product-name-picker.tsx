@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -42,11 +42,13 @@ export function ProductNamePicker({
 }: ProductNamePickerProps) {
   const inCatalog = options.includes(value)
   const [addingNew, setAddingNew] = useState(() => !inCatalog && value !== "")
-
-  useEffect(() => {
-    if (!value.trim()) setAddingNew(false)
-    else if (options.includes(value)) setAddingNew(false)
-  }, [value, options])
+  // Turn "add new" off when the value is cleared or lands in the catalog.
+  // Empty-to-empty (the Add new click) does not match, so that path stays open.
+  const [addingSeed, setAddingSeed] = useState({ value, inCatalog })
+  if (value !== addingSeed.value || inCatalog !== addingSeed.inCatalog) {
+    setAddingSeed({ value, inCatalog })
+    if (!value.trim() || inCatalog) setAddingNew(false)
+  }
 
   const selectValue: string | undefined = inCatalog ? value : addingNew ? ADD_NEW : undefined
 

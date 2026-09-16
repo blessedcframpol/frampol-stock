@@ -309,8 +309,8 @@ export function MonthlySalesChart() {
     const sorted = Object.entries(byMonth)
       .sort(([a], [b]) => a.localeCompare(b))
       .slice(-6)
-    return sorted.map(([monthKey, count]) => {
-      const [y, m] = monthKey.split("-")
+      return sorted.map(([monthKey, count]) => {
+      const [, m] = monthKey.split("-")
       return {
         month: MONTH_LABELS[m] ?? monthKey,
         monthKey,

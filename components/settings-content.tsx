@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
+import { useSyncExternalStore } from "react"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -16,14 +17,14 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import {
-  getLowStockEmailsEnabled,
   setLowStockEmailsEnabled,
-  getLowStockEmailRecipients,
   setLowStockEmailRecipients,
-  getReorderLevelDefault,
   setReorderLevelDefault,
-  getReorderLevelOverrides,
   setReorderLevelOverrides,
+  subscribeClientSettings,
+  getClientSettingsSnapshot,
+  getClientSettingsServerSnapshot,
+  type ClientSettingsSnapshot,
 } from "@/lib/settings"
 import { useAuth } from "@/lib/auth-context"
 import { canManageUsers } from "@/lib/permissions"
@@ -99,23 +100,26 @@ export function SettingsContent() {
   const isAdmin = canManageUsers(role)
   const productNames = useProductNames()
 
-  const [emailsEnabled, setEmailsEnabledState] = useState(true)
-  const [emailRecipients, setEmailRecipientsState] = useState<string[]>([])
+  const stored = useSyncExternalStore(
+    subscribeClientSettings,
+    getClientSettingsSnapshot,
+    getClientSettingsServerSnapshot
+  )
+  // null until the user edits, so the first client snapshot replaces server defaults
+  // without an effect. After that, local draft wins so an unsaved field is not
+  // overwritten when another field is saved.
+  const [draft, setDraft] = useState<ClientSettingsSnapshot | null>(null)
+  const form = draft ?? stored
+  const emailsEnabled = form.emailsEnabled
+  const emailRecipients = form.emailRecipients
+  const reorderDefault = form.reorderDefault
+  const overrides = form.overrides
   const [newEmail, setNewEmail] = useState("")
-  const [reorderDefault, setReorderDefaultState] = useState(2)
-  const [overrides, setOverridesState] = useState<Record<string, number>>({})
 
   const displayName = (profile?.display_name ?? "").trim()
   const nameParts = displayName ? displayName.split(/\s+/).filter(Boolean) : []
   const firstName = nameParts[0] ?? ""
   const lastName = nameParts.slice(1).join(" ")
-
-  useEffect(() => {
-    setEmailsEnabledState(getLowStockEmailsEnabled())
-    setEmailRecipientsState(getLowStockEmailRecipients())
-    setReorderDefaultState(getReorderLevelDefault())
-    setOverridesState(getReorderLevelOverrides())
-  }, [])
 
   function addEmail() {
     const trimmed = newEmail.trim().toLowerCase()
@@ -130,7 +134,7 @@ export function SettingsContent() {
       return
     }
     const next = [...emailRecipients, trimmed]
-    setEmailRecipientsState(next)
+    setDraft((prev) => ({ ...(prev ?? stored), emailRecipients: next }))
     setLowStockEmailRecipients(next)
     setNewEmail("")
     toast.success("Email added")
@@ -138,40 +142,42 @@ export function SettingsContent() {
 
   function removeEmail(email: string) {
     const next = emailRecipients.filter((e) => e !== email)
-    setEmailRecipientsState(next)
+    setDraft((prev) => ({ ...(prev ?? stored), emailRecipients: next }))
     setLowStockEmailRecipients(next)
     toast.success("Email removed")
   }
 
   function toggleEmailsEnabled(checked: boolean) {
-    setEmailsEnabledState(checked)
+    setDraft((prev) => ({ ...(prev ?? stored), emailsEnabled: checked }))
     setLowStockEmailsEnabled(checked)
     toast.success(checked ? "Low stock emails enabled" : "Low stock emails disabled")
   }
 
   function saveReorderDefault() {
     const n = Math.max(0, Math.floor(Number(reorderDefault)) || 0)
-    setReorderDefaultState(n)
+    setDraft((prev) => ({ ...(prev ?? stored), reorderDefault: n }))
     setReorderLevelDefault(n)
     toast.success("Default reorder level saved")
   }
 
   function setOverride(productName: string, value: number) {
     const n = Math.max(0, Math.floor(Number(value)) || 0)
-    setOverridesState((prev) => {
-      const next = { ...prev, [productName]: n }
+    setDraft((prev) => {
+      const base = prev ?? stored
+      const next = { ...base.overrides, [productName]: n }
       setReorderLevelOverrides(next)
-      return next
+      return { ...base, overrides: next }
     })
     toast.success(`Reorder level for "${productName}" saved`)
   }
 
   function clearOverride(productName: string) {
-    setOverridesState((prev) => {
-      const next = { ...prev }
+    setDraft((prev) => {
+      const base = prev ?? stored
+      const next = { ...base.overrides }
       delete next[productName]
       setReorderLevelOverrides(next)
-      return next
+      return { ...base, overrides: next }
     })
     toast.success("Using default reorder level for this product")
   }
@@ -396,7 +402,12 @@ export function SettingsContent() {
                     min={0}
                     className="h-11 w-28 rounded-lg border-input bg-background"
                     value={reorderDefault}
-                    onChange={(e) => setReorderDefaultState(e.target.valueAsNumber ?? 0)}
+                    onChange={(e) =>
+                      setDraft((prev) => ({
+                        ...(prev ?? stored),
+                        reorderDefault: e.target.valueAsNumber ?? 0,
+                      }))
+                    }
                   />
                   <span className="text-sm text-muted-foreground">Alert when in stock ≤ this number</span>
                   <Button type="button" size="sm" className="rounded-lg" onClick={saveReorderDefault}>
@@ -433,15 +444,21 @@ export function SettingsContent() {
                             onChange={(e) => {
                               const v = e.target.value
                               if (v === "") {
-                                setOverridesState((prev) => {
-                                  const next = { ...prev }
+                                setDraft((prev) => {
+                                  const base = prev ?? stored
+                                  const next = { ...base.overrides }
                                   delete next[name]
-                                  return next
+                                  return { ...base, overrides: next }
                                 })
                                 return
                               }
                               const n = parseInt(v, 10)
-                              if (Number.isFinite(n) && n >= 0) setOverridesState((prev) => ({ ...prev, [name]: n }))
+                              if (Number.isFinite(n) && n >= 0) {
+                                setDraft((prev) => {
+                                  const base = prev ?? stored
+                                  return { ...base, overrides: { ...base.overrides, [name]: n } }
+                                })
+                              }
                             }}
                             onBlur={(e) => {
                               const v = e.target.value

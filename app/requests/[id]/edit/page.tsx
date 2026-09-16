@@ -1,10 +1,9 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useEffect, useState } from "react"
 import { useParams } from "next/navigation"
 import { DashboardShell } from "@/components/dashboard-shell"
 import { StockRequestForm } from "@/components/stock-request-form"
-import { Button } from "@/components/ui/button"
 import { useAuth } from "@/lib/auth-context"
 import { ADMIN, canCreateStockRequest } from "@/lib/permissions"
 import { getSupabaseClient } from "@/lib/supabase/client"
@@ -12,6 +11,12 @@ import { fetchStockRequestById, type StockRequestWithRelations } from "@/lib/sup
 import { Loader2 } from "lucide-react"
 import { PageBackLink } from "@/components/page-nav"
 import { toastFromCaughtError } from "@/lib/toast-reportable-error"
+import {
+  isAuthFailure,
+  loadErrorFromCaught,
+  notifySessionExpired,
+  signedOutLoadError,
+} from "@/lib/unauthorized"
 
 export default function EditStockRequestPage() {
   const params = useParams()
@@ -19,25 +24,49 @@ export default function EditStockRequestPage() {
   const { user, role } = useAuth()
   const [row, setRow] = useState<StockRequestWithRelations | null>(null)
   const [loading, setLoading] = useState(true)
-
-  const load = useCallback(async () => {
-    if (!id) return
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [loadedForId, setLoadedForId] = useState(id)
+  if (id !== loadedForId) {
+    setLoadedForId(id)
     setLoading(true)
-    try {
-      const sb = getSupabaseClient()
-      const r = await fetchStockRequestById(sb, id)
-      setRow(r)
-    } catch (e) {
-      toastFromCaughtError(e, "Could not load request")
-      setRow(null)
-    } finally {
-      setLoading(false)
-    }
-  }, [id])
+    setLoadError(null)
+    setRow(null)
+  }
 
   useEffect(() => {
-    void load()
-  }, [load])
+    if (!id) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const sb = getSupabaseClient()
+        const r = await fetchStockRequestById(sb, id)
+        if (cancelled) return
+        if (!r) {
+          const sessionErr = await signedOutLoadError(sb)
+          if (cancelled) return
+          if (sessionErr) {
+            setLoadError(sessionErr)
+            setRow(null)
+            return
+          }
+        }
+        setLoadError(null)
+        setRow(r)
+      } catch (e) {
+        if (!cancelled) {
+          if (isAuthFailure(e)) notifySessionExpired()
+          else toastFromCaughtError(e, "Could not load request")
+          setLoadError(loadErrorFromCaught(e, "Could not load this request."))
+          setRow(null)
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [id])
 
   const isOwner = Boolean(user?.id && row?.created_by === user.id)
   const canEdit = row?.status === "draft" && (isOwner || role === ADMIN) && canCreateStockRequest(role)
@@ -61,6 +90,19 @@ export default function EditStockRequestPage() {
     )
   }
 
+  if (loadError) {
+    return (
+      <DashboardShell>
+        <div className="flex flex-col gap-4 max-w-lg">
+          <PageBackLink href="/requests" />
+          <p role="alert" className="text-sm text-destructive">
+            {loadError}
+          </p>
+        </div>
+      </DashboardShell>
+    )
+  }
+
   if (!row || !canEdit) {
     return (
       <DashboardShell>
@@ -78,7 +120,12 @@ export default function EditStockRequestPage() {
 
   return (
     <DashboardShell>
-      <StockRequestForm mode="edit" initialRequest={row} onCancelHref={`/requests/${row.id}`} />
+      <StockRequestForm
+        key={row.id}
+        mode="edit"
+        initialRequest={row}
+        onCancelHref={`/requests/${row.id}`}
+      />
     </DashboardShell>
   )
 }

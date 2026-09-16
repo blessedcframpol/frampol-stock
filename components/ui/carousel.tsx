@@ -95,12 +95,19 @@ function Carousel({
 
   React.useEffect(() => {
     if (!api) return
-    onSelect(api)
+    // Defer the first read so setState is not synchronous in this effect
+    // (shadcn#10613). Arrows stay at their initial disabled state for one microtask.
+    let cancelled = false
+    queueMicrotask(() => {
+      if (!cancelled) onSelect(api)
+    })
     api.on('reInit', onSelect)
     api.on('select', onSelect)
 
     return () => {
-      api?.off('select', onSelect)
+      cancelled = true
+      api.off('select', onSelect)
+      api.off('reInit', onSelect)
     }
   }, [api, onSelect])
 

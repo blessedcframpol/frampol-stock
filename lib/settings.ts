@@ -86,6 +86,55 @@ export function setReorderLevelOverrides(overrides: Record<string, number>): voi
   setItem(KEY_REORDER_OVERRIDES, JSON.stringify(overrides))
 }
 
+export type ClientSettingsSnapshot = {
+  emailsEnabled: boolean
+  emailRecipients: string[]
+  reorderDefault: number
+  overrides: Record<string, number>
+}
+
+const SERVER_SETTINGS: ClientSettingsSnapshot = {
+  emailsEnabled: true,
+  emailRecipients: [],
+  reorderDefault: DEFAULT_REORDER_LEVEL,
+  overrides: {},
+}
+
+let settingsSnapshot: ClientSettingsSnapshot = SERVER_SETTINGS
+let settingsSnapshotKey = ""
+
+function settingsStorageKey(): string {
+  if (typeof window === "undefined") return ""
+  return [
+    localStorage.getItem(KEY_EMAILS_ENABLED),
+    localStorage.getItem(KEY_EMAIL_RECIPIENTS),
+    localStorage.getItem(KEY_REORDER_DEFAULT),
+    localStorage.getItem(KEY_REORDER_OVERRIDES),
+  ].join("\0")
+}
+
+export function subscribeClientSettings(onStoreChange: () => void): () => void {
+  window.addEventListener("storage", onStoreChange)
+  return () => window.removeEventListener("storage", onStoreChange)
+}
+
+export function getClientSettingsSnapshot(): ClientSettingsSnapshot {
+  const key = settingsStorageKey()
+  if (key === settingsSnapshotKey) return settingsSnapshot
+  settingsSnapshotKey = key
+  settingsSnapshot = {
+    emailsEnabled: getLowStockEmailsEnabled(),
+    emailRecipients: getLowStockEmailRecipients(),
+    reorderDefault: getReorderLevelDefault(),
+    overrides: getReorderLevelOverrides(),
+  }
+  return settingsSnapshot
+}
+
+export function getClientSettingsServerSnapshot(): ClientSettingsSnapshot {
+  return SERVER_SETTINGS
+}
+
 /** Threshold for a product: override if set, otherwise default. */
 export function getReorderLevelForProduct(productName: string): number {
   const overrides = getReorderLevelOverrides()

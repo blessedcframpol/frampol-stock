@@ -116,18 +116,21 @@ export interface Database {
           product_name: string
           vendor: string
           created_at: string
+          requires_serial: boolean
         }
         Insert: {
           id: string
           product_name: string
           vendor?: string
           created_at?: string
+          requires_serial?: boolean
         }
         Update: {
           id?: string
           product_name?: string
           vendor?: string
           created_at?: string
+          requires_serial?: boolean
         }
         Relationships: []
       }
@@ -192,6 +195,7 @@ export interface Database {
           id: string
           request_id: string
           product_name: string
+          product_id: string
           quantity_requested: number
           sort_order: number
         }
@@ -199,6 +203,7 @@ export interface Database {
           id?: string
           request_id: string
           product_name: string
+          product_id: string
           quantity_requested: number
           sort_order?: number
         }
@@ -206,6 +211,7 @@ export interface Database {
           id?: string
           request_id?: string
           product_name?: string
+          product_id?: string
           quantity_requested?: number
           sort_order?: number
         }
@@ -215,6 +221,13 @@ export interface Database {
             columns: ["request_id"]
             isOneToOne: false
             referencedRelation: "stock_requests"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_request_lines_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "product_lines"
             referencedColumns: ["id"]
           },
         ]
@@ -589,7 +602,6 @@ export interface Database {
           from_status: string | null
           to_status: string | null
           payload: Json
-          idempotency_key: string | null
         }
         Insert: {
           id?: string
@@ -600,7 +612,6 @@ export interface Database {
           from_status?: string | null
           to_status?: string | null
           payload?: Json
-          idempotency_key?: string | null
         }
         Update: {
           id?: string
@@ -611,7 +622,6 @@ export interface Database {
           from_status?: string | null
           to_status?: string | null
           payload?: Json
-          idempotency_key?: string | null
         }
         Relationships: [
           {
@@ -660,7 +670,8 @@ export interface Database {
         Args: {
           p_batch_id: string
           p_entries: Json
-          p_reversal_transactions?: Json
+          p_reversal_transactions: Json
+          p_reason: string
         }
         Returns: Json
       }

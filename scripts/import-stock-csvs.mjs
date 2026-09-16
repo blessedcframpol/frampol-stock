@@ -20,7 +20,6 @@ const OUT_SQL = path.join(PROJECT_ROOT, "data", "stock-seed.sql")
 
 const LOCATION = "Warehouse A"
 const DATE_ADDED = new Date().toISOString().slice(0, 10)
-const DEFAULT_ITEM_TYPE = "Starlink Kit" // for seed; Fortinet items we'll use "Router" / "Switch" etc. broadly
 
 function filenameToProductType(filename) {
   const base = path.basename(filename, ".csv")

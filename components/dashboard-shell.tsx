@@ -47,6 +47,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Popover, PopoverContent, PopoverTrigger, PopoverAnchor } from "@/components/ui/popover"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { useIsClient } from "@/hooks/use-is-client"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useState, useMemo, useEffect } from "react"
 import { appUsers } from "@/lib/data"
@@ -308,10 +309,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const { user, profile, role, signOut, loading, refetch } = useAuth()
   const { inventory, getAlerts } = useInventoryStore()
   const { clients } = useClients()
-  const [mounted, setMounted] = useState(false)
-  useEffect(() => {
-    setMounted(true)
-  }, [])
+  const mounted = useIsClient()
 
   const blockReason: "inactive" | "no-role" | null =
     user && profile && !profile.active

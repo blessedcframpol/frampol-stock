@@ -1,6 +1,7 @@
 "use client"
 
 import { Suspense, useState, useEffect } from "react"
+import { useIsClient } from "@/hooks/use-is-client"
 import Image from "next/image"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
@@ -68,10 +69,9 @@ function AuthDivider() {
 
 function LoginThemeToggle() {
   const { setTheme, theme } = useTheme()
-  const [mounted, setMounted] = useState(false)
-  useEffect(() => setMounted(true), [])
+  const isClient = useIsClient()
 
-  if (!mounted) {
+  if (!isClient) {
     return <div className="size-9 shrink-0" aria-hidden />
   }
 
@@ -117,16 +117,14 @@ function LoginPageContent() {
   const [password, setPassword] = useState("")
   const [displayName, setDisplayName] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
-  const [error, setError] = useState<string | null>(null)
+  const urlError = searchParams.get("error")
+  const [dismissedUrlError, setDismissedUrlError] = useState<string | null>(null)
+  const [formError, setFormError] = useState<string | null>(null)
+  const error = formError ?? (urlError && urlError !== dismissedUrlError ? urlError : null)
   const [info, setInfo] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [forgotLoading, setForgotLoading] = useState(false)
   const [oauthLoading, setOauthLoading] = useState(false)
-
-  useEffect(() => {
-    const q = searchParams.get("error")
-    if (q) setError(q)
-  }, [searchParams])
 
   useEffect(() => {
     if (authLoading) return
@@ -147,14 +145,15 @@ function LoginPageContent() {
   }, [authLoading, user, profile, redirectTo, router])
 
   function clearMessages() {
-    setError(null)
+    if (urlError) setDismissedUrlError(urlError)
+    setFormError(null)
     setInfo(null)
   }
 
   async function handleForgotPassword() {
     clearMessages()
     if (!email.trim()) {
-      setError("Enter your email in the field above, then try again.")
+      setFormError("Enter your email in the field above, then try again.")
       return
     }
     setForgotLoading(true)
@@ -165,14 +164,14 @@ function LoginPageContent() {
         redirectTo: getAuthCallbackUrl(origin, redirectTo),
       })
       if (resetError) {
-        setError(resetError.message)
+        setFormError(resetError.message)
         setForgotLoading(false)
         return
       }
       setInfo("If an account exists for that email, you will receive a reset link shortly.")
       setForgotLoading(false)
     } catch {
-      setError("Something went wrong. Please try again.")
+      setFormError("Something went wrong. Please try again.")
       setForgotLoading(false)
     }
   }
@@ -194,7 +193,7 @@ function LoginPageContent() {
         },
       })
       if (oauthError) {
-        setError(oauthError.message)
+        setFormError(oauthError.message)
         setOauthLoading(false)
         return
       }
@@ -202,10 +201,10 @@ function LoginPageContent() {
         window.location.assign(data.url)
         return
       }
-      setError("Could not start Microsoft sign-in. Check that Azure is enabled in Supabase Auth.")
+      setFormError("Could not start Microsoft sign-in. Check that Azure is enabled in Supabase Auth.")
       setOauthLoading(false)
     } catch {
-      setError("Something went wrong. Please try again.")
+      setFormError("Something went wrong. Please try again.")
       setOauthLoading(false)
     }
   }
@@ -218,14 +217,14 @@ function LoginPageContent() {
       const supabase = createBrowserSupabaseClient()
       const { error: signInError } = await supabase.auth.signInWithPassword({ email, password })
       if (signInError) {
-        setError(signInError.message)
+        setFormError(signInError.message)
         setLoading(false)
         return
       }
       router.push(redirectTo)
       router.refresh()
     } catch {
-      setError("Something went wrong. Please try again.")
+      setFormError("Something went wrong. Please try again.")
       setLoading(false)
     }
   }
@@ -234,11 +233,11 @@ function LoginPageContent() {
     e.preventDefault()
     clearMessages()
     if (password !== confirmPassword) {
-      setError("Passwords do not match.")
+      setFormError("Passwords do not match.")
       return
     }
     if (password.length < 6) {
-      setError("Password must be at least 6 characters.")
+      setFormError("Password must be at least 6 characters.")
       return
     }
     setLoading(true)
@@ -256,7 +255,7 @@ function LoginPageContent() {
         },
       })
       if (signUpError) {
-        setError(signUpError.message)
+        setFormError(signUpError.message)
         setLoading(false)
         return
       }
@@ -272,7 +271,7 @@ function LoginPageContent() {
       setConfirmPassword("")
       setLoading(false)
     } catch {
-      setError("Something went wrong. Please try again.")
+      setFormError("Something went wrong. Please try again.")
       setLoading(false)
     }
   }

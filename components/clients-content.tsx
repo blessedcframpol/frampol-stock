@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -63,6 +63,11 @@ export function ClientsContent() {
   const [search, setSearch] = useState("")
   const [view, setView] = useState<ClientView>("list")
   const [page, setPage] = useState(1)
+  const [pageForSearch, setPageForSearch] = useState(search)
+  if (search !== pageForSearch) {
+    setPageForSearch(search)
+    setPage(1)
+  }
   const { clients, isLoading, error, refetch } = useClients()
   const { transactions } = useInventoryStore()
 
@@ -125,14 +130,6 @@ export function ClientsContent() {
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
   const safePage = Math.min(page, totalPages)
-
-  useEffect(() => {
-    setPage(1)
-  }, [search])
-
-  useEffect(() => {
-    if (page > totalPages) setPage(totalPages)
-  }, [page, totalPages])
 
   const pageClients = useMemo(() => {
     const start = (safePage - 1) * PAGE_SIZE
@@ -415,7 +412,7 @@ export function ClientsContent() {
               size="sm"
               className="h-9"
               disabled={safePage <= 1}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              onClick={() => setPage(Math.max(1, safePage - 1))}
             >
               <ChevronLeft className="w-4 h-4 mr-1" />
               Previous
@@ -428,7 +425,7 @@ export function ClientsContent() {
               size="sm"
               className="h-9"
               disabled={safePage >= totalPages}
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              onClick={() => setPage(Math.min(totalPages, safePage + 1))}
             >
               Next
               <ChevronRight className="w-4 h-4 ml-1" />

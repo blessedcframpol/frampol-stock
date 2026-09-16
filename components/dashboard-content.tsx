@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useIsClient } from "@/hooks/use-is-client"
 import { Package, ShoppingCart, Radio, AlertTriangle } from "lucide-react"
 import { StatCard } from "@/components/stat-card"
 import { StockByVendorChart, VendorDistributionChart, MonthlySalesChart } from "@/components/dashboard-charts"
@@ -9,12 +9,16 @@ import { QuickScan } from "@/components/quick-scan"
 import { TransactionsTable } from "@/components/transactions-table"
 import { useInventoryStore } from "@/lib/inventory-store"
 import { PageHeader } from "@/components/page-nav"
+import { useAuth } from "@/lib/auth-context"
+import { canRecordStockMovement } from "@/lib/permissions"
 
 export function DashboardContent() {
   const { inventory, getAlerts } = useInventoryStore()
-  /** Avoid hydration mismatch: reorder levels read localStorage on client only (see lib/settings.ts). */
-  const [statsReady, setStatsReady] = useState(false)
-  useEffect(() => setStatsReady(true), [])
+  const { role } = useAuth()
+  const showQuickScan = canRecordStockMovement(role)
+  // Reorder thresholds come from localStorage. Gate every stat card so the first
+  // paint stays "—" instead of showing inventory numbers a frame earlier than before.
+  const statsReady = useIsClient()
 
   const totalStock = inventory.filter((i) => i.status === "In Stock").length
   const itemsSold = inventory.filter((i) => i.status === "Sold").length
@@ -71,12 +75,20 @@ export function DashboardContent() {
         />
       </div>
 
-      {/* Quick Scan + Stock by vendor (same row, same height) */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 md:gap-4 items-stretch">
-        <div className="min-h-[300px] sm:min-h-[340px]">
-          <QuickScan />
-        </div>
-        <div className="lg:col-span-2 min-h-[300px] sm:min-h-[340px]">
+      {/* Quick Scan (admin/technicians) + Stock by vendor */}
+      <div
+        className={
+          showQuickScan
+            ? "grid grid-cols-1 lg:grid-cols-3 gap-3 md:gap-4 items-stretch"
+            : "grid grid-cols-1 gap-3 md:gap-4 items-stretch"
+        }
+      >
+        {showQuickScan ? (
+          <div className="min-h-[300px] sm:min-h-[340px]">
+            <QuickScan />
+          </div>
+        ) : null}
+        <div className={showQuickScan ? "lg:col-span-2 min-h-[300px] sm:min-h-[340px]" : "min-h-[300px] sm:min-h-[340px]"}>
           <StockByVendorChart />
         </div>
       </div>

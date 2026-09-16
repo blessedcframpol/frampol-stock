@@ -21,6 +21,7 @@ import { buildStockTakeScopeLabel } from "@/lib/stock-take"
 import { formatDateDDMMYYYY } from "@/lib/utils"
 import { toast } from "sonner"
 import { toastFromApiErrorBody, toastFromCaughtError } from "@/lib/toast-reportable-error"
+import { SESSION_EXPIRED_MESSAGE } from "@/lib/unauthorized"
 import { buildCsvFilename, cn } from "@/lib/utils"
 
 const statusStyles: Record<string, string> = {
@@ -91,6 +92,7 @@ function exportStockTakeSectionCsv(
 export function StockTakeHistoryDetailContent({ id }: { id: string }) {
   const [record, setRecord] = useState<StockTakeRecord | null>(null)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -98,14 +100,28 @@ export function StockTakeHistoryDetailContent({ id }: { id: string }) {
       try {
         const res = await fetch(`/api/stock-takes/${id}`)
         const data = await res.json().catch(() => ({}))
+        if (cancelled) return
         if (!res.ok) {
-          if (res.status === 404) setRecord(null)
-          else if (!cancelled) toastFromApiErrorBody(data, "Failed to load stock take")
+          if (res.status === 404) {
+            setLoadError(null)
+            setRecord(null)
+            return
+          }
+          toastFromApiErrorBody(data, "Failed to load stock take", res.status)
+          setLoadError(
+            res.status === 401 ? SESSION_EXPIRED_MESSAGE : "Could not load this stock take."
+          )
           return
         }
-        if (!cancelled) setRecord(data as StockTakeRecord)
+        const loaded =
+          data && typeof data === "object" && "id" in data ? (data as StockTakeRecord) : null
+        setLoadError(null)
+        setRecord(loaded)
       } catch (e) {
-        if (!cancelled) toastFromCaughtError(e, "Failed to load stock take")
+        if (!cancelled) {
+          toastFromCaughtError(e, "Failed to load stock take")
+          setLoadError("Could not load this stock take.")
+        }
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -119,6 +135,17 @@ export function StockTakeHistoryDetailContent({ id }: { id: string }) {
       <div className="flex items-center justify-center py-12 text-muted-foreground">
         <Loader2 className="size-6 animate-spin mr-2" />
         Loading…
+      </div>
+    )
+  }
+
+  if (loadError) {
+    return (
+      <div className="flex flex-col gap-4">
+        <PageBackLink href="/inventory/stock-take/history" label="History" />
+        <p role="alert" className="text-sm text-destructive">
+          {loadError}
+        </p>
       </div>
     )
   }

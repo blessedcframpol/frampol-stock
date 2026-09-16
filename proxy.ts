@@ -20,7 +20,7 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next({ request: { headers: request.headers } })
   }
 
-  let response = NextResponse.next({ request: { headers: request.headers } })
+  const response = NextResponse.next({ request: { headers: request.headers } })
 
   const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
     cookies: {
@@ -35,13 +35,19 @@ export async function proxy(request: NextRequest) {
     },
   })
 
-  await supabase.auth.getUser()
+  // One getUser() for both cookie refresh (incl. public paths) and the auth gate.
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
 
   if (!isPublicPath(request.nextUrl.pathname)) {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
     if (!user) {
+      if (request.nextUrl.pathname.startsWith("/api/")) {
+        return NextResponse.json(
+          { error: "Unauthorized", requestId: crypto.randomUUID() },
+          { status: 401 }
+        )
+      }
       const url = request.nextUrl.clone()
       url.pathname = "/login"
       url.searchParams.set("redirectTo", request.nextUrl.pathname)

@@ -129,6 +129,12 @@ export function UsersContent() {
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [pageSize, setPageSize] = useState<number>(15)
   const [page, setPage] = useState(1)
+  const pageFilterKey = `${search}\0${roleFilter}\0${statusFilter}\0${pageSize}`
+  const [pageForFilter, setPageForFilter] = useState(pageFilterKey)
+  if (pageFilterKey !== pageForFilter) {
+    setPageForFilter(pageFilterKey)
+    setPage(1)
+  }
 
   const [createOpen, setCreateOpen] = useState(false)
   const [createEmail, setCreateEmail] = useState("")
@@ -144,33 +150,49 @@ export function UsersContent() {
   const [editActive, setEditActive] = useState(true)
   const [saving, setSaving] = useState(false)
 
+  const loadProfiles = useCallback(async (): Promise<ProfileRow[]> => {
+    const res = await fetch("/api/admin/profiles")
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      toastFromApiErrorBody(data, "Could not load users", res.status)
+      return []
+    }
+    return Array.isArray(data) ? (data as ProfileRow[]) : []
+  }, [])
+
   const fetchProfiles = useCallback(async () => {
     if (!allowed) return
     setLoading(true)
     try {
-      const res = await fetch("/api/admin/profiles")
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        toastFromApiErrorBody(data, "Could not load users")
-        setProfiles([])
-        return
-      }
-      setProfiles(Array.isArray(data) ? data : [])
+      setProfiles(await loadProfiles())
     } catch (e) {
       toastFromCaughtError(e, "Could not load users")
       setProfiles([])
     } finally {
       setLoading(false)
     }
-  }, [allowed])
+  }, [allowed, loadProfiles])
 
   useEffect(() => {
-    if (!allowed) {
-      setLoading(false)
-      return
+    if (!allowed) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const rows = await loadProfiles()
+        if (!cancelled) setProfiles(rows)
+      } catch (e) {
+        if (!cancelled) {
+          toastFromCaughtError(e, "Could not load users")
+          setProfiles([])
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
     }
-    void fetchProfiles()
-  }, [allowed, fetchProfiles])
+  }, [allowed, loadProfiles])
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -194,10 +216,6 @@ export function UsersContent() {
   const safePage = Math.min(page, totalPages)
   const pageStart = (safePage - 1) * pageSize
   const pageRows = filtered.slice(pageStart, pageStart + pageSize)
-
-  useEffect(() => {
-    setPage(1)
-  }, [search, roleFilter, statusFilter, pageSize])
 
   function openEdit(p: ProfileRow) {
     setEditProfile(p)
@@ -234,7 +252,7 @@ export function UsersContent() {
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
-        toastFromApiErrorBody(data, "Failed to create user")
+        toastFromApiErrorBody(data, "Failed to create user", res.status)
         return
       }
       const name = createDisplayName.trim() || createEmail.trim()
@@ -271,7 +289,7 @@ export function UsersContent() {
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
-        toastFromApiErrorBody(data, "Update failed")
+        toastFromApiErrorBody(data, "Update failed", res.status)
         return
       }
       const name = editDisplayName.trim() || editProfile.email
@@ -486,7 +504,7 @@ export function UsersContent() {
                 size="icon"
                 className="size-8 rounded-lg"
                 disabled={safePage <= 1}
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                onClick={() => setPage(Math.max(1, safePage - 1))}
                 aria-label="Previous page"
               >
                 <ChevronLeft className="size-4" />
@@ -500,7 +518,7 @@ export function UsersContent() {
                 size="icon"
                 className="size-8 rounded-lg"
                 disabled={safePage >= totalPages}
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                onClick={() => setPage(Math.min(totalPages, safePage + 1))}
                 aria-label="Next page"
               >
                 <ChevronRight className="size-4" />

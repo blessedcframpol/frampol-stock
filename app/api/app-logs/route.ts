@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { apiClientError, apiErrorResponse } from "@/lib/api-error-response"
-import { createServerSupabaseClient } from "@/lib/supabase/server"
+import { requireAdmin } from "@/lib/require-admin"
 import { insertAppEventLogRow, type AppEventSeverity, type AppEventSource } from "@/lib/app-event-log-server"
+import { createServerSupabaseClient } from "@/lib/supabase/server"
 
 const SEVERITIES = new Set<string>(["error", "warn", "info"])
 const SOURCES = new Set<string>(["client", "api"])
@@ -83,17 +84,9 @@ export async function POST(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = await createServerSupabaseClient()
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-    if (!user) {
-      return apiClientError(401, "Unauthorized", { log: "warn", logLabel: "app-logs GET" })
-    }
-    const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single()
-    if (profile?.role !== "admin") {
-      return apiClientError(403, "Forbidden", { log: "warn", logLabel: "app-logs GET" })
-    }
+    const auth = await requireAdmin({ logLabel: "app-logs GET" })
+    if (!auth.ok) return auth.response
+    const { supabase } = auth
 
     const { searchParams } = new URL(request.url)
     const limitRaw = searchParams.get("limit")

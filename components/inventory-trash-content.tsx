@@ -29,11 +29,15 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 
-function daysUntilPurge(deletedAtIso: string): number {
+function daysUntilPurge(deletedAtIso: string, now: number): number {
   const deleted = new Date(deletedAtIso).getTime()
   const purgeAt = deleted + INVENTORY_TRASH_RETENTION_DAYS * 86400000
-  const left = Math.ceil((purgeAt - Date.now()) / 86400000)
+  const left = Math.ceil((purgeAt - now) / 86400000)
   return Math.max(0, left)
+}
+
+function isPastRetention(deletedAtIso: string, now: number): boolean {
+  return new Date(deletedAtIso).getTime() < now - INVENTORY_TRASH_RETENTION_DAYS * 86400000
 }
 
 export function InventoryTrashContent() {
@@ -44,12 +48,22 @@ export function InventoryTrashContent() {
   const [purgeOpen, setPurgeOpen] = useState(false)
   const [purging, setPurging] = useState(false)
   const [permId, setPermId] = useState<string | null>(null)
+  // Clock lives in state so retention math is not frozen inside useMemo and
+  // Date.now() is not called during render. Tick is deferred so this effect
+  // does not setState synchronously.
+  const [now, setNow] = useState<number | null>(null)
+  useEffect(() => {
+    const tick = () => setNow(Date.now())
+    const kick = window.setTimeout(tick, 0)
+    const id = window.setInterval(tick, 60_000)
+    return () => {
+      window.clearTimeout(kick)
+      window.clearInterval(id)
+    }
+  }, [])
 
   useEffect(() => {
-    if (!isAdmin) {
-      setLoading(false)
-      return
-    }
+    if (!isAdmin) return
     let cancelled = false
     void (async () => {
       await refetchTrashed()
@@ -61,9 +75,9 @@ export function InventoryTrashContent() {
   }, [isAdmin, refetchTrashed])
 
   const expiredCount = useMemo(() => {
-    const cutoff = Date.now() - INVENTORY_TRASH_RETENTION_DAYS * 86400000
-    return trashedInventory.filter((i) => i.deletedAt && new Date(i.deletedAt).getTime() < cutoff).length
-  }, [trashedInventory])
+    if (now == null) return 0
+    return trashedInventory.filter((i) => i.deletedAt && isPastRetention(i.deletedAt, now)).length
+  }, [trashedInventory, now])
 
   async function handlePurgeExpired() {
     setPurging(true)
@@ -146,8 +160,8 @@ export function InventoryTrashContent() {
               </TableHeader>
               <TableBody>
                 {trashedInventory.map((item) => {
-                  const left = item.deletedAt ? daysUntilPurge(item.deletedAt) : 0
-                  const canPurgeNow = item.deletedAt && new Date(item.deletedAt).getTime() < Date.now() - INVENTORY_TRASH_RETENTION_DAYS * 86400000
+                  const left = item.deletedAt && now != null ? daysUntilPurge(item.deletedAt, now) : 0
+                  const canPurgeNow = Boolean(item.deletedAt && now != null && isPastRetention(item.deletedAt, now))
                   return (
                     <TableRow key={item.id}>
                       <TableCell className="font-mono text-xs">{item.serialNumber}</TableCell>

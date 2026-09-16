@@ -2,6 +2,7 @@
 
 import { toast } from "sonner"
 import { parseApiErrorBody } from "@/lib/parse-api-error"
+import { handleUnauthorized } from "@/lib/unauthorized"
 
 export type ReportAppEventInput = {
   severity: "error" | "warn" | "info"
@@ -60,6 +61,11 @@ export async function reportAppEvent(input: ReportAppEventInput): Promise<void> 
       body,
     })
     if (!res.ok) {
+      // Fire-and-forget: a 401 here is not a user action — do not toast session-expired.
+      if (handleUnauthorized(res.status, { silent: true })) {
+        console.warn("[reportAppEvent] POST 401 (silent, fire-and-forget)")
+        return
+      }
       const body = await res.json().catch(() => null)
       const parsed = parseApiErrorBody(body)
       if (parsed) {

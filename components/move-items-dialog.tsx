@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -35,12 +35,25 @@ type Props = {
   onMoved?: () => void
 }
 
-export function MoveItemsDialog({ open, onOpenChange, items, onMoved }: Props) {
+function initialVendor(item: InventoryItem | undefined): string {
+  return item?.vendor?.trim() ? item.vendor.trim() : "General"
+}
+
+function MoveItemsForm({
+  items,
+  onOpenChange,
+  onMoved,
+}: {
+  items: InventoryItem[]
+  onOpenChange: (open: boolean) => void
+  onMoved?: () => void
+}) {
   const { inventory, reassignInventoryItems } = useInventoryStore()
   const onHandInventory = useMemo(() => filterOnHandInventory(inventory), [inventory])
+  const first = items[0]
 
-  const [targetGroupName, setTargetGroupName] = useState("")
-  const [vendorPick, setVendorPick] = useState("General")
+  const [targetGroupName, setTargetGroupName] = useState(first?.name ?? "")
+  const [vendorPick, setVendorPick] = useState(() => initialVendor(first))
   const [newVendorName, setNewVendorName] = useState("")
   const [submitting, setSubmitting] = useState(false)
   const [vendorEditable, setVendorEditable] = useState(false)
@@ -74,15 +87,6 @@ export function MoveItemsDialog({ open, onOpenChange, items, onMoved }: Props) {
     const first = items[0].vendor?.trim() ? items[0].vendor.trim() : "General"
     return items.every((i) => (i.vendor?.trim() ? i.vendor.trim() : "General") === first) ? first : null
   }, [items])
-
-  useEffect(() => {
-    if (!open || items.length === 0) return
-    const vendor = items[0].vendor?.trim() ? items[0].vendor.trim() : "General"
-    setTargetGroupName(items[0].name)
-    setVendorPick(vendor)
-    setNewVendorName("")
-    setVendorEditable(false)
-  }, [open, items])
 
   function handleVendorChange(next: string) {
     setVendorPick(next)
@@ -136,14 +140,7 @@ export function MoveItemsDialog({ open, onOpenChange, items, onMoved }: Props) {
   const count = items.length
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="bg-card text-card-foreground max-w-[calc(100vw-2rem)] sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle className="text-foreground">
-            {count === 1 ? "Move item (Admin)" : "Move items (Admin)"}
-          </DialogTitle>
-        </DialogHeader>
-        <div className="flex flex-col gap-3 py-2">
+    <div className="flex flex-col gap-3 py-2">
           <div className="text-xs text-muted-foreground">
             {count === 1
               ? `Reassign ${items[0]?.serialNumber ?? "this serial"} to a product group and vendor.`
@@ -213,7 +210,25 @@ export function MoveItemsDialog({ open, onOpenChange, items, onMoved }: Props) {
               Apply move
             </Button>
           </div>
-        </div>
+    </div>
+  )
+}
+
+export function MoveItemsDialog({ open, onOpenChange, items, onMoved }: Props) {
+  const count = items.length
+  const itemKey = items.map((i) => i.id).join("|")
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="bg-card text-card-foreground max-w-[calc(100vw-2rem)] sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="text-foreground">
+            {count === 1 ? "Move item (Admin)" : "Move items (Admin)"}
+          </DialogTitle>
+        </DialogHeader>
+        {open && items.length > 0 ? (
+          <MoveItemsForm key={itemKey} items={items} onOpenChange={onOpenChange} onMoved={onMoved} />
+        ) : null}
       </DialogContent>
     </Dialog>
   )

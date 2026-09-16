@@ -57,6 +57,7 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 import { toastFromCaughtError } from "@/lib/toast-reportable-error"
+import { isAuthFailure, SESSION_EXPIRED_MESSAGE } from "@/lib/unauthorized"
 import {
   getTransactionOrderGroupKey,
   groupClientOrderTransactions,
@@ -106,7 +107,8 @@ export default function ClientDetailPage() {
   const id = typeof params?.id === "string" ? params.id : ""
   const { role } = useAuth()
   const showFinancials = canViewFinancials(role)
-  const { clients, isLoading: clientsLoading, refetch: refetchClients } = useClients()
+  const { clients, isLoading: clientsLoading, error: clientsError, refetch: refetchClients } =
+    useClients()
   const { transactions } = useInventoryStore()
   const [detailOpen, setDetailOpen] = useState(false)
   const [selectedConsignment, setSelectedConsignment] = useState<ConsignmentRow | null>(null)
@@ -119,18 +121,21 @@ export default function ClientDetailPage() {
   const [editSites, setEditSites] = useState<ClientSite[]>([{ address: "" }])
   const [isSavingClient, setIsSavingClient] = useState(false)
   const [clientRequests, setClientRequests] = useState<StockRequestWithRelations[]>([])
-  const [requestsLoading, setRequestsLoading] = useState(false)
+  const [requestsLoading, setRequestsLoading] = useState(true)
+  const [requestsForId, setRequestsForId] = useState(id)
+  if (id !== requestsForId) {
+    setRequestsForId(id)
+    setClientRequests([])
+    setRequestsLoading(true)
+  }
 
   const client = id ? (clients.find((c) => c.id === id) ?? null) : null
 
   useEffect(() => {
-    if (!id || !client) {
-      setClientRequests([])
-      setRequestsLoading(false)
-      return
-    }
+    // No client: the "not found" return below is the empty view. This page is
+    // not keyed on id; a reused instance resets the list during render above.
+    if (!id || !client?.id) return
     let cancelled = false
-    setRequestsLoading(true)
     ;(async () => {
       try {
         const sb = getSupabaseClient()
@@ -146,9 +151,10 @@ export default function ClientDetailPage() {
       cancelled = true
     }
   }, [id, client?.id])
-  const clientOrders = client
-    ? transactions.filter((txn) => isTransactionForClient(txn, client))
-    : []
+  const clientOrders = useMemo(
+    () => (client ? transactions.filter((txn) => isTransactionForClient(txn, client)) : []),
+    [client, transactions]
+  )
 
   const rows = useMemo((): ListRow[] => {
     const groups = groupClientOrderTransactions(clientOrders)
@@ -194,6 +200,19 @@ export default function ClientDetailPage() {
       <DashboardShell>
         <div className="flex flex-col gap-4 min-w-0">
           <p className="text-sm text-muted-foreground">Loading client...</p>
+        </div>
+      </DashboardShell>
+    )
+  }
+
+  if (clientsError) {
+    return (
+      <DashboardShell>
+        <div className="flex flex-col gap-4 min-w-0">
+          <PageBackLink href="/clients" label="Clients" />
+          <p role="alert" className="text-sm text-destructive">
+            {isAuthFailure(clientsError) ? SESSION_EXPIRED_MESSAGE : "Could not load this client."}
+          </p>
         </div>
       </DashboardShell>
     )

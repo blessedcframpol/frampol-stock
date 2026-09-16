@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useRef, useEffect } from "react"
+import { useMemo } from "react"
 import {
   Dialog,
   DialogContent,
@@ -18,11 +18,6 @@ type Props = {
 }
 
 export function RecordStockMovementDialog({ open, onOpenChange, items, initialMovementType }: Props) {
-  const onOpenChangeRef = useRef(onOpenChange)
-  useEffect(() => {
-    onOpenChangeRef.current = onOpenChange
-  }, [onOpenChange])
-
   const serialKey = useMemo(
     () =>
       items
@@ -41,9 +36,9 @@ export function RecordStockMovementDialog({ open, onOpenChange, items, initialMo
       fixedProductName: productName,
       initialMovementType,
       expectedVendor: (first.vendor ?? "").trim() || "General",
-      onClose: () => onOpenChangeRef.current(false),
+      onClose: () => onOpenChange(false),
     }
-  }, [open, items, productName, initialMovementType, serialKey])
+  }, [open, items, productName, initialMovementType, onOpenChange])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

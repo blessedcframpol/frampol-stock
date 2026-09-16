@@ -38,7 +38,6 @@ import { Textarea } from "@/components/ui/textarea"
 import { History, Undo2, Loader2, Search, Copy, ChevronsUpDown, Download } from "lucide-react"
 import { INTERNAL_LOCATIONS, type InternalLocation } from "@/lib/data"
 import type { TransactionBatchSummary } from "@/lib/transaction-batches"
-import { cn } from "@/lib/utils"
 import { formatDateDDMMYYYY } from "@/lib/utils"
 import { toast } from "sonner"
 import { toastFromApiErrorBody, toastFromCaughtError } from "@/lib/toast-reportable-error"
@@ -132,7 +131,7 @@ export function TransactionHistoryContent() {
       const res = await fetch("/api/transaction-batches")
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
-        toastFromApiErrorBody(data, "Failed to load transaction history")
+        toastFromApiErrorBody(data, "Failed to load transaction history", res.status)
         setBatches([])
         return
       }
@@ -146,8 +145,31 @@ export function TransactionHistoryContent() {
   }, [])
 
   useEffect(() => {
-    fetchBatches()
-  }, [fetchBatches])
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await fetch("/api/transaction-batches")
+        const data = await res.json().catch(() => ({}))
+        if (cancelled) return
+        if (!res.ok) {
+          toastFromApiErrorBody(data, "Failed to load transaction history", res.status)
+          setBatches([])
+          return
+        }
+        setBatches(Array.isArray(data) ? data : [])
+      } catch (e) {
+        if (!cancelled) {
+          toastFromCaughtError(e, "Failed to load transaction history")
+          setBatches([])
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   async function submitReverse() {
     if (!reverseTarget?.reverseBatchId) return
@@ -180,7 +202,7 @@ export function TransactionHistoryContent() {
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
-        toastFromApiErrorBody(data, "Failed to reverse batch")
+        toastFromApiErrorBody(data, "Failed to reverse batch", res.status)
         return
       }
       toast.success(
@@ -219,7 +241,7 @@ export function TransactionHistoryContent() {
       const res = await fetch("/api/admin/transactions/export")
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
-        toastFromApiErrorBody(data, "Failed to export transactions")
+        toastFromApiErrorBody(data, "Failed to export transactions", res.status)
         return
       }
       const blob = await res.blob()

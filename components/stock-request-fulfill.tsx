@@ -1,7 +1,6 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -18,64 +17,144 @@ import { getSupabaseClient } from "@/lib/supabase/client"
 import {
   assignSerialToLine,
   fetchAssignedCountsByLineId,
-  fetchInventoryItemsForAssignment,
+  fetchInventoryItemsForAssignmentByProductIds,
   fetchStockRequestById,
   markRequestServiced,
   releaseSerialFromLine,
   type StockRequestWithRelations,
 } from "@/lib/supabase/stock-requests-db"
+import {
+  linesBlockingServiced,
+  servicedBlockedReason,
+} from "@/lib/stock-request-rules"
+import {
+  allowedTransitions,
+  isStockRequestStatus,
+  type StockRequestStatus,
+} from "@/lib/stock-request-statuses"
 import type { InventoryItem } from "@/lib/data"
 import { formatDateDDMMYYYY } from "@/lib/utils"
 import { toast } from "sonner"
 import { toastFromCaughtError } from "@/lib/toast-reportable-error"
+import {
+  isAuthFailure,
+  loadErrorFromCaught,
+  notifySessionExpired,
+  signedOutLoadError,
+} from "@/lib/unauthorized"
 import { CheckCircle2, Loader2, Unlink } from "lucide-react"
 import { PageBackLink, PageHeader } from "@/components/page-nav"
 
 export function StockRequestFulfill({ requestId }: { requestId: string }) {
   const router = useRouter()
-  const { profile } = useAuth()
+  const { user, role, profile } = useAuth()
   const [row, setRow] = useState<StockRequestWithRelations | null>(null)
   const [assigned, setAssigned] = useState<Record<string, number>>({})
   const [poolByLine, setPoolByLine] = useState<Record<string, InventoryItem[]>>({})
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [busyLine, setBusyLine] = useState<string | null>(null)
   const [servicing, setServicing] = useState(false)
+  const [loadedForId, setLoadedForId] = useState(requestId)
+  if (requestId !== loadedForId) {
+    setLoadedForId(requestId)
+    setLoading(true)
+    setLoadError(null)
+    setRow(null)
+    setAssigned({})
+    setPoolByLine({})
+  }
+
+  const fetchRequestBundle = useCallback(async () => {
+    const sb = getSupabaseClient()
+    const r = await fetchStockRequestById(sb, requestId)
+    if (!r?.stock_request_lines?.length) {
+      return {
+        r,
+        assigned: {} as Record<string, number>,
+        poolByLine: {} as Record<string, InventoryItem[]>,
+      }
+    }
+    const lineIds = r.stock_request_lines.map((l) => l.id)
+    const asg = await fetchAssignedCountsByLineId(sb, lineIds)
+    const productIds = [...new Set(r.stock_request_lines.map((l) => l.product_id).filter(Boolean))]
+    const items = await fetchInventoryItemsForAssignmentByProductIds(sb, productIds)
+    const byProductId = new Map<string, InventoryItem[]>()
+    for (const it of items) {
+      if (!it.productId) continue
+      const list = byProductId.get(it.productId) ?? []
+      list.push(it)
+      byProductId.set(it.productId, list)
+    }
+    const pools: Record<string, InventoryItem[]> = {}
+    for (const line of r.stock_request_lines) {
+      const forProduct = byProductId.get(line.product_id) ?? []
+      pools[line.id] = forProduct.filter(
+        (it) => !it.reservedForRequestLineId || it.reservedForRequestLineId === line.id
+      )
+    }
+    return { r, assigned: asg, poolByLine: pools }
+  }, [requestId])
 
   const load = useCallback(async () => {
-    setLoading(true)
     try {
-      const sb = getSupabaseClient()
-      const r = await fetchStockRequestById(sb, requestId)
-      setRow(r)
-      if (!r?.stock_request_lines?.length) {
-        setAssigned({})
-        setPoolByLine({})
-        return
+      const bundle = await fetchRequestBundle()
+      if (!bundle.r) {
+        const sessionErr = await signedOutLoadError(getSupabaseClient())
+        if (sessionErr) {
+          setLoadError(sessionErr)
+          setRow(null)
+          return
+        }
       }
-      const lineIds = r.stock_request_lines.map((l) => l.id)
-      const asg = await fetchAssignedCountsByLineId(sb, lineIds)
-      setAssigned(asg)
-
-      const pools: Record<string, InventoryItem[]> = {}
-      for (const line of r.stock_request_lines) {
-        const items = await fetchInventoryItemsForAssignment(sb, line.product_name)
-        pools[line.id] = items.filter(
-          (it) =>
-            !it.reservedForRequestLineId || it.reservedForRequestLineId === line.id
-        )
-      }
-      setPoolByLine(pools)
+      setLoadError(null)
+      setRow(bundle.r)
+      setAssigned(bundle.assigned)
+      setPoolByLine(bundle.poolByLine)
     } catch (e) {
-      toastFromCaughtError(e, "Could not load request")
+      if (isAuthFailure(e)) notifySessionExpired()
+      else toastFromCaughtError(e, "Could not load request")
+      setLoadError(loadErrorFromCaught(e, "Could not load this request."))
       setRow(null)
     } finally {
       setLoading(false)
     }
-  }, [requestId])
+  }, [fetchRequestBundle])
 
   useEffect(() => {
-    void load()
-  }, [load])
+    let cancelled = false
+    void (async () => {
+      try {
+        const bundle = await fetchRequestBundle()
+        if (cancelled) return
+        if (!bundle.r) {
+          const sessionErr = await signedOutLoadError(getSupabaseClient())
+          if (cancelled) return
+          if (sessionErr) {
+            setLoadError(sessionErr)
+            setRow(null)
+            return
+          }
+        }
+        setLoadError(null)
+        setRow(bundle.r)
+        setAssigned(bundle.assigned)
+        setPoolByLine(bundle.poolByLine)
+      } catch (e) {
+        if (!cancelled) {
+          if (isAuthFailure(e)) notifySessionExpired()
+          else toastFromCaughtError(e, "Could not load request")
+          setLoadError(loadErrorFromCaught(e, "Could not load this request."))
+          setRow(null)
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [fetchRequestBundle])
 
   const assignmentsByLine = useMemo(() => {
     const m: Record<string, InventoryItem[]> = {}
@@ -94,12 +173,25 @@ export function StockRequestFulfill({ requestId }: { requestId: string }) {
     return m
   }, [row, poolByLine])
 
+  const status: StockRequestStatus | null =
+    row && isStockRequestStatus(row.status) ? row.status : null
+  const isOwner = Boolean(user?.id && row?.created_by === user.id)
+  const transitions = status ? allowedTransitions(status, role, isOwner) : []
+  const canMarkServiced = transitions.includes("serviced")
+  const blocking = useMemo(
+    () => linesBlockingServiced(row?.stock_request_lines ?? [], assigned),
+    [row, assigned]
+  )
+  const blockedReason = servicedBlockedReason(blocking)
+  const servicedDisabled = servicing || blocking.length > 0
+
   async function onAssign(lineId: string, inventoryItemId: string) {
     setBusyLine(lineId)
     try {
       const sb = getSupabaseClient()
       await assignSerialToLine(sb, lineId, inventoryItemId)
       toast.success("Serial assigned.")
+      // load() re-fetches request — picks up auto-promote submitted → in_progress from 049
       await load()
       router.refresh()
     } catch (e) {
@@ -125,11 +217,12 @@ export function StockRequestFulfill({ requestId }: { requestId: string }) {
   }
 
   async function onMarkServiced() {
-    if (!row) return
+    if (!row || !status || !canMarkServiced || blocking.length > 0) return
+    if (status !== "submitted" && status !== "in_progress") return
     setServicing(true)
     try {
       const sb = getSupabaseClient()
-      await markRequestServiced(sb, row.id, profile?.email ?? null)
+      await markRequestServiced(sb, row.id, profile?.email ?? null, status)
       toast.success("Request marked serviced. Sales has been notified.")
       await load()
       router.push(`/requests/${row.id}`)
@@ -150,11 +243,22 @@ export function StockRequestFulfill({ requestId }: { requestId: string }) {
     )
   }
 
+  if (loadError) {
+    return (
+      <div className="flex flex-col gap-4">
+        <PageBackLink href="/requests" label="Requests" />
+        <p role="alert" className="text-sm text-destructive">
+          {loadError}
+        </p>
+      </div>
+    )
+  }
+
   if (!row) {
     return (
       <div className="flex flex-col gap-4">
         <PageBackLink href="/requests" label="Requests" />
-        <p className="text-sm text-muted-foreground">Request not found or not open for fulfillment.</p>
+        <p className="text-sm text-muted-foreground">Request not found or you don’t have access.</p>
       </div>
     )
   }
@@ -170,13 +274,11 @@ export function StockRequestFulfill({ requestId }: { requestId: string }) {
     )
   }
 
-  const canMarkServiced = row.status === "in_progress" || row.status === "submitted"
-
   return (
     <div className="flex flex-col gap-6 max-w-3xl">
       <PageHeader
         title="Fulfill request"
-        description={`${row.client ? `${row.client.name} — ${row.client.company}` : row.client_id} · ${formatDateDDMMYYYY(row.created_at)}`}
+        description={`${row.client ? `${row.client.name} — ${row.client.company}` : row.client_id} · ${formatDateDDMMYYYY(row.created_at)} · ${row.status.replace("_", " ")}`}
         back={{ href: `/requests/${row.id}` }}
       />
 
@@ -255,20 +357,27 @@ export function StockRequestFulfill({ requestId }: { requestId: string }) {
         </CardContent>
       </Card>
 
-      <div className="flex flex-wrap gap-2">
-        <Button
-          type="button"
-          disabled={!canMarkServiced || servicing}
-          onClick={() => void onMarkServiced()}
-          className="gap-2"
-        >
-          {servicing ? <Loader2 className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />}
-          Mark serviced
-        </Button>
-        <p className="text-xs text-muted-foreground w-full sm:w-auto sm:self-center">
-          Notifies the request owner in-app (email stub unless configured).
-        </p>
-      </div>
+      {canMarkServiced ? (
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-wrap gap-2 items-center">
+            <Button
+              type="button"
+              disabled={servicedDisabled}
+              onClick={() => void onMarkServiced()}
+              className="gap-2"
+            >
+              {servicing ? <Loader2 className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />}
+              Mark serviced
+            </Button>
+            <p className="text-xs text-muted-foreground w-full sm:w-auto sm:self-center">
+              Notifies the request owner in-app (email stub unless configured).
+            </p>
+          </div>
+          {blocking.length > 0 ? (
+            <p className="text-sm text-amber-800 dark:text-amber-200">{blockedReason}</p>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   )
 }

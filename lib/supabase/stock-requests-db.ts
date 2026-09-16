@@ -7,25 +7,95 @@ import { getSupabaseClient } from "./client"
 import { notifyRequestServicedByEmail } from "@/lib/notify-request-email"
 import { rowToClient } from "./clients-db"
 import type { Client } from "@/lib/data"
-import { rowToInventoryItem, INVENTORY_ITEM_SELECT } from "./inventory-db"
+import { rowToInventoryItem } from "./inventory-db"
 import type { InventoryItem } from "@/lib/data"
+import type { StockRequestStatus } from "@/lib/stock-request-statuses"
+import { ensureProductLine } from "./product-lines"
 
 type SB = AppSupabaseClient
 
-export type StockRequestStatus =
-  | "draft"
-  | "submitted"
-  | "in_progress"
-  | "serviced"
-  | "invoiced"
-  | "cancelled"
+export type { StockRequestStatus }
+
+const ALREADY_MOVED = "request has already moved on"
+
+function assertUpdated(
+  data: { id: string }[] | null,
+  error: { message: string } | null
+): void {
+  if (error) throw error
+  if (!data?.length) throw new Error(ALREADY_MOVED)
+}
 
 export type StockRequestRow = Database["public"]["Tables"]["stock_requests"]["Row"]
-export type StockRequestLineRow = Database["public"]["Tables"]["stock_request_lines"]["Row"]
+export type StockRequestLineRow = Database["public"]["Tables"]["stock_request_lines"]["Row"] & {
+  requires_serial: boolean
+}
 
 export type StockRequestWithRelations = StockRequestRow & {
   stock_request_lines: StockRequestLineRow[]
   client?: Pick<Client, "id" | "name" | "company" | "email"> | null
+}
+
+const REQUEST_WITH_LINES_SELECT = "*, stock_request_lines(*, product_lines(requires_serial))"
+
+type LineEmbed = { requires_serial?: boolean } | { requires_serial?: boolean }[] | null
+
+function foldProductName(name: string): string {
+  return name.trim().toLowerCase()
+}
+
+function requiresSerialFromEmbed(embed: LineEmbed): boolean {
+  if (!embed) return false
+  if (Array.isArray(embed)) return Boolean(embed[0]?.requires_serial)
+  return Boolean(embed.requires_serial)
+}
+
+function normalizeLines(
+  lines: (Database["public"]["Tables"]["stock_request_lines"]["Row"] & {
+    product_lines?: LineEmbed
+  })[]
+): StockRequestLineRow[] {
+  return [...(lines ?? [])]
+    .map((l) => ({
+      ...l,
+      requires_serial: requiresSerialFromEmbed(l.product_lines ?? null),
+    }))
+    .sort((a, b) => a.sort_order - b.sort_order)
+}
+
+/**
+ * Fold-match line names against the catalog in one query. Existing names reuse the
+ * catalog id (no vendor argument). Genuinely new names call ensureProductLine(..., 'General').
+ */
+async function resolveProductIdsForLineNames(sb: SB, names: string[]): Promise<string[]> {
+  const trimmed = names.map((n) => n.trim())
+  const { data, error } = await sb.from("product_lines").select("id, product_name")
+  if (error) throw error
+  const byFold = new Map<string, string>()
+  for (const row of data ?? []) {
+    byFold.set(foldProductName(row.product_name), row.id)
+  }
+  const resolved = new Map<string, string>()
+  const ids: string[] = []
+  for (const name of trimmed) {
+    const key = foldProductName(name)
+    const cached = resolved.get(key)
+    if (cached) {
+      ids.push(cached)
+      continue
+    }
+    const existing = byFold.get(key)
+    if (existing) {
+      resolved.set(key, existing)
+      ids.push(existing)
+      continue
+    }
+    const id = await ensureProductLine(sb, name, "General")
+    resolved.set(key, id)
+    byFold.set(key, id)
+    ids.push(id)
+  }
+  return ids
 }
 
 function getSb(): SB | null {
@@ -39,25 +109,30 @@ function getSb(): SB | null {
 export async function fetchStockRequests(sb: SB): Promise<StockRequestWithRelations[]> {
   const { data, error } = await sb
     .from("stock_requests")
-    .select("*, stock_request_lines(*)")
+    .select(REQUEST_WITH_LINES_SELECT)
     .order("created_at", { ascending: false })
   if (error) throw error
   const rows = (data ?? []) as StockRequestWithRelations[]
   const clientIds = [...new Set(rows.map((r) => r.client_id))]
-  if (clientIds.length === 0) return rows
+  if (clientIds.length === 0) {
+    return rows.map((r) => ({
+      ...r,
+      stock_request_lines: normalizeLines(r.stock_request_lines ?? []),
+    }))
+  }
   const { data: clientsData } = await sb.from("clients").select("*").in("id", clientIds)
   const byId = new Map((clientsData ?? []).map((c) => [c.id, rowToClient(c)]))
   return rows.map((r) => ({
     ...r,
     client: byId.get(r.client_id) ?? null,
-    stock_request_lines: [...(r.stock_request_lines ?? [])].sort((a, b) => a.sort_order - b.sort_order),
+    stock_request_lines: normalizeLines(r.stock_request_lines ?? []),
   }))
 }
 
 export async function fetchStockRequestById(sb: SB, id: string): Promise<StockRequestWithRelations | null> {
   const { data, error } = await sb
     .from("stock_requests")
-    .select("*, stock_request_lines(*)")
+    .select(REQUEST_WITH_LINES_SELECT)
     .eq("id", id)
     .maybeSingle()
   if (error) throw error
@@ -67,14 +142,14 @@ export async function fetchStockRequestById(sb: SB, id: string): Promise<StockRe
   return {
     ...row,
     client: clientRow ? rowToClient(clientRow) : null,
-    stock_request_lines: [...(row.stock_request_lines ?? [])].sort((a, b) => a.sort_order - b.sort_order),
+    stock_request_lines: normalizeLines(row.stock_request_lines ?? []),
   }
 }
 
 export async function fetchStockRequestsForClient(sb: SB, clientId: string): Promise<StockRequestWithRelations[]> {
   const { data, error } = await sb
     .from("stock_requests")
-    .select("*, stock_request_lines(*)")
+    .select(REQUEST_WITH_LINES_SELECT)
     .eq("client_id", clientId)
     .order("created_at", { ascending: false })
   if (error) throw error
@@ -84,14 +159,14 @@ export async function fetchStockRequestsForClient(sb: SB, clientId: string): Pro
   return rows.map((r) => ({
     ...r,
     client,
-    stock_request_lines: [...(r.stock_request_lines ?? [])].sort((a, b) => a.sort_order - b.sort_order),
+    stock_request_lines: normalizeLines(r.stock_request_lines ?? []),
   }))
 }
 
 export async function fetchLatestOpenRequests(sb: SB, limit: number): Promise<StockRequestWithRelations[]> {
   const { data, error } = await sb
     .from("stock_requests")
-    .select("*, stock_request_lines(*)")
+    .select(REQUEST_WITH_LINES_SELECT)
     .in("status", ["submitted", "in_progress", "serviced"])
     .order("created_at", { ascending: false })
     .limit(limit)
@@ -106,35 +181,29 @@ export async function fetchLatestOpenRequests(sb: SB, limit: number): Promise<St
   return rows.map((r) => ({
     ...r,
     client: byId.get(r.client_id) ?? null,
-    stock_request_lines: [...(r.stock_request_lines ?? [])].sort((a, b) => a.sort_order - b.sort_order),
+    stock_request_lines: normalizeLines(r.stock_request_lines ?? []),
   }))
 }
 
-/** Free pool: In Stock and not reserved. */
-export async function fetchAvailabilityByProductNames(
+/** Free pool: In Stock and not reserved, keyed by product_id. */
+export async function fetchAvailabilityByProductIds(
   sb: SB,
-  productNames: string[]
+  productIds: string[]
 ): Promise<Record<string, number>> {
-  const unique = [...new Set(productNames.map((n) => n.trim()).filter(Boolean))]
+  const unique = [...new Set(productIds.filter(Boolean))]
   if (unique.length === 0) return {}
-  const norm = (s: string) => s.trim().toLowerCase()
-  const normToRequested = new Map<string, string>()
-  for (const n of unique) normToRequested.set(norm(n), n)
-
   const { data, error } = await sb
     .from("inventory_items")
-    .select("status, reserved_for_request_line_id, product_lines(product_name)")
+    .select("product_id")
+    .in("product_id", unique)
     .eq("status", "In Stock")
     .is("reserved_for_request_line_id", null)
   if (error) throw error
   const counts: Record<string, number> = {}
-  for (const n of unique) counts[n] = 0
+  for (const id of unique) counts[id] = 0
   for (const row of data ?? []) {
-    const pl = row.product_lines as { product_name: string } | null
-    const pn = pl?.product_name?.trim() ?? ""
-    const key = norm(pn)
-    const requested = normToRequested.get(key)
-    if (requested) counts[requested] = (counts[requested] ?? 0) + 1
+    const pid = row.product_id
+    if (pid) counts[pid] = (counts[pid] ?? 0) + 1
   }
   return counts
 }
@@ -157,13 +226,23 @@ export async function fetchAssignedCountsByLineId(sb: SB, lineIds: string[]): Pr
 
 export async function fetchInventoryItemsForAssignment(
   sb: SB,
-  productName: string
+  productId: string
 ): Promise<InventoryItem[]> {
-  const trimmed = productName.trim()
+  if (!productId) return []
+  return fetchInventoryItemsForAssignmentByProductIds(sb, [productId])
+}
+
+/** One query for many catalog ids; caller groups by product_id. */
+export async function fetchInventoryItemsForAssignmentByProductIds(
+  sb: SB,
+  productIds: string[]
+): Promise<InventoryItem[]> {
+  const unique = [...new Set(productIds.filter(Boolean))]
+  if (unique.length === 0) return []
   const { data, error } = await sb
     .from("inventory_items")
-    .select("*, product_lines!inner(product_name, vendor)")
-    .eq("product_lines.product_name", trimmed)
+    .select("*, product_lines(product_name, vendor)")
+    .in("product_id", unique)
     .eq("status", "In Stock")
     .order("date_added", { ascending: true })
   if (error) throw error
@@ -179,6 +258,10 @@ export type CreateRequestInput = {
 }
 
 export async function createStockRequest(sb: SB, input: CreateRequestInput): Promise<StockRequestWithRelations> {
+  const productIds = await resolveProductIdsForLineNames(
+    sb,
+    input.lines.map((l) => l.productName)
+  )
   const { data: req, error: e1 } = await sb
     .from("stock_requests")
     .insert({
@@ -196,6 +279,7 @@ export async function createStockRequest(sb: SB, input: CreateRequestInput): Pro
   const lineRows = input.lines.map((l, i) => ({
     request_id: requestId,
     product_name: l.productName.trim(),
+    product_id: productIds[i],
     quantity_requested: l.quantity,
     sort_order: i,
   }))
@@ -208,22 +292,44 @@ export async function createStockRequest(sb: SB, input: CreateRequestInput): Pro
 }
 
 export async function submitStockRequest(sb: SB, requestId: string): Promise<void> {
-  const { error } = await sb.from("stock_requests").update({ status: "submitted" }).eq("id", requestId)
-  if (error) throw error
+  const { data, error } = await sb
+    .from("stock_requests")
+    .update({ status: "submitted" })
+    .eq("id", requestId)
+    .eq("status", "draft")
+    .select("id")
+  assertUpdated(data, error)
 }
 
-export async function markRequestInProgress(sb: SB, requestId: string): Promise<void> {
-  const { error } = await sb.from("stock_requests").update({ status: "in_progress" }).eq("id", requestId)
-  if (error) throw error
+/** Move to in_progress from submitted (start work) or serviced (recovery). */
+export async function markRequestInProgress(
+  sb: SB,
+  requestId: string,
+  fromStatus: Extract<StockRequestStatus, "submitted" | "serviced"> = "submitted"
+): Promise<void> {
+  const { data, error } = await sb
+    .from("stock_requests")
+    .update({ status: "in_progress" })
+    .eq("id", requestId)
+    .eq("status", fromStatus)
+    .select("id")
+  assertUpdated(data, error)
 }
 
-export async function markRequestServiced(sb: SB, requestId: string, ownerEmail?: string | null): Promise<void> {
+export async function markRequestServiced(
+  sb: SB,
+  requestId: string,
+  ownerEmail?: string | null,
+  fromStatus: Extract<StockRequestStatus, "submitted" | "in_progress"> = "in_progress"
+): Promise<void> {
   const { data: before } = await sb.from("stock_requests").select("created_by").eq("id", requestId).single()
-  const { error } = await sb
+  const { data, error } = await sb
     .from("stock_requests")
     .update({ status: "serviced", serviced_at: new Date().toISOString() })
     .eq("id", requestId)
-  if (error) throw error
+    .eq("status", fromStatus)
+    .select("id")
+  assertUpdated(data, error)
   const { error: rpcErr } = await sb.rpc("create_request_serviced_notification", { p_request_id: requestId })
   if (rpcErr) throw rpcErr
   if (before?.created_by) {
@@ -240,7 +346,7 @@ export async function markRequestInvoiced(
   requestId: string,
   args: { invoiceNumber: string; invoiceDocumentUrl?: string | null; invoicedBy: string }
 ): Promise<void> {
-  const { error } = await sb
+  const { data, error } = await sb
     .from("stock_requests")
     .update({
       status: "invoiced",
@@ -250,12 +356,33 @@ export async function markRequestInvoiced(
       invoiced_by: args.invoicedBy,
     })
     .eq("id", requestId)
-  if (error) throw error
+    .eq("status", "serviced")
+    .select("id")
+  assertUpdated(data, error)
 }
 
-export async function cancelStockRequest(sb: SB, requestId: string): Promise<void> {
-  const { error } = await sb.from("stock_requests").update({ status: "cancelled" }).eq("id", requestId)
-  if (error) throw error
+export async function cancelStockRequest(
+  sb: SB,
+  requestId: string,
+  fromStatus: Extract<StockRequestStatus, "draft" | "submitted" | "in_progress">
+): Promise<void> {
+  const { data, error } = await sb
+    .from("stock_requests")
+    .update({ status: "cancelled" })
+    .eq("id", requestId)
+    .eq("status", fromStatus)
+    .select("id")
+  assertUpdated(data, error)
+}
+
+export async function revertStockRequestToDraft(sb: SB, requestId: string): Promise<void> {
+  const { data, error } = await sb
+    .from("stock_requests")
+    .update({ status: "draft" })
+    .eq("id", requestId)
+    .eq("status", "submitted")
+    .select("id")
+  assertUpdated(data, error)
 }
 
 export async function updateDraftRequest(
@@ -278,16 +405,20 @@ export async function replaceDraftLines(
 ): Promise<void> {
   const { error: delErr } = await sb.from("stock_request_lines").delete().eq("request_id", requestId)
   if (delErr) throw delErr
+  if (lines.length === 0) return
+  const productIds = await resolveProductIdsForLineNames(
+    sb,
+    lines.map((l) => l.productName)
+  )
   const lineRows = lines.map((l, i) => ({
     request_id: requestId,
     product_name: l.productName.trim(),
+    product_id: productIds[i],
     quantity_requested: l.quantity,
     sort_order: i,
   }))
-  if (lineRows.length > 0) {
-    const { error: insErr } = await sb.from("stock_request_lines").insert(lineRows)
-    if (insErr) throw insErr
-  }
+  const { error: insErr } = await sb.from("stock_request_lines").insert(lineRows)
+  if (insErr) throw insErr
 }
 
 export async function assignSerialToLine(sb: SB, lineId: string, inventoryItemId: string): Promise<void> {
@@ -370,29 +501,55 @@ export function useStockRequests(): {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<Error | null>(null)
 
-  const refetch = useCallback(async () => {
+  const fetchList = useCallback(async () => {
     const sb = getSb()
-    if (!sb) {
-      setList([])
-      setLoading(false)
-      return
-    }
+    if (!sb) return { ok: false as const }
+    const rows = await fetchStockRequests(sb)
+    return { ok: true as const, rows }
+  }, [])
+
+  const refetch = useCallback(async () => {
     setError(null)
     setLoading(true)
     try {
-      const rows = await fetchStockRequests(sb)
-      setList(rows)
+      const result = await fetchList()
+      if (!result.ok) {
+        setList([])
+        return
+      }
+      setList(result.rows)
     } catch (e) {
       setError(e instanceof Error ? e : new Error(String(e)))
       setList([])
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [fetchList])
 
   useEffect(() => {
-    void refetch()
-  }, [refetch])
+    let cancelled = false
+    void (async () => {
+      try {
+        const result = await fetchList()
+        if (cancelled) return
+        if (!result.ok) {
+          setList([])
+          return
+        }
+        setList(result.rows)
+      } catch (e) {
+        if (!cancelled) {
+          setError(e instanceof Error ? e : new Error(String(e)))
+          setList([])
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [fetchList])
 
   return { list, loading, error, refetch }
 }

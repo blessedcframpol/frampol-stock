@@ -55,7 +55,7 @@ export function AlertsContent() {
             <AlertTriangle className="w-12 h-12 text-muted-foreground/50 mb-3" />
             <p className="text-sm font-medium text-foreground">No alerts</p>
             <p className="text-sm text-muted-foreground mt-1">
-              You're all set. New alerts will appear here when stock is low, warranty is expiring, or a rental is past its return date.
+              You&apos;re all set. New alerts will appear here when stock is low, warranty is expiring, or a rental is past its return date.
             </p>
           </CardContent>
         </Card>

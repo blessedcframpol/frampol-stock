@@ -173,29 +173,55 @@ export function useClients(): {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<Error | null>(null)
 
+  const fetchClientRows = useCallback(async () => {
+    const supabase = getSupabaseIfConfigured()
+    if (!supabase) return { ok: false as const }
+    const rows = await fetchAllClientRows(supabase)
+    return { ok: true as const, rows }
+  }, [])
+
   const refetch = useCallback(async () => {
     setError(null)
-    const supabase = getSupabaseIfConfigured()
-    if (!supabase) {
-      setClients(staticClients)
-      setIsLoading(false)
-      return
-    }
     setIsLoading(true)
     try {
-      const rows = await fetchAllClientRows(supabase)
-      setClients(rows.map(rowToClient))
+      const result = await fetchClientRows()
+      if (!result.ok) {
+        setClients(staticClients)
+        return
+      }
+      setClients(result.rows.map(rowToClient))
     } catch (e) {
       setError(e instanceof Error ? e : new Error(String(e)))
       setClients(staticClients)
     } finally {
       setIsLoading(false)
     }
-  }, [])
+  }, [fetchClientRows])
 
   useEffect(() => {
-    refetch()
-  }, [refetch])
+    let cancelled = false
+    void (async () => {
+      try {
+        const result = await fetchClientRows()
+        if (cancelled) return
+        if (!result.ok) {
+          setClients(staticClients)
+          return
+        }
+        setClients(result.rows.map(rowToClient))
+      } catch (e) {
+        if (!cancelled) {
+          setError(e instanceof Error ? e : new Error(String(e)))
+          setClients(staticClients)
+        }
+      } finally {
+        if (!cancelled) setIsLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [fetchClientRows])
 
   return { clients, isLoading, error, refetch }
 }
