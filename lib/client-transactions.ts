@@ -1,16 +1,14 @@
+import { clientMatchKeys } from "./clients-directory"
 import type { Transaction } from "./data"
 
-/** Whether a stock movement row belongs to this directory client (by id or legacy display string). */
-export function isTransactionForClient(
-  txn: { clientId?: string; client: string },
-  client: { id: string; company: string; name: string }
+/** Stored ledger text that does not name this directory row. Shown so a client_id win stays visible. */
+export function ledgerTextDiffersFromClient(
+  stored: string | null | undefined,
+  client: { name?: string | null; company?: string | null },
 ): boolean {
-  if (txn.clientId === client.id) return true
-  const c = txn.client?.trim()
-  if (!c) return false
-  const canonical = `${client.name} - ${client.company}`.trim()
-  if (c === canonical || c.toLowerCase() === canonical.toLowerCase()) return true
-  return c === client.company || c === client.name || c.includes(client.company)
+  const text = (stored ?? "").trim().toLowerCase()
+  if (!text) return false
+  return !clientMatchKeys(client).includes(text)
 }
 
 /** Outbound types where multiple lines from one submit often share one invoice/time but may lack batch_id (legacy Sale). */
@@ -40,14 +38,3 @@ export function groupClientOrderTransactions(clientTxns: Transaction[]): Transac
   return Array.from(map.values())
 }
 
-export function countOrderGroupsForClient(
-  transactions: Pick<Transaction, "id" | "type" | "clientId" | "client" | "batchId" | "invoiceNumber" | "date">[],
-  client: { id: string; company: string; name: string }
-): number {
-  const keys = new Set<string>()
-  for (const txn of transactions) {
-    if (!isTransactionForClient(txn, client)) continue
-    keys.add(getTransactionOrderGroupKey(txn))
-  }
-  return keys.size
-}

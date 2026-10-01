@@ -1,7 +1,6 @@
 "use client"
 
-import Link from "next/link"
-import { useParams } from "next/navigation"
+import { useParams, useRouter } from "next/navigation"
 import { useEffect, useMemo, useState } from "react"
 import {
   Table,
@@ -11,9 +10,24 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { clientCompanyDetail } from "@/lib/client-label"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import {
+  clientListIdentity,
+  displayContact,
+  holderMatchesClient,
+  holdingsForClient,
+  OPEN_REQUEST_STATUSES,
+  realSites,
+  splitEmails,
+  type HeldUnit,
+} from "@/lib/clients-directory"
+import { fetchHeldUnits } from "@/lib/clients-holdings"
+import { formatReturnAge, isOverdue } from "@/lib/alerts"
+import { todayBusinessDate } from "@/lib/business-date.mjs"
+import { fetchRemediationCases, type RemediationCaseRow } from "@/lib/supabase/remediation-db"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -31,59 +45,38 @@ import {
   SheetDescription,
 } from "@/components/ui/sheet"
 import { DashboardShell } from "@/components/dashboard-shell"
-import { PageBackLink } from "@/components/page-nav"
+import { PageBreadcrumbs } from "@/components/page-breadcrumbs"
 import { useAuth } from "@/lib/auth-context"
-import { canViewFinancials } from "@/lib/permissions"
-import { useInventoryStore } from "@/lib/inventory-store"
+import { canEditClients, canViewFinancials } from "@/lib/permissions"
 import { useClients, updateClient } from "@/lib/supabase/clients-db"
 import { getSupabaseClient } from "@/lib/supabase/client"
+import { fetchAllPages } from "@/lib/supabase/postgrest-page"
 import {
   fetchStockRequestsForClient,
   type StockRequestWithRelations,
 } from "@/lib/supabase/stock-requests-db"
-import { cn, formatDateDDMMYYYY } from "@/lib/utils"
+import { SignedStorageLink } from "@/components/signed-storage-link"
+import { BusinessDateLabel } from "@/components/business-date-label"
+import { useOrgTimezone } from "@/hooks/use-org-timezone"
+import { compareBusinessDatesDesc, latestRecordedAt } from "@/lib/business-date.mjs"
+import { formatDateDDMMYYYY } from "@/lib/utils"
 import {
   FileText,
   Mail,
   Phone,
-  Building2,
   MapPin,
-  Package,
   ChevronRight,
   Pencil,
   Plus,
   Trash2,
-  MessageSquare,
 } from "lucide-react"
 import { toast } from "sonner"
 import { toastFromCaughtError } from "@/lib/toast-reportable-error"
 import { isAuthFailure, SESSION_EXPIRED_MESSAGE } from "@/lib/unauthorized"
-import {
-  getTransactionOrderGroupKey,
-  groupClientOrderTransactions,
-  isTransactionForClient,
-} from "@/lib/client-transactions"
+import { ledgerTextDiffersFromClient } from "@/lib/client-transactions"
+import { fetchClientTransactions, type ResolvedClientTransaction } from "@/lib/clients-orders"
 import type { ClientSite, Transaction } from "@/lib/data"
-
-const requestStatusStyles: Record<string, string> = {
-  draft: "bg-muted text-foreground",
-  submitted: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
-  in_progress: "bg-blue-500/15 text-blue-700 dark:text-blue-400",
-  serviced: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
-  invoiced: "bg-slate-500/15 text-slate-700 dark:text-slate-300",
-  cancelled: "bg-destructive/15 text-destructive",
-}
-
-const statusStyles: Record<string, string> = {
-  Inbound: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-  Sale: "bg-red-500/10 text-red-500 dark:text-red-400",
-  "POC Out": "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400",
-  "POC Return": "bg-amber-500/10 text-amber-600 dark:text-amber-400",
-  Rentals: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
-  "Rental Return": "bg-blue-500/10 text-blue-600 dark:text-blue-400",
-  Transfer: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
-  Dispose: "bg-slate-500/10 text-slate-600 dark:text-slate-400",
-}
+import { StatusPill } from "@/components/fs/status-pill"
 
 type ConsignmentRow = {
   kind: "consignment"
@@ -103,14 +96,24 @@ type SingleRow = {
 type ListRow = ConsignmentRow | SingleRow
 
 export default function ClientDetailPage() {
+  const timeZone = useOrgTimezone()
   const params = useParams()
   const id = typeof params?.id === "string" ? params.id : ""
   const { role } = useAuth()
   const showFinancials = canViewFinancials(role)
+  const canEdit = canEditClients(role)
   const { clients, isLoading: clientsLoading, error: clientsError, refetch: refetchClients } =
     useClients()
-  const { transactions } = useInventoryStore()
+  const [ledger, setLedger] = useState<ResolvedClientTransaction[]>([])
+  const [ledgerReady, setLedgerReady] = useState(false)
+  const [ledgerForId, setLedgerForId] = useState(id)
+  if (id !== ledgerForId) {
+    setLedgerForId(id)
+    setLedger([])
+    setLedgerReady(false)
+  }
   const [detailOpen, setDetailOpen] = useState(false)
+  const [tab, setTab] = useState<string | null>(null)
   const [selectedConsignment, setSelectedConsignment] = useState<ConsignmentRow | null>(null)
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null)
   const [editOpen, setEditOpen] = useState(false)
@@ -120,6 +123,11 @@ export default function ClientDetailPage() {
   const [editPhone, setEditPhone] = useState("")
   const [editSites, setEditSites] = useState<ClientSite[]>([{ address: "" }])
   const [isSavingClient, setIsSavingClient] = useState(false)
+  const router = useRouter()
+  const today = todayBusinessDate(timeZone)
+  const [heldUnits, setHeldUnits] = useState<HeldUnit[]>([])
+  const [cases, setCases] = useState<RemediationCaseRow[]>([])
+  const [caseHolders, setCaseHolders] = useState<Record<string, string>>({})
   const [clientRequests, setClientRequests] = useState<StockRequestWithRelations[]>([])
   const [requestsLoading, setRequestsLoading] = useState(true)
   const [requestsForId, setRequestsForId] = useState(id)
@@ -151,22 +159,96 @@ export default function ClientDetailPage() {
       cancelled = true
     }
   }, [id, client?.id])
-  const clientOrders = useMemo(
-    () => (client ? transactions.filter((txn) => isTransactionForClient(txn, client)) : []),
-    [client, transactions]
-  )
+
+  useEffect(() => {
+    let cancelled = false
+    fetchHeldUnits()
+      .then((rows) => {
+        if (!cancelled) setHeldUnits(rows)
+      })
+      .catch(() => {
+        if (!cancelled) setHeldUnits([])
+      })
+    ;(async () => {
+      try {
+        const sb = getSupabaseClient()
+        const rows = await fetchRemediationCases(sb)
+        if (cancelled) return
+        setCases(rows)
+        const ids = [
+          ...new Set(
+            rows.flatMap((row) =>
+              [row.faulty_inventory_item_id, row.loaner_inventory_item_id].filter((id): id is string => Boolean(id)),
+            ),
+          ),
+        ]
+        if (ids.length === 0) return
+        const data = await fetchAllPages((from, to) =>
+          sb.from("inventory_items").select("id, client, assigned_to").in("id", ids).order("id").range(from, to),
+        )
+        if (cancelled) return
+        const holders: Record<string, string> = {}
+        for (const item of data) {
+          holders[item.id] = (item.assigned_to ?? "").trim() || (item.client ?? "").trim()
+        }
+        setCaseHolders(holders)
+      } catch {
+        if (!cancelled) setCases([])
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!id) return
+    let cancelled = false
+    fetchClientTransactions(id)
+      .then((rows) => {
+        if (!cancelled) setLedger(rows)
+      })
+      .catch(() => {
+        if (!cancelled) setLedger([])
+      })
+      .finally(() => {
+        if (!cancelled) setLedgerReady(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [id])
+
+  const saleStats = useMemo(() => {
+    const keys = new Set<string>()
+    let units = 0
+    let last = ""
+    for (const txn of ledger) {
+      const day = txn.date.slice(0, 10)
+      if (day > last) last = day
+      if (txn.type !== "Sale") continue
+      units += 1
+      keys.add(txn.batchKey)
+    }
+    return { orders: keys.size, units, last }
+  }, [ledger])
 
   const rows = useMemo((): ListRow[] => {
-    const groups = groupClientOrderTransactions(clientOrders)
+    const groups = new Map<string, ResolvedClientTransaction[]>()
+    for (const txn of ledger) {
+      const list = groups.get(txn.batchKey) ?? []
+      list.push(txn)
+      groups.set(txn.batchKey, list)
+    }
     const out: ListRow[] = []
-    for (const txns of groups) {
+    for (const [batchKey, txns] of groups) {
       if (txns.length === 1) {
         out.push({ kind: "single", transaction: txns[0]! })
       } else {
         const first = txns[0]!
         out.push({
           kind: "consignment",
-          batchId: getTransactionOrderGroupKey(first),
+          batchId: batchKey,
           type: first.type,
           date: first.date,
           invoiceNumber: first.invoiceNumber,
@@ -178,10 +260,10 @@ export default function ClientDetailPage() {
     out.sort((a, b) => {
       const dateA = a.kind === "consignment" ? a.date : a.transaction.date
       const dateB = b.kind === "consignment" ? b.date : b.transaction.date
-      return new Date(dateB).getTime() - new Date(dateA).getTime()
+      return compareBusinessDatesDesc(dateA, dateB)
     })
     return out
-  }, [clientOrders])
+  }, [ledger])
 
   const openConsignment = (row: ConsignmentRow) => {
     setSelectedConsignment(row)
@@ -209,7 +291,7 @@ export default function ClientDetailPage() {
     return (
       <DashboardShell>
         <div className="flex flex-col gap-4 min-w-0">
-          <PageBackLink href="/clients" label="Clients" />
+          <PageBreadcrumbs items={[{ label: "Clients", href: "/clients" }, { label: "Client" }]} />
           <p role="alert" className="text-sm text-destructive">
             {isAuthFailure(clientsError) ? SESSION_EXPIRED_MESSAGE : "Could not load this client."}
           </p>
@@ -222,7 +304,7 @@ export default function ClientDetailPage() {
     return (
       <DashboardShell>
         <div className="flex flex-col gap-4 min-w-0">
-          <PageBackLink href="/clients" label="Clients" />
+          <PageBreadcrumbs items={[{ label: "Clients", href: "/clients" }, { label: "Client" }]} />
           <p className="text-sm text-muted-foreground">Client not found.</p>
         </div>
       </DashboardShell>
@@ -230,6 +312,26 @@ export default function ClientDetailPage() {
   }
 
   const activeClient = client
+  const held = holdingsForClient(heldUnits, activeClient)
+  const overdueHeld = held.filter((unit) => unit.returnDate && isOverdue(unit.returnDate, today))
+  const openRequests = clientRequests.filter((request) => OPEN_REQUEST_STATUSES.has(request.status))
+  const lastActivity = ledgerReady ? saleStats.last : ""
+  const emails = splitEmails(activeClient.email)
+  const phone = displayContact(activeClient.phone)
+  const sites = realSites(
+    activeClient.sites?.length
+      ? activeClient.sites
+      : activeClient.address
+        ? [{ address: activeClient.address }]
+        : [],
+  )
+  const company = displayContact(clientCompanyDetail(activeClient))
+  const identity = clientListIdentity(activeClient)
+  const clientCases = cases.filter((row) => {
+    const faulty = caseHolders[row.faulty_inventory_item_id]
+    const loaner = row.loaner_inventory_item_id ? caseHolders[row.loaner_inventory_item_id] : ""
+    return holderMatchesClient(faulty, activeClient) || holderMatchesClient(loaner, activeClient)
+  })
 
   function openEditClient() {
     setEditName(activeClient.name)
@@ -293,87 +395,39 @@ export default function ClientDetailPage() {
   return (
     <DashboardShell>
       <div className="flex flex-col gap-6 min-w-0">
-        <PageBackLink href="/clients" label="Clients" />
+        <PageBreadcrumbs items={[{ label: "Clients", href: "/clients" }, { label: identity.title }]} />
 
         {/* Client header */}
         <Card>
           <CardHeader>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <CardTitle className="text-lg">{activeClient.name}</CardTitle>
-              <Button type="button" variant="outline" size="sm" className="w-fit shrink-0" onClick={openEditClient}>
-                <Pencil className="w-4 h-4 mr-2" />
-                Edit details
-              </Button>
-            </div>
-            <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-muted-foreground mt-1">
-              <span className="flex items-center gap-1.5">
-                <Building2 className="w-4 h-4 shrink-0" />
-                {activeClient.company}
-              </span>
-              {activeClient.email && (
-                <a
-                  href={`mailto:${activeClient.email}`}
-                  className="flex items-center gap-1.5 hover:text-foreground"
-                >
-                  <Mail className="w-4 h-4 shrink-0" />
-                  {activeClient.email}
-                </a>
-              )}
-              {activeClient.phone && (
-                <span className="flex items-center gap-1.5">
-                  <Phone className="w-4 h-4 shrink-0" />
-                  {activeClient.phone}
-                </span>
-              )}
-            </div>
-            {(activeClient.sites?.length ?? 0) > 0 ? (
-              <div className="mt-3 space-y-2 w-full min-w-0">
-                <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-                  <MapPin className="w-3.5 h-3.5" />
-                  Sites
-                </p>
-                <ul className="space-y-2 text-sm text-muted-foreground">
-                  {activeClient.sites!.map((s, i) => (
-                    <li key={i} className="flex items-start gap-2 min-w-0">
-                      <MapPin className="w-4 h-4 shrink-0 mt-0.5" />
-                      <span className="min-w-0 break-words">
-                        {s.name ? <span className="text-foreground font-medium">{s.name}: </span> : null}
-                        {s.address}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
+              <div>
+                <CardTitle className="text-lg">{identity.title}</CardTitle>
+                {identity.fallback ? (
+                  <p className="mt-1 font-mono text-xs text-muted-foreground">{activeClient.id}</p>
+                ) : company ? (
+                  <p className="mt-1 text-sm text-muted-foreground">{company}</p>
+                ) : null}
               </div>
-            ) : activeClient.address ? (
-              <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-muted-foreground mt-3">
-                <span className="flex items-start gap-1.5">
-                  <MapPin className="w-4 h-4 shrink-0 mt-0.5" />
-                  <span>{activeClient.address}</span>
-                </span>
-              </div>
-            ) : null}
-            <div className="flex gap-4 mt-3 text-sm">
-              <span className="text-muted-foreground">
-                {clientOrders.length} transaction{clientOrders.length !== 1 ? "s" : ""}
-                {rows.length > 0 && (
-                  <span> in {rows.length} consignment{rows.length !== 1 ? "s" : ""} / order{rows.length !== 1 ? "s" : ""}</span>
-                )}
-              </span>
-              {(activeClient.totalSpent ?? 0) > 0 && (
-                <span className="text-muted-foreground">
-                  Total spent: ${(activeClient.totalSpent ?? 0).toLocaleString()}
-                </span>
-              )}
-              {activeClient.lastOrder && (
-                <span className="text-muted-foreground">
-                  Last order: {formatDateDDMMYYYY(activeClient.lastOrder)}
-                </span>
-              )}
+              {canEdit ? (
+                <Button type="button" variant="outline" size="sm" className="w-fit shrink-0" onClick={openEditClient}>
+                  <Pencil className="w-4 h-4 mr-2" />
+                  Edit details
+                </Button>
+              ) : null}
             </div>
+            <dl className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+              <Stat label="Items held" value={String(held.length)} />
+              <Stat label="Orders" value={ledgerReady ? String(saleStats.orders) : "…"} />
+              <Stat label="Units" value={ledgerReady ? String(saleStats.units) : "…"} />
+              <Stat label="Overdue returns" value={String(overdueHeld.length)} />
+              <Stat label="Open requests" value={String(openRequests.length)} />
+              <Stat label="Last activity" value={!ledgerReady ? "…" : lastActivity ? formatDateDDMMYYYY(lastActivity) : "—"} />
+            </dl>
           </CardHeader>
         </Card>
 
-        <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        {canEdit ? <Dialog open={editOpen} onOpenChange={setEditOpen}>
           <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Edit client</DialogTitle>
@@ -470,18 +524,20 @@ export default function ClientDetailPage() {
               </Button>
             </DialogFooter>
           </DialogContent>
-        </Dialog>
+        </Dialog> : null}
 
-        {/* Stock requests (orders) */}
+        <div className="grid w-full min-w-0 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <Tabs value={tab ?? (held.length > 0 ? "held" : "transactions")} onValueChange={setTab} className="min-w-0">
+          <TabsList className="flex h-auto w-full flex-wrap justify-start">
+            <TabsTrigger value="requests">Requests {clientRequests.length}</TabsTrigger>
+            <TabsTrigger value="transactions">Transactions {ledgerReady ? rows.length : "…"}</TabsTrigger>
+            <TabsTrigger value="held">Items held {held.length}</TabsTrigger>
+            <TabsTrigger value="cases">Cases {clientCases.length}</TabsTrigger>
+          </TabsList>
+          <TabsContent value="requests">
         <Card className="flex flex-col min-h-[120px]">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base font-semibold text-foreground flex items-center gap-2">
-              <MessageSquare className="w-4 h-4" />
-              Stock requests
-            </CardTitle>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Sales requests tied to this client in the directory. Open a row for fulfilment and billing.
-            </p>
+            <CardTitle className="text-base font-semibold text-foreground">Requests</CardTitle>
           </CardHeader>
           <CardContent className="flex-1 min-h-0 overflow-auto overflow-x-auto">
             {requestsLoading ? (
@@ -492,37 +548,31 @@ export default function ClientDetailPage() {
               <Table className="min-w-[480px]">
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">
-                    <TableHead className="text-xs text-muted-foreground font-medium">Lines</TableHead>
-                    <TableHead className="text-xs text-muted-foreground font-medium">Status</TableHead>
-                    <TableHead className="text-xs text-muted-foreground font-medium">Created</TableHead>
+                    <TableHead>Lines</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Created</TableHead>
                     <TableHead className="w-24" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {clientRequests.map((r) => (
-                    <TableRow key={r.id}>
+                    <TableRow
+                      key={r.id}
+                      className="cursor-pointer hover:bg-muted/50"
+                      onClick={() => router.push(`/requests/${r.id}`)}
+                    >
                       <TableCell className="text-sm text-muted-foreground">
                         {(r.stock_request_lines ?? []).length} line
                         {(r.stock_request_lines ?? []).length !== 1 ? "s" : ""}
                       </TableCell>
                       <TableCell>
-                        <Badge
-                          variant="secondary"
-                          className={`text-[10px] border-0 ${requestStatusStyles[r.status] ?? ""}`}
-                        >
-                          {r.status.replace("_", " ")}
-                        </Badge>
+                        <StatusPill value={r.status} />
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
                         {formatDateDDMMYYYY(r.created_at)}
                       </TableCell>
                       <TableCell>
-                        <Button variant="ghost" size="sm" className="h-8 px-2" asChild>
-                          <Link href={`/requests/${r.id}`} className="gap-1">
-                            Open
-                            <ChevronRight className="w-3.5 h-3.5" />
-                          </Link>
-                        </Button>
+                        <ChevronRight className="w-4 h-4 text-muted-foreground" />
                       </TableCell>
                     </TableRow>
                   ))}
@@ -531,35 +581,29 @@ export default function ClientDetailPage() {
             )}
           </CardContent>
         </Card>
-
-        {/* Transactions & consignments */}
+          </TabsContent>
+          <TabsContent value="transactions">
         <Card className="flex flex-col min-h-[200px]">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base font-semibold text-foreground flex items-center gap-2">
-              <Package className="w-4 h-4" />
-              Transactions & consignments
-            </CardTitle>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Click a row to see the items moved and movement type.
-            </p>
+            <CardTitle className="text-base font-semibold text-foreground">Transactions</CardTitle>
           </CardHeader>
           <CardContent className="flex-1 min-h-0 overflow-auto overflow-x-auto">
-            {rows.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-4">
-                No transactions or consignments recorded for this client.
-              </p>
+            {!ledgerReady ? (
+              <p className="text-sm text-muted-foreground py-4">Loading transactions…</p>
+            ) : rows.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-4">No transactions for this client.</p>
             ) : (
               <Table className="min-w-[560px]">
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">
-                    <TableHead className="text-xs text-muted-foreground font-medium">Date</TableHead>
-                    <TableHead className="text-xs text-muted-foreground font-medium">Type</TableHead>
-                    <TableHead className="text-xs text-muted-foreground font-medium">Items</TableHead>
-                    <TableHead className="text-xs text-muted-foreground font-medium hidden sm:table-cell">
+                    <TableHead>Date</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead className="text-right">Items</TableHead>
+                    <TableHead className="hidden sm:table-cell">
                       Serial / Ref
                     </TableHead>
                     {showFinancials && (
-                      <TableHead className="text-xs text-muted-foreground font-medium hidden lg:table-cell">
+                      <TableHead className="hidden lg:table-cell">
                         Invoice
                       </TableHead>
                     )}
@@ -576,17 +620,17 @@ export default function ClientDetailPage() {
                           onClick={() => openConsignment(row)}
                         >
                           <TableCell className="text-sm text-muted-foreground">
-                            {formatDateDDMMYYYY(row.date)}
+                            <BusinessDateLabel
+                              date={row.date}
+                              createdAt={latestRecordedAt(row.transactions.map((txn) => txn.createdAt))}
+                              timeZone={timeZone}
+                            />
                           </TableCell>
                           <TableCell>
-                            <Badge
-                              variant="secondary"
-                              className={cn("text-[10px] font-medium border-0", statusStyles[row.type])}
-                            >
-                              {row.type}
-                            </Badge>
+                            <StatusPill value={row.type} />
+                            <LedgerMismatch labels={mismatchLabels(row.transactions, activeClient)} />
                           </TableCell>
-                          <TableCell className="text-sm font-medium">{row.count} item{row.count !== 1 ? "s" : ""}</TableCell>
+                          <TableCell className="text-right text-sm font-medium tabular-nums">{row.count} item{row.count !== 1 ? "s" : ""}</TableCell>
                           <TableCell className="text-sm text-muted-foreground hidden sm:table-cell">—</TableCell>
                           {showFinancials && (
                             <TableCell className="font-mono text-xs text-muted-foreground hidden lg:table-cell">
@@ -607,17 +651,13 @@ export default function ClientDetailPage() {
                         onClick={() => openTransaction(t)}
                       >
                         <TableCell className="text-sm text-muted-foreground">
-                          {formatDateDDMMYYYY(t.date)}
+                          <BusinessDateLabel date={t.date} createdAt={t.createdAt} timeZone={timeZone} />
                         </TableCell>
                         <TableCell>
-                          <Badge
-                            variant="secondary"
-                            className={cn("text-[10px] font-medium border-0", statusStyles[t.type])}
-                          >
-                            {t.type}
-                          </Badge>
+                          <StatusPill value={t.type} />
+                          <LedgerMismatch labels={mismatchLabels([t], activeClient)} />
                         </TableCell>
-                        <TableCell className="text-sm">1 item</TableCell>
+                        <TableCell className="text-right text-sm tabular-nums">1 item</TableCell>
                         <TableCell className="font-mono text-xs text-foreground hidden sm:table-cell">
                           {t.serialNumber}
                         </TableCell>
@@ -637,6 +677,85 @@ export default function ClientDetailPage() {
             )}
           </CardContent>
         </Card>
+          </TabsContent>
+          <TabsContent value="held">
+            <HeldTable units={held} today={today} />
+          </TabsContent>
+          <TabsContent value="cases">
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">Cases</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {clientCases.length === 0 ? (
+                  <p className="py-4 text-sm text-muted-foreground">No remediation cases for this client.</p>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Faulty serial</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Loaner</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {clientCases.map((row) => (
+                        <TableRow key={row.id}>
+                          <TableCell className="font-mono text-xs">{row.faulty_serial}</TableCell>
+                          <TableCell><StatusPill value={row.status} /></TableCell>
+                          <TableCell className="font-mono text-xs">{row.loaner_serial ?? "—"}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
+        <Card className="w-full lg:sticky lg:top-4 lg:w-[320px]">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Contact</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4 text-sm">
+            {emails.length > 0 ? (
+              <div className="flex flex-col gap-1">
+                {emails.map((email) => (
+                  <a key={email} href={`mailto:${email}`} className="inline-flex items-center gap-2 break-words hover:text-foreground text-muted-foreground">
+                    <Mail className="size-4 shrink-0" />
+                    {email}
+                  </a>
+                ))}
+              </div>
+            ) : null}
+            {phone ? (
+              <a href={`tel:${phone.replace(/\s/g, "")}`} className="inline-flex items-center gap-2 text-muted-foreground hover:text-foreground">
+                <Phone className="size-4 shrink-0" />
+                {phone}
+              </a>
+            ) : null}
+            {sites.length > 0 ? (
+              <div>
+                <p className="mb-1 text-xs font-medium text-muted-foreground">Sites</p>
+                <ul className="space-y-2 text-muted-foreground">
+                  {sites.map((site) => (
+                    <li key={`${site.name ?? ""}-${site.address}`} className="flex items-start gap-2">
+                      <MapPin className="mt-0.5 size-4 shrink-0" />
+                      <span className="break-words">
+                        {site.name ? <span className="font-medium text-foreground">{site.name}: </span> : null}
+                        {site.address}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {emails.length === 0 && !phone && sites.length === 0 ? (
+              <p className="text-muted-foreground">No contact details.</p>
+            ) : null}
+          </CardContent>
+        </Card>
+        </div>
       </div>
 
       {/* Detail sheet */}
@@ -645,17 +764,30 @@ export default function ClientDetailPage() {
           <SheetHeader className="p-0 space-y-1.5 pb-4 text-left pr-[1.4rem] sm:pr-7 shrink-0">
             <SheetTitle>
               {selectedConsignment
-                ? `Consignment — ${selectedConsignment.type}`
+                ? `Transactions — ${selectedConsignment.type}`
                 : selectedTransaction
                   ? `Transaction — ${selectedTransaction.type}`
                   : "Details"}
             </SheetTitle>
             <SheetDescription>
-              {selectedConsignment
-                ? `${selectedConsignment.count} item${selectedConsignment.count !== 1 ? "s" : ""} · ${formatDateDDMMYYYY(selectedConsignment.date)}`
-                : selectedTransaction
-                  ? formatDateDDMMYYYY(selectedTransaction.date)
-                  : ""}
+              {selectedConsignment ? (
+                <>
+                  {`${selectedConsignment.count} item${selectedConsignment.count !== 1 ? "s" : ""} · `}
+                  <BusinessDateLabel
+                    date={selectedConsignment.date}
+                    createdAt={latestRecordedAt(selectedConsignment.transactions.map((txn) => txn.createdAt))}
+                    timeZone={timeZone}
+                  />
+                </>
+              ) : selectedTransaction ? (
+                <BusinessDateLabel
+                  date={selectedTransaction.date}
+                  createdAt={selectedTransaction.createdAt}
+                  timeZone={timeZone}
+                />
+              ) : (
+                ""
+              )}
             </SheetDescription>
           </SheetHeader>
           <div className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-auto overscroll-y-contain [scrollbar-gutter:stable]">
@@ -671,18 +803,16 @@ export default function ClientDetailPage() {
                 <Table>
                   <TableHeader>
                     <TableRow className="hover:bg-transparent">
-                      <TableHead className="text-xs">Type</TableHead>
-                      <TableHead className="text-xs">Serial</TableHead>
-                      <TableHead className="text-xs">Item</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead>Serial</TableHead>
+                      <TableHead>Item</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {selectedConsignment.transactions.map((txn) => (
                       <TableRow key={txn.id}>
                         <TableCell>
-                          <Badge variant="secondary" className={cn("text-[10px]", statusStyles[txn.type])}>
-                            {txn.type}
-                          </Badge>
+                          <StatusPill value={txn.type} />
                         </TableCell>
                         <TableCell className="font-mono text-xs">{txn.serialNumber}</TableCell>
                         <TableCell className="text-sm">{txn.itemName}</TableCell>
@@ -698,9 +828,7 @@ export default function ClientDetailPage() {
                 <div>
                   <dt className="text-muted-foreground text-xs font-medium">Movement type</dt>
                   <dd className="mt-0.5">
-                    <Badge variant="secondary" className={cn(statusStyles[selectedTransaction.type])}>
-                      {selectedTransaction.type}
-                    </Badge>
+                    <StatusPill value={selectedTransaction.type} />
                   </dd>
                 </div>
                 <div>
@@ -713,7 +841,13 @@ export default function ClientDetailPage() {
                 </div>
                 <div>
                   <dt className="text-muted-foreground text-xs font-medium">Date</dt>
-                  <dd className="mt-0.5">{formatDateDDMMYYYY(selectedTransaction.date)}</dd>
+                  <dd className="mt-0.5">
+                    <BusinessDateLabel
+                      date={selectedTransaction.date}
+                      createdAt={selectedTransaction.createdAt}
+                      timeZone={timeZone}
+                    />
+                  </dd>
                 </div>
                 {showFinancials && selectedTransaction.invoiceNumber && (
                   <div>
@@ -737,15 +871,13 @@ export default function ClientDetailPage() {
                   <div>
                     <dt className="text-muted-foreground text-xs font-medium">Delivery note</dt>
                     <dd className="mt-0.5">
-                      <a
-                        href={selectedTransaction.deliveryNoteUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-primary hover:underline"
+                      <SignedStorageLink
+                        path={selectedTransaction.deliveryNoteUrl}
+                        className="inline-flex items-center gap-1 text-brand hover:underline"
                       >
                         <FileText className="w-3.5 h-3.5" />
                         View
-                      </a>
+                      </SignedStorageLink>
                     </dd>
                   </div>
                 )}
@@ -761,5 +893,96 @@ export default function ClientDetailPage() {
         </SheetContent>
       </Sheet>
     </DashboardShell>
+  )
+}
+
+function mismatchLabels(
+  txns: readonly { client: string }[],
+  client: { name?: string | null; company?: string | null },
+): string[] {
+  const seen: string[] = []
+  for (const txn of txns) {
+    const text = txn.client.trim()
+    if (!text || seen.includes(text)) continue
+    if (ledgerTextDiffersFromClient(text, client)) seen.push(text)
+  }
+  return seen
+}
+
+function LedgerMismatch({ labels }: { labels: string[] }) {
+  if (labels.length === 0) return null
+  return <p className="mt-1 max-w-[16rem] text-xs text-muted-foreground">{labels.join(" · ")}</p>
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="mt-0.5 text-sm font-medium tabular-nums text-foreground">{value}</dd>
+    </div>
+  )
+}
+
+function HeldTable({ units, today }: { units: HeldUnit[]; today: string }) {
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base">Items held</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {units.length === 0 ? (
+          <p className="py-4 text-sm text-muted-foreground">No POC or rental units are out with this client.</p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Serial</TableHead>
+                <TableHead>Product</TableHead>
+                <TableHead>Date out</TableHead>
+                <TableHead>Return date</TableHead>
+                <TableHead>Age</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {units.map((unit) => {
+                const overdue = Boolean(unit.returnDate && isOverdue(unit.returnDate, today))
+                return (
+                  <TableRow key={unit.id}>
+                    <TableCell className="font-mono text-xs">{unit.serialNumber}</TableCell>
+                    <TableCell className="text-sm">
+                      <div className="flex flex-col items-start gap-1">
+                        <span>{unit.product}</span>
+                        <StatusPill value={unit.kind === "POC" ? "POC" : "Rented"}>{unit.kind}</StatusPill>
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {unit.dateOut ? formatDateDDMMYYYY(unit.dateOut) : "—"}
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {unit.returnDate ? formatDateDDMMYYYY(unit.returnDate) : "—"}
+                    </TableCell>
+                    <TableCell>
+                      {unit.returnDate ? (
+                        <span
+                          className={
+                            overdue
+                              ? "inline-flex items-center rounded-md bg-warning-soft px-2 py-0.5 text-sm font-medium text-warning"
+                              : "inline-flex items-center rounded-md bg-muted px-2 py-0.5 text-sm font-medium text-muted-foreground"
+                          }
+                        >
+                          {formatReturnAge(unit.returnDate, today)}
+                        </span>
+                      ) : (
+                        "—"
+                      )}
+                    </TableCell>
+                  </TableRow>
+                )
+              })}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
   )
 }

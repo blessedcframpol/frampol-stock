@@ -6,11 +6,15 @@ import { useSearchParams, useRouter } from "next/navigation"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
+import { StatusPill } from "@/components/fs/status-pill"
+import { EmptyState } from "@/components/fs/empty-state"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useInventoryStore } from "@/lib/inventory-store"
-import { clients, appUsers } from "@/lib/data"
+import { useClients } from "@/lib/supabase/clients-db"
+import { useSearchUsers } from "@/lib/supabase/search-users"
 import { runSearch, type SearchResults } from "@/lib/search"
+import { clientCompanyDetail } from "@/lib/client-label"
 import {
   Search,
   Package,
@@ -19,7 +23,6 @@ import {
   ChevronRight,
   FileQuestion,
 } from "lucide-react"
-import { cn } from "@/lib/utils"
 import { PageHeader } from "@/components/page-nav"
 
 type FilterTab = "all" | "inventory" | "clients" | "users"
@@ -37,13 +40,15 @@ export function SearchResultsContent() {
   }
 
   const { inventory } = useInventoryStore()
+  const { clients } = useClients()
+  const users = useSearchUsers()
 
   const results = useMemo<SearchResults>(() => {
     return runSearch(
-      { inventory, clients, users: appUsers },
+      { inventory, clients, users },
       qFromUrl
     )
-  }, [inventory, qFromUrl])
+  }, [inventory, clients, users, qFromUrl])
 
   const totalCount =
     results.inventory.length + results.clients.length + results.users.length
@@ -84,25 +89,15 @@ export function SearchResultsContent() {
       </form>
 
       {!qFromUrl ? (
-        <Card className="border-border">
-          <CardContent className="flex flex-col items-center justify-center py-16 text-center">
-            <FileQuestion className="w-12 h-12 text-muted-foreground/50 mb-3" />
-            <p className="text-sm font-medium text-foreground">Enter a search term</p>
-            <p className="text-sm text-muted-foreground mt-1">
-              Type in the box above and press Enter to search across inventory, clients, and users.
-            </p>
-          </CardContent>
-        </Card>
+        <EmptyState
+          icon={<FileQuestion />}
+          message="Enter a search term. Type in the box above and press Enter to search across inventory, clients, and users."
+        />
       ) : totalCount === 0 ? (
-        <Card className="border-border">
-          <CardContent className="flex flex-col items-center justify-center py-16 text-center">
-            <Search className="w-12 h-12 text-muted-foreground/50 mb-3" />
-            <p className="text-sm font-medium text-foreground">No results for &quot;{qFromUrl}&quot;</p>
-            <p className="text-sm text-muted-foreground mt-1">
-              Try different keywords or check spelling.
-            </p>
-          </CardContent>
-        </Card>
+        <EmptyState
+          icon={<Search />}
+          message={`No results for "${qFromUrl}". Try different keywords or check spelling.`}
+        />
       ) : (
         <>
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -173,22 +168,7 @@ export function SearchResultsContent() {
                               </p>
                             </div>
                             <div className="flex items-center gap-2 shrink-0">
-                              <Badge
-                                variant="secondary"
-                                className={cn(
-                                  item.status === "In Stock" && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-                                  item.status === "Sold" && "bg-red-500/10 text-red-500 dark:text-red-400",
-                                  item.status === "POC" && "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400",
-                                  item.status === "Rented" && "bg-blue-500/10 text-blue-600 dark:text-blue-400",
-                                  item.status === "Maintenance" && "bg-amber-500/10 text-amber-600 dark:text-amber-400",
-                                  item.status === "RMA Hold" && "bg-orange-500/10 text-orange-600 dark:text-orange-400",
-                                  item.status === "Pending Inspection" &&
-                                    "bg-teal-500/10 text-teal-700 dark:text-teal-400",
-                                  item.status === "Disposed" && "bg-slate-500/10 text-slate-600 dark:text-slate-400"
-                                )}
-                              >
-                                {item.status}
-                              </Badge>
+                              <StatusPill value={item.status} />
                               <ChevronRight className="w-4 h-4 text-muted-foreground" />
                             </div>
                           </Link>
@@ -210,7 +190,9 @@ export function SearchResultsContent() {
                       </Badge>
                     </div>
                     <ul className="divide-y divide-border">
-                      {results.clients.map((client) => (
+                      {results.clients.map((client) => {
+                        const detail = [clientCompanyDetail(client), client.email].filter(Boolean).join(" · ")
+                        return (
                         <li key={client.id}>
                           <Link
                             href={`/clients/${client.id}`}
@@ -220,15 +202,15 @@ export function SearchResultsContent() {
                               <p className="font-medium text-foreground truncate">
                                 {client.name}
                               </p>
-                              <p className="text-sm text-muted-foreground truncate">
-                                {client.company}
-                                {client.email ? ` · ${client.email}` : ""}
-                              </p>
+                              {detail ? (
+                                <p className="text-sm text-muted-foreground truncate">{detail}</p>
+                              ) : null}
                             </div>
                             <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
                           </Link>
                         </li>
-                      ))}
+                        )
+                      })}
                     </ul>
                   </CardContent>
                 </Card>

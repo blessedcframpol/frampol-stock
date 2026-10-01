@@ -1,457 +1,334 @@
 "use client"
 
 import Link from "next/link"
-import { Card, CardContent } from "@/components/ui/card"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
-import { Badge } from "@/components/ui/badge"
+import { Fragment, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
+import { Card } from "@/components/ui/card"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { useInventoryStore } from "@/lib/inventory-store"
+import { EmptyState } from "@/components/fs/empty-state"
+import { FilterChip } from "@/components/fs/filter-chip"
+import { StatusPill } from "@/components/fs/status-pill"
 import { PageHeader } from "@/components/page-nav"
-import { Package, ShieldAlert, Clock, AlertTriangle, ChevronRight } from "lucide-react"
-import { cn, formatDateDDMMYYYY } from "@/lib/utils"
+import { useAuth } from "@/lib/auth-context"
+import { useAlertFeed } from "@/hooks/use-alert-feed"
+import { formatBusinessDate } from "@/lib/business-date.mjs"
+import {
+  alertChipFromSearch,
+  canRecordReturn,
+  formatReturnAge,
+  groupReturnRows,
+  isInternalHolder,
+  recordReturnHref,
+  sectionCount,
+  showsSection,
+  visibleReturnRows,
+  type AlertChip,
+  type AlertCounts,
+  type ReturnAlertRow,
+} from "@/lib/alerts"
+import { ConvertToSaleDialog, ExtendHoldingDialog } from "@/components/holding-actions"
+import { AlertTriangle, ChevronRight } from "lucide-react"
 
-function daysUntil(dateStr: string): number {
-  const end = new Date(dateStr)
-  const now = new Date()
-  now.setHours(0, 0, 0, 0)
-  end.setHours(0, 0, 0, 0)
-  return Math.ceil((end.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
-}
+const CHIPS: { id: AlertChip; label: string; count: (counts: AlertCounts) => number }[] = [
+  { id: "all", label: "All", count: (counts) => counts.all },
+  { id: "overdue", label: "Overdue", count: (counts) => counts.overdue },
+  { id: "dueSoon", label: "Due soon", count: (counts) => counts.dueSoon },
+  { id: "lowStock", label: "Low stock", count: (counts) => counts.lowStock },
+  { id: "poc", label: "POC", count: (counts) => counts.poc },
+  { id: "rental", label: "Rental", count: (counts) => counts.rental },
+]
 
-function daysOverdue(dateStr: string): number {
-  const out = new Date(dateStr)
-  const now = new Date()
-  now.setHours(0, 0, 0, 0)
-  out.setHours(0, 0, 0, 0)
-  return Math.ceil((now.getTime() - out.getTime()) / (1000 * 60 * 60 * 24))
+function ReturnTable({
+  rows,
+  today,
+  showActions,
+  onConvert,
+  onExtend,
+}: {
+  rows: ReturnAlertRow[]
+  today: string
+  showActions: boolean
+  onConvert: (serial: string) => void
+  onExtend: (row: ReturnAlertRow) => void
+}) {
+  const groups = groupReturnRows(rows)
+  const columns = showActions ? 7 : 6
+  return (
+    <div className="overflow-x-auto">
+      <Table>
+        <TableHeader>
+          <TableRow className="hover:bg-transparent">
+            <TableHead>Serial</TableHead>
+            <TableHead>Product</TableHead>
+            <TableHead>Type</TableHead>
+            <TableHead>Holder</TableHead>
+            <TableHead>Return date</TableHead>
+            <TableHead>Age</TableHead>
+            {showActions ? <TableHead className="text-right">Actions</TableHead> : null}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {groups.map((group) => {
+            const grouped = group.rows.length > 1
+            return (
+              <Fragment key={group.key}>
+                {grouped ? (
+                  <TableRow className="bg-muted/40 hover:bg-muted/40">
+                    <TableCell colSpan={columns} className="whitespace-normal">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-sm font-medium text-foreground">
+                          {group.holder}
+                          <span className="font-normal text-muted-foreground">
+                            {" "}
+                            · {formatBusinessDate(group.returnDate)} · {group.rows.length} units
+                          </span>
+                        </span>
+                        {showActions ? (
+                          <Button variant="ghost" size="sm" className="h-8 text-xs" asChild>
+                            <Link href={recordReturnHref(group.kind, group.rows.map((row) => row.serialNumber))}>
+                              Record return ({group.rows.length})
+                              <ChevronRight className="w-3.5 h-3.5 ml-0.5" />
+                            </Link>
+                          </Button>
+                        ) : null}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ) : null}
+                {group.rows.map((row) => (
+                  <TableRow key={row.id}>
+                    <TableCell className="font-mono text-sm text-foreground">{row.serialNumber}</TableCell>
+                    <TableCell className="text-sm text-foreground">{row.product}</TableCell>
+                    <TableCell>
+                      <StatusPill value={row.kind === "POC" ? "POC" : "Rented"}>
+                        {row.kind}
+                      </StatusPill>
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {row.holder}
+                      {isInternalHolder(row.holder) ? (
+                        <span className="ml-2 text-xs uppercase tracking-wide">Internal</span>
+                      ) : null}
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">{formatBusinessDate(row.returnDate)}</TableCell>
+                    <TableCell className="text-sm">{formatReturnAge(row.returnDate, today)}</TableCell>
+                    {showActions ? (
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-1">
+                          {grouped ? null : (
+                            <Button variant="ghost" size="sm" className="h-8 text-xs" asChild>
+                              <Link href={recordReturnHref(row.kind, [row.serialNumber])}>
+                                Record return
+                                <ChevronRight className="w-3.5 h-3.5 ml-0.5" />
+                              </Link>
+                            </Button>
+                          )}
+                          {row.kind === "POC" ? (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 text-xs"
+                              onClick={() => onConvert(row.serialNumber)}
+                            >
+                              Convert to sale
+                            </Button>
+                          ) : null}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 text-xs"
+                            onClick={() => onExtend(row)}
+                          >
+                            Extend
+                          </Button>
+                        </div>
+                      </TableCell>
+                    ) : null}
+                  </TableRow>
+                ))}
+              </Fragment>
+            )
+          })}
+        </TableBody>
+      </Table>
+    </div>
+  )
 }
 
 export function AlertsContent() {
-  const { getAlerts } = useInventoryStore()
-  const alerts = getAlerts()
-  const returnAlertsCount =
-    alerts.pocOverdue.length + alerts.pocApproaching.length + alerts.rentalOverdue.length + alerts.rentalApproaching.length
-  const total =
-    alerts.lowStock.length + alerts.warrantyExpiring.length + returnAlertsCount
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const chipParam = searchParams.get("chip")
+  const { role } = useAuth()
+  const { feed, loading, error } = useAlertFeed()
+  const [chip, setChip] = useState<AlertChip>(() => alertChipFromSearch(chipParam))
+  const [chipParamSeen, setChipParamSeen] = useState(chipParam)
+  if (chipParam !== chipParamSeen) {
+    setChipParamSeen(chipParam)
+    setChip(alertChipFromSearch(chipParam))
+  }
+  const [hideInternal, setHideInternal] = useState(false)
+  const [convertSerial, setConvertSerial] = useState<string | null>(null)
+  const [extendRow, setExtendRow] = useState<ReturnAlertRow | null>(null)
+  const showActions = canRecordReturn(role)
+  const counts = feed?.counts
 
   return (
     <div className="flex flex-col gap-6 min-w-0">
       <PageHeader
         title="Alerts"
-        description="Low stock, warranty expiring, and rentals past return date. Take action from here or in Inventory / Stock Movement."
+        description="Overdue returns, returns due in the next 14 days, and low stock. Record a return in Inventory movement."
       />
 
-      {total === 0 ? (
-        <Card className="border-border">
-          <CardContent className="flex flex-col items-center justify-center py-16 text-center">
-            <AlertTriangle className="w-12 h-12 text-muted-foreground/50 mb-3" />
-            <p className="text-sm font-medium text-foreground">No alerts</p>
-            <p className="text-sm text-muted-foreground mt-1">
-              You&apos;re all set. New alerts will appear here when stock is low, warranty is expiring, or a rental is past its return date.
-            </p>
-          </CardContent>
-        </Card>
-      ) : (
-        <Card className="border-border">
-          <Tabs defaultValue="all" className="w-full">
-            <TabsList className="w-full justify-start rounded-none border-b border-border bg-transparent p-0 h-auto gap-0 shrink-0 min-w-0 overflow-x-auto flex-nowrap [&::-webkit-scrollbar]:h-1">
-              <TabsTrigger
-                value="all"
-                className={cn(
-                  "rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-3 gap-1.5 shrink-0"
-                )}
-              >
-                All
-                <Badge variant="secondary" className="h-5 min-w-5 px-1 text-[10px] font-semibold">
-                  {total}
-                </Badge>
-              </TabsTrigger>
-              <TabsTrigger
-                value="lowStock"
-                className={cn(
-                  "rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-3 gap-1.5 shrink-0"
-                )}
-              >
+      {error ? <p className="text-sm text-danger">{error}</p> : null}
+
+      <div className="flex flex-col gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {CHIPS.map((item) => (
+            <FilterChip
+              key={item.id}
+              label={item.label}
+              count={counts ? item.count(counts) : undefined}
+              selected={chip === item.id}
+              onSelect={() => setChip(item.id)}
+            />
+          ))}
+          <FilterChip
+            label="Internal"
+            count={counts?.internal}
+            selected={hideInternal}
+            onSelect={() => setHideInternal((current) => !current)}
+          />
+        </div>
+        {counts ? (
+          <p className="text-sm text-muted-foreground">
+            {counts.internal} {counts.internal === 1 ? "unit is" : "units are"} with internal holders.
+          </p>
+        ) : null}
+      </div>
+
+      {loading && !feed ? (
+        <p className="text-sm text-muted-foreground">Loading alerts…</p>
+      ) : feed && counts && counts.all === 0 ? (
+        <EmptyState
+          icon={<AlertTriangle />}
+          message="No alerts. You're all set. New alerts will appear here when a return is overdue, a return is due in the next 14 days, or stock is low."
+        />
+      ) : feed && counts ? (
+        <div className="flex flex-col gap-6">
+          {showsSection(chip, "overdue") ? (
+            <section className="flex flex-col gap-3">
+              <h2 className="text-sm font-medium text-foreground">
+                Overdue returns
+                <span className="ml-2 tabular-nums text-muted-foreground">{sectionCount(counts, "overdue", chip)}</span>
+              </h2>
+              {visibleReturnRows(feed.overdue, chip, hideInternal).length === 0 ? (
+                <EmptyState message="No overdue returns." />
+              ) : (
+                <Card className="border-border p-0">
+                  <ReturnTable
+                    rows={visibleReturnRows(feed.overdue, chip, hideInternal)}
+                    today={feed.today}
+                    showActions={showActions}
+                    onConvert={setConvertSerial}
+                    onExtend={setExtendRow}
+                  />
+                </Card>
+              )}
+            </section>
+          ) : null}
+
+          {showsSection(chip, "dueSoon") ? (
+            <section className="flex flex-col gap-3">
+              <h2 className="text-sm font-medium text-foreground">
+                Due soon
+                <span className="ml-2 tabular-nums text-muted-foreground">{sectionCount(counts, "dueSoon", chip)}</span>
+              </h2>
+              {visibleReturnRows(feed.dueSoon, chip, hideInternal).length === 0 ? (
+                <EmptyState message="No returns due in the next 14 days." />
+              ) : (
+                <Card className="border-border p-0">
+                  <ReturnTable
+                    rows={visibleReturnRows(feed.dueSoon, chip, hideInternal)}
+                    today={feed.today}
+                    showActions={showActions}
+                    onConvert={setConvertSerial}
+                    onExtend={setExtendRow}
+                  />
+                </Card>
+              )}
+            </section>
+          ) : null}
+
+          {showsSection(chip, "lowStock") ? (
+            <section className="flex flex-col gap-3">
+              <h2 className="text-sm font-medium text-foreground">
                 Low stock
-                {alerts.lowStock.length > 0 && (
-                  <Badge variant="secondary" className="h-5 min-w-5 px-1 text-[10px] font-semibold">
-                    {alerts.lowStock.length}
-                  </Badge>
-                )}
-              </TabsTrigger>
-              <TabsTrigger
-                value="warranty"
-                className={cn(
-                  "rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-3 gap-1.5 shrink-0"
-                )}
-              >
-                Warranty
-                {alerts.warrantyExpiring.length > 0 && (
-                  <Badge variant="secondary" className="h-5 min-w-5 px-1 text-[10px] font-semibold">
-                    {alerts.warrantyExpiring.length}
-                  </Badge>
-                )}
-              </TabsTrigger>
-              <TabsTrigger
-                value="return"
-                className={cn(
-                  "rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-3 gap-1.5 shrink-0"
-                )}
-              >
-                POC / Rental return
-                {returnAlertsCount > 0 && (
-                  <Badge variant="secondary" className="h-5 min-w-5 px-1 text-[10px] font-semibold">
-                    {returnAlertsCount}
-                  </Badge>
-                )}
-              </TabsTrigger>
-            </TabsList>
-
-            {/* All: show all three sections */}
-            <TabsContent value="all" className="mt-0">
-              <div className="flex flex-col gap-6 p-4">
-                {alerts.lowStock.length > 0 && (
-                  <div>
-                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1.5 mb-3">
-                      <Package className="w-3.5 h-3.5" />
-                      Low stock
-                    </p>
-                    <div className="overflow-x-auto -mx-1">
-                      <Table>
-                        <TableHeader>
-                          <TableRow className="hover:bg-transparent border-b border-border">
-                            <TableHead className="text-xs text-muted-foreground font-medium">Product</TableHead>
-                            <TableHead className="text-xs text-muted-foreground font-medium">Vendor</TableHead>
-                            <TableHead className="text-xs text-muted-foreground font-medium">In stock</TableHead>
-                            <TableHead className="text-xs text-muted-foreground font-medium w-20" />
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {alerts.lowStock.map((a) => (
-                            <TableRow key={a.groupName} className="border-b border-border/50">
-                              <TableCell className="font-medium text-foreground">{a.groupName}</TableCell>
-                              <TableCell className="text-sm text-muted-foreground">{a.vendor}</TableCell>
-                              <TableCell className="text-sm">{a.inStock}</TableCell>
-                              <TableCell>
-                                <Button variant="ghost" size="sm" className="h-8 text-xs" asChild>
-                                  <Link href={`/inventory?group=${encodeURIComponent(a.groupName)}`}>
-                                    View in Inventory <ChevronRight className="w-3.5 h-3.5 ml-0.5" />
-                                  </Link>
-                                </Button>
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </div>
-                  </div>
-                )}
-                {alerts.warrantyExpiring.length > 0 && (
-                  <div>
-                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1.5 mb-3">
-                      <ShieldAlert className="w-3.5 h-3.5" />
-                      Warranty expiring
-                    </p>
-                    <div className="overflow-x-auto -mx-1">
-                      <Table>
-                        <TableHeader>
-                          <TableRow className="hover:bg-transparent border-b border-border">
-                            <TableHead className="text-xs text-muted-foreground font-medium">Serial</TableHead>
-                            <TableHead className="text-xs text-muted-foreground font-medium">Product</TableHead>
-                            <TableHead className="text-xs text-muted-foreground font-medium">Warranty end</TableHead>
-                            <TableHead className="text-xs text-muted-foreground font-medium">Days left</TableHead>
-                            <TableHead className="text-xs text-muted-foreground font-medium w-20" />
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {alerts.warrantyExpiring.map((item) => {
-                            const days = daysUntil(item.warrantyEndDate!)
-                            return (
-                              <TableRow key={item.id} className="border-b border-border/50">
-                                <TableCell className="font-mono text-sm text-foreground">{item.serialNumber}</TableCell>
-                                <TableCell className="text-sm text-foreground">{item.name}</TableCell>
-                                <TableCell className="text-sm text-muted-foreground">{formatDateDDMMYYYY(item.warrantyEndDate)}</TableCell>
-                                <TableCell className="text-sm">{days} days</TableCell>
-                                <TableCell>
-                                  <Button variant="ghost" size="sm" className="h-8 text-xs" asChild>
-                                    <Link href={`/inventory?group=${encodeURIComponent(item.name)}`}>View in Inventory <ChevronRight className="w-3.5 h-3.5 ml-0.5" /></Link>
-                                  </Button>
-                                </TableCell>
-                              </TableRow>
-                            )
-                          })}
-                        </TableBody>
-                      </Table>
-                    </div>
-                  </div>
-                )}
-                {(alerts.pocOverdue.length > 0 || alerts.pocApproaching.length > 0) && (
-                  <div>
-                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1.5 mb-3">
-                      <Clock className="w-3.5 h-3.5" />
-                      POC — return date overdue / approaching
-                    </p>
-                    <div className="overflow-x-auto -mx-1">
-                      <Table>
-                        <TableHeader>
-                          <TableRow className="hover:bg-transparent border-b border-border">
-                            <TableHead className="text-xs text-muted-foreground font-medium">Serial</TableHead>
-                            <TableHead className="text-xs text-muted-foreground font-medium">Product</TableHead>
-                            <TableHead className="text-xs text-muted-foreground font-medium">Assigned to</TableHead>
-                            <TableHead className="text-xs text-muted-foreground font-medium">Return date</TableHead>
-                            <TableHead className="text-xs text-muted-foreground font-medium">Status</TableHead>
-                            <TableHead className="text-xs text-muted-foreground font-medium w-20" />
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {alerts.pocOverdue.map((item) => (
-                            <TableRow key={item.id} className="border-b border-border/50">
-                              <TableCell className="font-mono text-sm text-foreground">{item.serialNumber}</TableCell>
-                              <TableCell className="text-sm text-foreground">{item.name}</TableCell>
-                              <TableCell className="text-sm text-muted-foreground">{item.assignedTo ?? "—"}</TableCell>
-                              <TableCell className="text-sm text-muted-foreground">{item.returnDate ? formatDateDDMMYYYY(item.returnDate) : "—"}</TableCell>
-                              <TableCell className="text-sm">Past due</TableCell>
-                              <TableCell>
-                                <Button variant="ghost" size="sm" className="h-8 text-xs" asChild>
-                                  <Link href="/inventory/movement">Record return <ChevronRight className="w-3.5 h-3.5 ml-0.5" /></Link>
-                                </Button>
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                          {alerts.pocApproaching.map((item) => (
-                            <TableRow key={item.id} className="border-b border-border/50">
-                              <TableCell className="font-mono text-sm text-foreground">{item.serialNumber}</TableCell>
-                              <TableCell className="text-sm text-foreground">{item.name}</TableCell>
-                              <TableCell className="text-sm text-muted-foreground">{item.assignedTo ?? "—"}</TableCell>
-                              <TableCell className="text-sm text-muted-foreground">{item.returnDate ? formatDateDDMMYYYY(item.returnDate) : "—"}</TableCell>
-                              <TableCell className="text-sm text-amber-600 dark:text-amber-400">Approaching</TableCell>
-                              <TableCell>
-                                <Button variant="ghost" size="sm" className="h-8 text-xs" asChild>
-                                  <Link href="/inventory/movement">Record return <ChevronRight className="w-3.5 h-3.5 ml-0.5" /></Link>
-                                </Button>
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </div>
-                  </div>
-                )}
-                {(alerts.rentalOverdue.length > 0 || alerts.rentalApproaching.length > 0) && (
-                  <div>
-                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1.5 mb-3">
-                      <Clock className="w-3.5 h-3.5" />
-                      Rental — return date overdue / approaching
-                    </p>
-                    <div className="overflow-x-auto -mx-1">
-                      <Table>
-                        <TableHeader>
-                          <TableRow className="hover:bg-transparent border-b border-border">
-                            <TableHead className="text-xs text-muted-foreground font-medium">Serial</TableHead>
-                            <TableHead className="text-xs text-muted-foreground font-medium">Product</TableHead>
-                            <TableHead className="text-xs text-muted-foreground font-medium">Assigned to</TableHead>
-                            <TableHead className="text-xs text-muted-foreground font-medium">Return date</TableHead>
-                            <TableHead className="text-xs text-muted-foreground font-medium">Status</TableHead>
-                            <TableHead className="text-xs text-muted-foreground font-medium w-20" />
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {alerts.rentalOverdue.map((item) => {
-                            const days = item.returnDate ? daysOverdue(item.returnDate) : 0
-                            return (
-                              <TableRow key={item.id} className="border-b border-border/50">
-                                <TableCell className="font-mono text-sm text-foreground">{item.serialNumber}</TableCell>
-                                <TableCell className="text-sm text-foreground">{item.name}</TableCell>
-                                <TableCell className="text-sm text-muted-foreground">{item.assignedTo ?? "—"}</TableCell>
-                                <TableCell className="text-sm text-muted-foreground">{item.returnDate ? formatDateDDMMYYYY(item.returnDate) : "—"}</TableCell>
-                                <TableCell className="text-sm">{days} days overdue</TableCell>
-                                <TableCell>
-                                  <Button variant="ghost" size="sm" className="h-8 text-xs" asChild>
-                                    <Link href="/inventory/movement">Record return <ChevronRight className="w-3.5 h-3.5 ml-0.5" /></Link>
-                                  </Button>
-                                </TableCell>
-                              </TableRow>
-                            )
-                          })}
-                          {alerts.rentalApproaching.map((item) => (
-                            <TableRow key={item.id} className="border-b border-border/50">
-                              <TableCell className="font-mono text-sm text-foreground">{item.serialNumber}</TableCell>
-                              <TableCell className="text-sm text-foreground">{item.name}</TableCell>
-                              <TableCell className="text-sm text-muted-foreground">{item.assignedTo ?? "—"}</TableCell>
-                              <TableCell className="text-sm text-muted-foreground">{item.returnDate ? formatDateDDMMYYYY(item.returnDate) : "—"}</TableCell>
-                              <TableCell className="text-sm text-amber-600 dark:text-amber-400">Approaching</TableCell>
-                              <TableCell>
-                                <Button variant="ghost" size="sm" className="h-8 text-xs" asChild>
-                                  <Link href="/inventory/movement">Record return <ChevronRight className="w-3.5 h-3.5 ml-0.5" /></Link>
-                                </Button>
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </TabsContent>
-
-            {/* Low stock only */}
-            <TabsContent value="lowStock" className="mt-0">
-              <div className="pt-4 px-4 pb-4">
-                {alerts.lowStock.length === 0 ? (
-                  <p className="text-sm text-muted-foreground py-4">No low stock alerts.</p>
-                ) : (
-                  <div className="overflow-x-auto -mx-1">
+                <span className="ml-2 tabular-nums text-muted-foreground">{counts.lowStock}</span>
+              </h2>
+              {feed.lowStock.length === 0 ? (
+                <EmptyState message="No low stock alerts." />
+              ) : (
+                <Card className="border-border p-0">
+                  <div className="overflow-x-auto">
                     <Table>
                       <TableHeader>
-                        <TableRow className="hover:bg-transparent border-b border-border">
-                          <TableHead className="text-xs text-muted-foreground font-medium">Product</TableHead>
-                          <TableHead className="text-xs text-muted-foreground font-medium">Vendor</TableHead>
-                          <TableHead className="text-xs text-muted-foreground font-medium">In stock</TableHead>
-                          <TableHead className="text-xs text-muted-foreground font-medium w-20" />
+                        <TableRow className="hover:bg-transparent">
+                          <TableHead>Product</TableHead>
+                          <TableHead>Vendor</TableHead>
+                          <TableHead className="text-right">In stock</TableHead>
+                          <TableHead className="text-right">Reorder at</TableHead>
+                          {role != null && role !== "viewer" ? <TableHead className="text-right">Actions</TableHead> : null}
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {alerts.lowStock.map((a) => (
-                          <TableRow key={a.groupName} className="border-b border-border/50">
-                            <TableCell className="font-medium text-foreground">{a.groupName}</TableCell>
-                            <TableCell className="text-sm text-muted-foreground">{a.vendor}</TableCell>
-                            <TableCell className="text-sm">{a.inStock}</TableCell>
-                            <TableCell>
-                              <Button variant="ghost" size="sm" className="h-8 text-xs" asChild>
-                                <Link href={`/inventory?group=${encodeURIComponent(a.groupName)}`}>
-                                  View in Inventory <ChevronRight className="w-3.5 h-3.5 ml-0.5" />
-                                </Link>
-                              </Button>
-                            </TableCell>
+                        {feed.lowStock.map((row) => (
+                          <TableRow
+                            key={row.productId}
+                            className="cursor-pointer"
+                            onClick={() => router.push(`/inventory/${row.productId}`)}
+                          >
+                            <TableCell className="font-medium text-foreground">{row.product}</TableCell>
+                            <TableCell className="text-sm text-muted-foreground">{row.vendor}</TableCell>
+                            <TableCell className="text-right tabular-nums text-sm">{row.inStock}</TableCell>
+                            <TableCell className="text-right tabular-nums text-sm">{row.reorderAt}</TableCell>
+                            {role != null && role !== "viewer" ? (
+                              <TableCell className="text-right">
+                                <Button variant="ghost" size="sm" className="h-8 text-xs" asChild>
+                                  <Link href={`/inventory/${row.productId}`} onClick={(event) => event.stopPropagation()}>
+                                    Open
+                                    <ChevronRight className="w-3.5 h-3.5 ml-0.5" />
+                                  </Link>
+                                </Button>
+                              </TableCell>
+                            ) : null}
                           </TableRow>
                         ))}
                       </TableBody>
                     </Table>
                   </div>
-                )}
-              </div>
-            </TabsContent>
-
-            {/* Warranty only */}
-            <TabsContent value="warranty" className="mt-0">
-              <div className="pt-4 px-4 pb-4">
-                {alerts.warrantyExpiring.length === 0 ? (
-                  <p className="text-sm text-muted-foreground py-4">No warranty alerts.</p>
-                ) : (
-                  <div className="overflow-x-auto -mx-1">
-                    <Table>
-                      <TableHeader>
-                        <TableRow className="hover:bg-transparent border-b border-border">
-                          <TableHead className="text-xs text-muted-foreground font-medium">Serial</TableHead>
-                          <TableHead className="text-xs text-muted-foreground font-medium">Product</TableHead>
-                          <TableHead className="text-xs text-muted-foreground font-medium">Warranty end</TableHead>
-                          <TableHead className="text-xs text-muted-foreground font-medium">Days left</TableHead>
-                          <TableHead className="text-xs text-muted-foreground font-medium w-20" />
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {alerts.warrantyExpiring.map((item) => {
-                          const days = daysUntil(item.warrantyEndDate!)
-                          return (
-                            <TableRow key={item.id} className="border-b border-border/50">
-                              <TableCell className="font-mono text-sm text-foreground">{item.serialNumber}</TableCell>
-                              <TableCell className="text-sm text-foreground">{item.name}</TableCell>
-                              <TableCell className="text-sm text-muted-foreground">{formatDateDDMMYYYY(item.warrantyEndDate)}</TableCell>
-                              <TableCell className="text-sm">{days} days</TableCell>
-                              <TableCell>
-                                <Button variant="ghost" size="sm" className="h-8 text-xs" asChild>
-                                  <Link href={`/inventory?group=${encodeURIComponent(item.name)}`}>View in Inventory <ChevronRight className="w-3.5 h-3.5 ml-0.5" /></Link>
-                                </Button>
-                              </TableCell>
-                            </TableRow>
-                          )
-                        })}
-                      </TableBody>
-                    </Table>
-                  </div>
-                )}
-              </div>
-            </TabsContent>
-
-            {/* POC / Rental return only */}
-            <TabsContent value="return" className="mt-0">
-              <div className="pt-4 px-4 pb-4 flex flex-col gap-6">
-                {alerts.pocOverdue.length === 0 && alerts.pocApproaching.length === 0 && alerts.rentalOverdue.length === 0 && alerts.rentalApproaching.length === 0 ? (
-                  <p className="text-sm text-muted-foreground py-4">No POC or rental return alerts.</p>
-                ) : (
-                  <>
-                    {(alerts.pocOverdue.length > 0 || alerts.pocApproaching.length > 0) && (
-                      <div>
-                        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">POC</p>
-                        <Table>
-                          <TableHeader>
-                            <TableRow className="hover:bg-transparent border-b border-border">
-                              <TableHead className="text-xs text-muted-foreground font-medium">Serial</TableHead>
-                              <TableHead className="text-xs text-muted-foreground font-medium">Product</TableHead>
-                              <TableHead className="text-xs text-muted-foreground font-medium">Return date</TableHead>
-                              <TableHead className="text-xs text-muted-foreground font-medium">Status</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {[...alerts.pocOverdue, ...alerts.pocApproaching].map((item) => {
-                              const isOverdue = alerts.pocOverdue.some((i) => i.id === item.id)
-                              return (
-                                <TableRow key={item.id} className="border-b border-border/50">
-                                  <TableCell className="font-mono text-sm">{item.serialNumber}</TableCell>
-                                  <TableCell className="text-sm">{item.name}</TableCell>
-                                  <TableCell className="text-sm text-muted-foreground">{item.returnDate ? formatDateDDMMYYYY(item.returnDate) : "—"}</TableCell>
-                                  <TableCell className="text-sm">{isOverdue ? "Past due" : "Approaching"}</TableCell>
-                                </TableRow>
-                              )
-                            })}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    )}
-                    {(alerts.rentalOverdue.length > 0 || alerts.rentalApproaching.length > 0) && (
-                      <div>
-                        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Rental</p>
-                        <Table>
-                          <TableHeader>
-                            <TableRow className="hover:bg-transparent border-b border-border">
-                              <TableHead className="text-xs text-muted-foreground font-medium">Serial</TableHead>
-                              <TableHead className="text-xs text-muted-foreground font-medium">Product</TableHead>
-                              <TableHead className="text-xs text-muted-foreground font-medium">Return date</TableHead>
-                              <TableHead className="text-xs text-muted-foreground font-medium">Status</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {[...alerts.rentalOverdue, ...alerts.rentalApproaching].map((item) => {
-                              const isOverdue = alerts.rentalOverdue.some((i) => i.id === item.id)
-                              return (
-                                <TableRow key={item.id} className="border-b border-border/50">
-                                  <TableCell className="font-mono text-sm">{item.serialNumber}</TableCell>
-                                  <TableCell className="text-sm">{item.name}</TableCell>
-                                  <TableCell className="text-sm text-muted-foreground">{item.returnDate ? formatDateDDMMYYYY(item.returnDate) : "—"}</TableCell>
-                                  <TableCell className="text-sm">{isOverdue ? "Past due" : "Approaching"}</TableCell>
-                                </TableRow>
-                              )
-                            })}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-            </TabsContent>
-          </Tabs>
-        </Card>
-      )}
+                </Card>
+              )}
+            </section>
+          ) : null}
+        </div>
+      ) : null}
+      <ConvertToSaleDialog
+        open={convertSerial != null}
+        serial={convertSerial ?? ""}
+        onOpenChange={(open) => {
+          if (!open) setConvertSerial(null)
+        }}
+      />
+      <ExtendHoldingDialog
+        open={extendRow != null}
+        itemId={extendRow?.id ?? ""}
+        serial={extendRow?.serialNumber ?? ""}
+        onOpenChange={(open) => {
+          if (!open) setExtendRow(null)
+        }}
+      />
     </div>
   )
 }

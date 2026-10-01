@@ -3,6 +3,36 @@ export type Json = string | number | boolean | null | { [key: string]: Json | un
 export interface Database {
   public: {
     Tables: {
+      app_settings: {
+        Row: {
+          id: boolean
+          default_reorder_level: number
+          low_stock_emails_enabled: boolean
+          low_stock_recipients: string[]
+          timezone: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          id?: boolean
+          default_reorder_level?: number
+          low_stock_emails_enabled?: boolean
+          low_stock_recipients?: string[]
+          timezone?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          id?: boolean
+          default_reorder_level?: number
+          low_stock_emails_enabled?: boolean
+          low_stock_recipients?: string[]
+          timezone?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: []
+      }
       app_event_logs: {
         Row: {
           id: string
@@ -117,6 +147,8 @@ export interface Database {
           vendor: string
           created_at: string
           requires_serial: boolean
+          reorder_level: number | null
+          is_active: boolean
         }
         Insert: {
           id: string
@@ -124,6 +156,8 @@ export interface Database {
           vendor?: string
           created_at?: string
           requires_serial?: boolean
+          reorder_level?: number | null
+          is_active?: boolean
         }
         Update: {
           id?: string
@@ -131,6 +165,8 @@ export interface Database {
           vendor?: string
           created_at?: string
           requires_serial?: boolean
+          reorder_level?: number | null
+          is_active?: boolean
         }
         Relationships: []
       }
@@ -285,6 +321,7 @@ export interface Database {
           delivery_note_url: string | null
           metadata: Json | null
           created_by: string | null
+          created_at: string | null
         }
         Insert: {
           id: string
@@ -293,6 +330,7 @@ export interface Database {
           item_name: string
           client: string
           date: string
+          created_at?: string | null
           client_id?: string | null
           disposal_reason?: string | null
           authorised_by?: string | null
@@ -325,6 +363,7 @@ export interface Database {
           delivery_note_url?: string | null
           metadata?: Json | null
           created_by?: string | null
+          created_at?: string | null
         }
         Relationships: []
       }
@@ -635,7 +674,17 @@ export interface Database {
       }
     }
     Views: {
-      [_ in never]: never
+      low_stock_products: {
+        Row: {
+          product_id: string
+          product_name: string
+          vendor: string
+          in_stock_count: number
+          effective_reorder_level: number
+          is_low: boolean
+        }
+        Relationships: []
+      }
     }
     Enums: {
       [_ in never]: never
@@ -644,6 +693,73 @@ export interface Database {
       [_ in never]: never
     }
     Functions: {
+      transaction_batch_page: {
+        Args: {
+          p_limit: number
+          p_offset: number
+          p_movement?: string | null
+          p_from?: string | null
+          p_to?: string | null
+          p_search?: string | null
+        }
+        Returns: Json
+      }
+      profile_display_labels: {
+        Args: { p_ids: string[] }
+        Returns: { id: string; label: string }[]
+      }
+      client_last_activity: {
+        Args: Record<string, never>
+        Returns: {
+          client_id: string
+          last_activity_date: string | null
+        }[]
+      }
+      client_transactions: {
+        Args: { p_client_id: string }
+        Returns: {
+          id: string
+          type: string
+          serial_number: string
+          item_name: string
+          client: string
+          date: string
+          client_id: string | null
+          invoice_number: string | null
+          notes: string | null
+          from_location: string | null
+          to_location: string | null
+          assigned_to: string | null
+          disposal_reason: string | null
+          authorised_by: string | null
+          batch_id: string | null
+          delivery_note_url: string | null
+          metadata: Json | null
+          created_by: string | null
+          created_at: string | null
+          batch_key: string
+        }[]
+      }
+      client_sale_dispatch_counts: {
+        Args: Record<string, never>
+        Returns: {
+          client_id: string
+          orders: number | null
+          units: number | null
+          reliable: boolean
+        }[]
+      }
+      dispatched_page: {
+        Args: {
+          p_limit: number
+          p_offset: number
+          p_movement?: string | null
+          p_from?: string | null
+          p_to?: string | null
+          p_search?: string | null
+        }
+        Returns: Json
+      }
       log_stock_request_event: {
         Args: {
           p_request_id: string
@@ -653,6 +769,14 @@ export interface Database {
           p_payload?: Json
           p_actor_id?: string | null
         }
+        Returns: undefined
+      }
+      movement_result_status: {
+        Args: { p_status: string; p_type: string }
+        Returns: string
+      }
+      extend_holding: {
+        Args: { p_item_id: string; p_new_date: string; p_reason: string }
         Returns: undefined
       }
       apply_stock_movement: {

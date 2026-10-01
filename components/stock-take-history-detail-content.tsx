@@ -13,27 +13,18 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import { StatusPill } from "@/components/fs/status-pill"
+import { EmptyState } from "@/components/fs/empty-state"
 import { CheckCircle2, AlertTriangle, Loader2, Copy, Download } from "lucide-react"
-import { PageBackLink, PageHeader } from "@/components/page-nav"
+import { PageHeader } from "@/components/page-nav"
+import { PageBreadcrumbs } from "@/components/page-breadcrumbs"
 import type { StockTakeRecord, StockTakeSnapshotItem } from "@/lib/data"
 import { buildStockTakeScopeLabel } from "@/lib/stock-take"
 import { formatDateDDMMYYYY } from "@/lib/utils"
 import { toast } from "sonner"
 import { toastFromApiErrorBody, toastFromCaughtError } from "@/lib/toast-reportable-error"
 import { SESSION_EXPIRED_MESSAGE } from "@/lib/unauthorized"
-import { buildCsvFilename, cn } from "@/lib/utils"
-
-const statusStyles: Record<string, string> = {
-  "In Stock": "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-  Sold: "bg-red-500/10 text-red-500 dark:text-red-400",
-  POC: "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400",
-  Rented: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
-  Maintenance: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
-  "RMA Hold": "bg-orange-500/10 text-orange-600 dark:text-orange-400",
-  "Pending Inspection": "bg-teal-500/10 text-teal-700 dark:text-teal-400",
-  Disposed: "bg-slate-500/10 text-slate-600 dark:text-slate-400",
-}
+import { buildCsvFilename } from "@/lib/utils"
 
 async function copySerialLinesToClipboard(serials: string[], toastLabel: string) {
   const text = serials.join("\n")
@@ -142,7 +133,14 @@ export function StockTakeHistoryDetailContent({ id }: { id: string }) {
   if (loadError) {
     return (
       <div className="flex flex-col gap-4">
-        <PageBackLink href="/inventory/stock-take/history" label="History" />
+        <PageBreadcrumbs
+          items={[
+            { label: "Inventory", href: "/inventory" },
+            { label: "Stock take", href: "/inventory/stock-take" },
+            { label: "History", href: "/inventory/stock-take/history" },
+            { label: "Stock take" },
+          ]}
+        />
         <p role="alert" className="text-sm text-destructive">
           {loadError}
         </p>
@@ -153,7 +151,14 @@ export function StockTakeHistoryDetailContent({ id }: { id: string }) {
   if (!record) {
     return (
       <div className="flex flex-col gap-4">
-        <PageBackLink href="/inventory/stock-take/history" label="History" />
+        <PageBreadcrumbs
+          items={[
+            { label: "Inventory", href: "/inventory" },
+            { label: "Stock take", href: "/inventory/stock-take" },
+            { label: "History", href: "/inventory/stock-take/history" },
+            { label: "Stock take" },
+          ]}
+        />
         <p className="text-muted-foreground">Stock take not found.</p>
       </div>
     )
@@ -186,7 +191,14 @@ export function StockTakeHistoryDetailContent({ id }: { id: string }) {
       <PageHeader
         title="Stock take"
         description={`${scopeLabel} · ${formatDateDDMMYYYY(record.completedAt.slice(0, 10))} at ${record.completedAt.slice(11, 16)} — read-only`}
-        back={{ href: "/inventory/stock-take/history", label: "History" }}
+      />
+      <PageBreadcrumbs
+        items={[
+          { label: "Inventory", href: "/inventory" },
+          { label: "Stock take", href: "/inventory/stock-take" },
+          { label: "History", href: "/inventory/stock-take/history" },
+          { label: formatDateDDMMYYYY(record.completedAt.slice(0, 10)) },
+        ]}
       />
 
       {s.expectedCount != null && (
@@ -231,7 +243,6 @@ export function StockTakeHistoryDetailContent({ id }: { id: string }) {
                 emptyIcon={<CheckCircle2 className="size-6" />}
                 emptyTitle="No matches"
                 emptyDesc="No scanned serials were in inventory at this time."
-                statusStyles={statusStyles}
               />
             </TabsContent>
             <TabsContent value="notInSystem" className="mt-3">
@@ -268,7 +279,6 @@ export function StockTakeHistoryDetailContent({ id }: { id: string }) {
                 emptyIcon={<AlertTriangle className="size-6" />}
                 emptyTitle="None missing"
                 emptyDesc="Every in-scope inventory item was scanned."
-                statusStyles={statusStyles}
               />
             </TabsContent>
             <TabsContent value="outOfScope" className="mt-3">
@@ -287,7 +297,6 @@ export function StockTakeHistoryDetailContent({ id }: { id: string }) {
                 emptyIcon={<CheckCircle2 className="size-6" />}
                 emptyTitle="None"
                 emptyDesc="All scanned serials were within this stock take scope."
-                statusStyles={statusStyles}
               />
             </TabsContent>
           </Tabs>
@@ -302,24 +311,14 @@ function SnapshotResultTable({
   emptyIcon,
   emptyTitle,
   emptyDesc,
-  statusStyles,
 }: {
   items: StockTakeSnapshotItem[]
   emptyIcon: React.ReactNode
   emptyTitle: string
   emptyDesc: string
-  statusStyles: Record<string, string>
 }) {
   if (items.length === 0) {
-    return (
-      <Empty>
-        <EmptyMedia variant="icon">{emptyIcon}</EmptyMedia>
-        <EmptyHeader>
-          <EmptyTitle>{emptyTitle}</EmptyTitle>
-          <EmptyDescription>{emptyDesc}</EmptyDescription>
-        </EmptyHeader>
-      </Empty>
-    )
+    return <EmptyState icon={emptyIcon} message={`${emptyTitle}. ${emptyDesc}`} />
   }
   return (
     <ScrollArea className="h-[280px] rounded-md border">
@@ -338,9 +337,7 @@ function SnapshotResultTable({
               <TableCell className="font-mono text-sm">{item.serialNumber}</TableCell>
               <TableCell>{item.name}</TableCell>
               <TableCell>
-                <span className={cn("text-xs rounded-md px-2 py-0.5", statusStyles[item.status] ?? "bg-muted text-muted-foreground")}>
-                  {item.status}
-                </span>
+                <StatusPill value={item.status} />
               </TableCell>
               <TableCell className="text-muted-foreground text-sm">{item.location}</TableCell>
             </TableRow>
@@ -363,15 +360,7 @@ function NotInSystemList({
   emptyDesc: string
 }) {
   if (serials.length === 0) {
-    return (
-      <Empty>
-        <EmptyMedia variant="icon">{emptyIcon}</EmptyMedia>
-        <EmptyHeader>
-          <EmptyTitle>{emptyTitle}</EmptyTitle>
-          <EmptyDescription>{emptyDesc}</EmptyDescription>
-        </EmptyHeader>
-      </Empty>
-    )
+    return <EmptyState icon={emptyIcon} message={`${emptyTitle}. ${emptyDesc}`} />
   }
   return (
     <ScrollArea className="h-[280px] rounded-md border">
@@ -379,9 +368,9 @@ function NotInSystemList({
         {serials.map((serial, i) => (
           <div
             key={`${serial}-${i}`}
-            className="flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 font-mono text-sm"
+            className="flex items-center gap-2 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 font-mono text-sm"
           >
-            <AlertTriangle className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+            <AlertTriangle className="size-4 shrink-0 text-warning" />
             {serial}
             <span className="text-muted-foreground text-xs">(not in inventory)</span>
           </div>

@@ -1,13 +1,21 @@
 "use client"
 
-import { useState } from "react"
-import { useSyncExternalStore } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
+import { EmptyState } from "@/components/fs/empty-state"
 import { Switch } from "@/components/ui/switch"
 import { Separator } from "@/components/ui/separator"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import {
   Select,
@@ -17,23 +25,23 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import {
-  setLowStockEmailsEnabled,
-  setLowStockEmailRecipients,
-  setReorderLevelDefault,
-  setReorderLevelOverrides,
-  subscribeClientSettings,
-  getClientSettingsSnapshot,
-  getClientSettingsServerSnapshot,
-  type ClientSettingsSnapshot,
+  fetchAppSettings,
+  fetchProductLineSettings,
+  updateAppSettings,
+  updateProductLineSetting,
+  type AppSettings,
+  type ProductLineSetting,
 } from "@/lib/settings"
 import { useAuth } from "@/lib/auth-context"
-import { canManageUsers } from "@/lib/permissions"
+import { canAccessSettings, canManageUsers } from "@/lib/permissions"
 import { useInventoryStore } from "@/lib/inventory-store"
 import { cn } from "@/lib/utils"
-import { Mail, Plus, Trash2, HelpCircle, Info, UsersRound, ArrowRight } from "lucide-react"
+import { Mail, Plus, Trash2, Info, UsersRound, ArrowRight } from "lucide-react"
 import { PageHeader } from "@/components/page-nav"
 import { toast } from "sonner"
 import Link from "next/link"
+import { toastFromCaughtError } from "@/lib/toast-reportable-error"
+import { useLowStockProducts } from "@/hooks/use-low-stock-products"
 
 const tabPill = cn(
   "rounded-full border border-border/70 bg-muted/50 px-5 py-2.5 text-sm font-medium text-muted-foreground shadow-none transition-all",
@@ -78,12 +86,6 @@ function SettingsSection({
   )
 }
 
-function useProductNames(): string[] {
-  const { inventory } = useInventoryStore()
-  const names = Array.from(new Set(inventory.map((i) => i.name))).sort()
-  return names
-}
-
 function profileInitials(display: string | null | undefined, email: string | null | undefined): string {
   const s = (display || "").trim()
   if (s) {
@@ -98,30 +100,116 @@ function profileInitials(display: string | null | undefined, email: string | nul
 export function SettingsContent() {
   const { role, profile, user } = useAuth()
   const isAdmin = canManageUsers(role)
-  const productNames = useProductNames()
-
-  const stored = useSyncExternalStore(
-    subscribeClientSettings,
-    getClientSettingsSnapshot,
-    getClientSettingsServerSnapshot
-  )
-  // null until the user edits, so the first client snapshot replaces server defaults
-  // without an effect. After that, local draft wins so an unsaved field is not
-  // overwritten when another field is saved.
-  const [draft, setDraft] = useState<ClientSettingsSnapshot | null>(null)
-  const form = draft ?? stored
-  const emailsEnabled = form.emailsEnabled
-  const emailRecipients = form.emailRecipients
-  const reorderDefault = form.reorderDefault
-  const overrides = form.overrides
+  const { inventory } = useInventoryStore()
+  const { products: lowStockProducts, refresh: refreshLowStock } = useLowStockProducts()
+  const [settings, setSettings] = useState<AppSettings | null>(null)
+  const [products, setProducts] = useState<ProductLineSetting[]>([])
+  const [defaultDraft, setDefaultDraft] = useState("2")
+  const [productDrafts, setProductDrafts] = useState<
+    Record<string, { reorderLevel: string; isActive: boolean }>
+  >({})
+  const [settingsLoading, setSettingsLoading] = useState(true)
+  const [savingKey, setSavingKey] = useState<string | null>(null)
   const [newEmail, setNewEmail] = useState("")
+
+  const loadSettings = useCallback(async () => {
+    try {
+      const [nextSettings, nextProducts] = await Promise.all([
+        fetchAppSettings(),
+        fetchProductLineSettings(),
+      ])
+      setSettings(nextSettings)
+      setDefaultDraft(String(nextSettings.defaultReorderLevel))
+      setProducts(nextProducts)
+      setProductDrafts(
+        Object.fromEntries(
+          nextProducts.map((product) => [
+            product.productId,
+            {
+              reorderLevel:
+                product.reorderLevel == null ? "" : String(product.reorderLevel),
+              isActive: product.isActive,
+            },
+          ])
+        )
+      )
+    } catch (error) {
+      toastFromCaughtError(error, "Could not load settings")
+    } finally {
+      setSettingsLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!canAccessSettings(role)) return
+    let cancelled = false
+    void Promise.all([fetchAppSettings(), fetchProductLineSettings()])
+      .then(([nextSettings, nextProducts]) => {
+        if (cancelled) return
+        setSettings(nextSettings)
+        setDefaultDraft(String(nextSettings.defaultReorderLevel))
+        setProducts(nextProducts)
+        setProductDrafts(
+          Object.fromEntries(
+            nextProducts.map((product) => [
+              product.productId,
+              {
+                reorderLevel:
+                  product.reorderLevel == null ? "" : String(product.reorderLevel),
+                isActive: product.isActive,
+              },
+            ])
+          )
+        )
+      })
+      .catch((error) => {
+        if (!cancelled) toastFromCaughtError(error, "Could not load settings")
+      })
+      .finally(() => {
+        if (!cancelled) setSettingsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [role])
+
+  const inStockByProduct = useMemo(() => {
+    const counts = new Map<string, number>()
+    // View counts win. The ledger only fills catalogue rows the view omits.
+    for (const product of lowStockProducts) {
+      counts.set(product.productId, product.inStockCount)
+    }
+    for (const item of inventory) {
+      if (!item.productId || counts.has(item.productId)) continue
+      if (item.status !== "In Stock" || item.deletedAt) continue
+      counts.set(item.productId, (counts.get(item.productId) ?? 0) + 1)
+    }
+    return counts
+  }, [inventory, lowStockProducts])
 
   const displayName = (profile?.display_name ?? "").trim()
   const nameParts = displayName ? displayName.split(/\s+/).filter(Boolean) : []
   const firstName = nameParts[0] ?? ""
   const lastName = nameParts.slice(1).join(" ")
 
-  function addEmail() {
+  async function saveAppSettings(
+    updates: Parameters<typeof updateAppSettings>[0],
+    success: string
+  ) {
+    if (!isAdmin) return
+    setSavingKey("app-settings")
+    try {
+      setSettings(await updateAppSettings(updates))
+      await refreshLowStock()
+      toast.success(success)
+    } catch (error) {
+      toastFromCaughtError(error, "Could not save settings")
+    } finally {
+      setSavingKey(null)
+    }
+  }
+
+  async function addEmail() {
     const trimmed = newEmail.trim().toLowerCase()
     if (!trimmed) return
     const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -129,57 +217,65 @@ export function SettingsContent() {
       toast.error("Enter a valid email address")
       return
     }
-    if (emailRecipients.includes(trimmed)) {
+    if (settings?.lowStockRecipients.includes(trimmed)) {
       toast.error("That email is already in the list")
       return
     }
-    const next = [...emailRecipients, trimmed]
-    setDraft((prev) => ({ ...(prev ?? stored), emailRecipients: next }))
-    setLowStockEmailRecipients(next)
+    const next = [...(settings?.lowStockRecipients ?? []), trimmed]
+    await saveAppSettings({ lowStockRecipients: next }, "Email added")
     setNewEmail("")
-    toast.success("Email added")
   }
 
-  function removeEmail(email: string) {
-    const next = emailRecipients.filter((e) => e !== email)
-    setDraft((prev) => ({ ...(prev ?? stored), emailRecipients: next }))
-    setLowStockEmailRecipients(next)
-    toast.success("Email removed")
+  async function removeEmail(email: string) {
+    const next = (settings?.lowStockRecipients ?? []).filter((value) => value !== email)
+    await saveAppSettings({ lowStockRecipients: next }, "Email removed")
   }
 
-  function toggleEmailsEnabled(checked: boolean) {
-    setDraft((prev) => ({ ...(prev ?? stored), emailsEnabled: checked }))
-    setLowStockEmailsEnabled(checked)
-    toast.success(checked ? "Low stock emails enabled" : "Low stock emails disabled")
+  async function toggleEmailsEnabled(checked: boolean) {
+    await saveAppSettings(
+      { lowStockEmailsEnabled: checked },
+      checked ? "Low stock emails enabled" : "Low stock emails disabled"
+    )
   }
 
-  function saveReorderDefault() {
-    const n = Math.max(0, Math.floor(Number(reorderDefault)) || 0)
-    setDraft((prev) => ({ ...(prev ?? stored), reorderDefault: n }))
-    setReorderLevelDefault(n)
-    toast.success("Default reorder level saved")
+  async function saveReorderDefault() {
+    const value = Number(defaultDraft)
+    if (!Number.isInteger(value) || value < 0) {
+      toast.error("Default reorder level must be a whole number of 0 or more")
+      return
+    }
+    await saveAppSettings(
+      { defaultReorderLevel: value },
+      "Default reorder level saved"
+    )
   }
 
-  function setOverride(productName: string, value: number) {
-    const n = Math.max(0, Math.floor(Number(value)) || 0)
-    setDraft((prev) => {
-      const base = prev ?? stored
-      const next = { ...base.overrides, [productName]: n }
-      setReorderLevelOverrides(next)
-      return { ...base, overrides: next }
-    })
-    toast.success(`Reorder level for "${productName}" saved`)
-  }
-
-  function clearOverride(productName: string) {
-    setDraft((prev) => {
-      const base = prev ?? stored
-      const next = { ...base.overrides }
-      delete next[productName]
-      setReorderLevelOverrides(next)
-      return { ...base, overrides: next }
-    })
-    toast.success("Using default reorder level for this product")
+  async function saveProduct(product: ProductLineSetting) {
+    if (!isAdmin) return
+    const draft = productDrafts[product.productId]
+    if (!draft) return
+    const reorderLevel =
+      draft.reorderLevel.trim() === "" ? null : Number(draft.reorderLevel)
+    if (
+      reorderLevel !== null &&
+      (!Number.isInteger(reorderLevel) || reorderLevel < 0)
+    ) {
+      toast.error("Reorder level must be blank or a whole number of 0 or more")
+      return
+    }
+    setSavingKey(product.productId)
+    try {
+      await updateProductLineSetting(product.productId, {
+        reorderLevel,
+        isActive: draft.isActive,
+      })
+      await Promise.all([loadSettings(), refreshLowStock()])
+      toast.success(`Settings for "${product.productName}" saved`)
+    } catch (error) {
+      toastFromCaughtError(error, "Could not save product settings")
+    } finally {
+      setSavingKey(null)
+    }
   }
 
   const profileAside = (
@@ -199,6 +295,15 @@ export function SettingsContent() {
       </div>
     </>
   )
+
+  if (!canAccessSettings(role)) {
+    return (
+      <div className="flex flex-col gap-4">
+        <PageHeader title="Settings" description="Workspace settings are not available to viewers." />
+        <p className="text-sm text-muted-foreground">Your account has read-only access.</p>
+      </div>
+    )
+  }
 
   return (
     <div className="flex w-full min-w-0 flex-col">
@@ -223,9 +328,6 @@ export function SettingsContent() {
           </TabsTrigger>
           <TabsTrigger value="reorder-levels" className={tabPill}>
             Reorder levels
-          </TabsTrigger>
-          <TabsTrigger value="alert-options" className={tabPill}>
-            Alert options
           </TabsTrigger>
           <TabsTrigger value="users" className={tabPill}>
             {isAdmin ? "Users" : "Workspace"}
@@ -332,12 +434,19 @@ export function SettingsContent() {
             description="When count in stock for a product is at or below its reorder level, notify these addresses."
           >
             <div className="flex flex-col gap-6">
+              <div className="rounded-xl border border-warning/40 bg-warning-soft px-4 py-3 text-sm text-warning">
+                Emails are not being sent yet. These settings are stored for a future sender.
+              </div>
               <div className="flex flex-col justify-between gap-4 rounded-xl border border-border/60 bg-muted/20 p-4 sm:flex-row sm:items-center">
                 <div>
                   <p className="text-sm font-medium text-foreground">Enable low stock emails</p>
                   <p className="text-xs text-muted-foreground">Recipients below receive alerts when thresholds are hit</p>
                 </div>
-                <Switch checked={emailsEnabled} onCheckedChange={toggleEmailsEnabled} />
+                <Switch
+                  checked={settings?.lowStockEmailsEnabled ?? false}
+                  onCheckedChange={(checked) => void toggleEmailsEnabled(checked)}
+                  disabled={!isAdmin || settingsLoading || savingKey === "app-settings"}
+                />
               </div>
               <Separator />
               <div className="space-y-3">
@@ -349,16 +458,26 @@ export function SettingsContent() {
                     className="h-11 flex-1 rounded-lg border-input bg-background"
                     value={newEmail}
                     onChange={(e) => setNewEmail(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addEmail())}
+                    onKeyDown={(e) =>
+                      e.key === "Enter" && (e.preventDefault(), void addEmail())
+                    }
+                    disabled={!isAdmin || settingsLoading}
                   />
-                  <Button type="button" size="sm" variant="secondary" className="h-11 shrink-0 rounded-lg" onClick={addEmail}>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    className="h-11 shrink-0 rounded-lg"
+                    onClick={() => void addEmail()}
+                    disabled={!isAdmin || settingsLoading || savingKey === "app-settings"}
+                  >
                     <Plus className="mr-1 size-4" />
                     Add
                   </Button>
                 </div>
-                {emailRecipients.length > 0 ? (
+                {(settings?.lowStockRecipients.length ?? 0) > 0 ? (
                   <ul className="space-y-2">
-                    {emailRecipients.map((email) => (
+                    {settings?.lowStockRecipients.map((email) => (
                       <li
                         key={email}
                         className="flex items-center justify-between gap-2 rounded-lg border border-border/60 bg-muted/30 px-3 py-2.5 text-sm"
@@ -369,7 +488,8 @@ export function SettingsContent() {
                           variant="ghost"
                           size="icon"
                           className="text-muted-foreground hover:text-destructive"
-                          onClick={() => removeEmail(email)}
+                          onClick={() => void removeEmail(email)}
+                          disabled={!isAdmin || savingKey === "app-settings"}
                         >
                           <Trash2 className="size-4" />
                         </Button>
@@ -377,7 +497,7 @@ export function SettingsContent() {
                     ))}
                   </ul>
                 ) : (
-                  <p className="text-xs text-muted-foreground">No recipients yet.</p>
+                  <EmptyState message="No recipients yet." />
                 )}
               </div>
             </div>
@@ -401,114 +521,120 @@ export function SettingsContent() {
                     type="number"
                     min={0}
                     className="h-11 w-28 rounded-lg border-input bg-background"
-                    value={reorderDefault}
-                    onChange={(e) =>
-                      setDraft((prev) => ({
-                        ...(prev ?? stored),
-                        reorderDefault: e.target.valueAsNumber ?? 0,
-                      }))
-                    }
+                    value={defaultDraft}
+                    onChange={(e) => setDefaultDraft(e.target.value)}
+                    disabled={!isAdmin || settingsLoading}
                   />
                   <span className="text-sm text-muted-foreground">Alert when in stock ≤ this number</span>
-                  <Button type="button" size="sm" className="rounded-lg" onClick={saveReorderDefault}>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="rounded-lg"
+                    onClick={() => void saveReorderDefault()}
+                    disabled={!isAdmin || settingsLoading || savingKey === "app-settings"}
+                  >
                     Save
                   </Button>
                 </div>
+                {!isAdmin ? (
+                  <p className="text-xs text-muted-foreground">
+                    Reorder settings are read-only. An administrator can make changes.
+                  </p>
+                ) : null}
               </div>
               <Separator />
               <div className="space-y-2">
-                <Label className="text-sm font-medium text-muted-foreground">Per-product overrides</Label>
+                <Label className="text-sm font-medium text-muted-foreground">Products</Label>
                 <p className="text-xs text-muted-foreground">
-                  Optional. Clear or use &quot;Default&quot; to fall back to the global level.
+                  Leave Reorder at blank to use the default of {settings?.defaultReorderLevel ?? 2}.
+                  Inactive products are excluded from low-stock alerts.
                 </p>
-                {productNames.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No products in inventory yet.</p>
+                {settingsLoading ? (
+                  <p className="text-sm text-muted-foreground">Loading product settings…</p>
+                ) : products.length === 0 ? (
+                  <EmptyState message="No products found." />
                 ) : (
-                  <div className="mt-2 grid w-full grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
-                    {productNames.map((name) => {
-                      const value = overrides[name]
-                      return (
-                        <div
-                          key={name}
-                          className="flex items-center gap-2 rounded-lg border border-border/60 bg-muted/20 px-3 py-2"
-                        >
-                          <span className="min-w-0 flex-1 truncate text-sm font-medium" title={name}>
-                            {name}
-                          </span>
-                          <Input
-                            type="number"
-                            min={0}
-                            className="h-9 w-16 rounded-md border-input bg-background text-sm"
-                            placeholder={String(reorderDefault)}
-                            value={value ?? ""}
-                            onChange={(e) => {
-                              const v = e.target.value
-                              if (v === "") {
-                                setDraft((prev) => {
-                                  const base = prev ?? stored
-                                  const next = { ...base.overrides }
-                                  delete next[name]
-                                  return { ...base, overrides: next }
-                                })
-                                return
-                              }
-                              const n = parseInt(v, 10)
-                              if (Number.isFinite(n) && n >= 0) {
-                                setDraft((prev) => {
-                                  const base = prev ?? stored
-                                  return { ...base, overrides: { ...base.overrides, [name]: n } }
-                                })
-                              }
-                            }}
-                            onBlur={(e) => {
-                              const v = e.target.value
-                              if (v !== "") {
-                                const n = Math.max(0, Math.floor(Number(v)) || 0)
-                                setOverride(name, n)
-                              }
-                            }}
-                          />
-                          {value !== undefined ? (
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              className="shrink-0 text-xs"
-                              onClick={() => clearOverride(name)}
-                            >
-                              Default
-                            </Button>
-                          ) : null}
-                        </div>
-                      )
-                    })}
+                  <div className="mt-3 overflow-x-auto rounded-xl border border-border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Product</TableHead>
+                          <TableHead>Vendor</TableHead>
+                          <TableHead className="text-right">In stock</TableHead>
+                          <TableHead className="w-36">Reorder at</TableHead>
+                          <TableHead className="w-24">Active</TableHead>
+                          <TableHead className="w-24" />
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {products.map((product) => {
+                          const draft = productDrafts[product.productId] ?? {
+                            reorderLevel: "",
+                            isActive: product.isActive,
+                          }
+                          return (
+                            <TableRow key={product.productId}>
+                              <TableCell className="font-medium">
+                                {product.productName}
+                              </TableCell>
+                              <TableCell className="text-muted-foreground">
+                                {product.vendor}
+                              </TableCell>
+                              <TableCell className="text-right tabular-nums">
+                                {inStockByProduct.get(product.productId) ?? 0}
+                              </TableCell>
+                              <TableCell>
+                                <Input
+                                  type="number"
+                                  min={0}
+                                  placeholder={String(settings?.defaultReorderLevel ?? 2)}
+                                  value={draft.reorderLevel}
+                                  onChange={(event) =>
+                                    setProductDrafts((current) => ({
+                                      ...current,
+                                      [product.productId]: {
+                                        ...draft,
+                                        reorderLevel: event.target.value,
+                                      },
+                                    }))
+                                  }
+                                  disabled={!isAdmin}
+                                  className="h-9 w-24"
+                                />
+                              </TableCell>
+                              <TableCell>
+                                <Switch
+                                  checked={draft.isActive}
+                                  onCheckedChange={(checked) =>
+                                    setProductDrafts((current) => ({
+                                      ...current,
+                                      [product.productId]: {
+                                        ...draft,
+                                        isActive: checked,
+                                      },
+                                    }))
+                                  }
+                                  disabled={!isAdmin}
+                                />
+                              </TableCell>
+                              <TableCell>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => void saveProduct(product)}
+                                  disabled={!isAdmin || savingKey === product.productId}
+                                >
+                                  Save
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          )
+                        })}
+                      </TableBody>
+                    </Table>
                   </div>
                 )}
-              </div>
-            </div>
-          </SettingsSection>
-        </TabsContent>
-
-        <TabsContent value="alert-options" className="mt-0 rounded-2xl border border-border bg-card/30 px-4 py-2 md:px-8">
-          <SettingsSection
-            title="Extra alert toggles"
-            description="Optional behaviours for the dashboard and (later) outbound email. Not all options are wired to the backend yet."
-          >
-            <div className="flex flex-col gap-4">
-              <div className="flex flex-col justify-between gap-4 rounded-xl border border-border/60 bg-muted/20 p-4 sm:flex-row sm:items-center">
-                <div>
-                  <p className="text-sm font-medium text-foreground">POC reminders</p>
-                  <p className="text-xs text-muted-foreground">Surface kits nearing return date (UI alerts)</p>
-                </div>
-                <Switch defaultChecked />
-              </div>
-              <Separator />
-              <div className="flex flex-col justify-between gap-4 rounded-xl border border-border/60 bg-muted/20 p-4 sm:flex-row sm:items-center">
-                <div>
-                  <p className="text-sm font-medium text-foreground">Transaction receipts</p>
-                  <p className="text-xs text-muted-foreground">Email confirmation for every stock movement</p>
-                </div>
-                <Switch />
               </div>
             </div>
           </SettingsSection>
@@ -518,7 +644,7 @@ export function SettingsContent() {
           {isAdmin ? (
             <SettingsSection
               title="Users"
-              description="Create sign-ins and assign roles from the dedicated User management page."
+              description="Assign roles and manage access from the dedicated User management page."
             >
               <div className="flex flex-col gap-4 rounded-xl border border-border/60 bg-muted/20 p-5 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex gap-3 min-w-0">
@@ -526,7 +652,7 @@ export function SettingsContent() {
                   <div className="space-y-1 text-sm min-w-0">
                     <p className="font-medium text-foreground">User management</p>
                     <p className="text-muted-foreground">
-                      Search, filter, add, and edit team members and their roles in one place.
+                      People appear after their first Microsoft sign-in. Search, filter, and edit their access.
                     </p>
                   </div>
                 </div>
@@ -565,16 +691,6 @@ export function SettingsContent() {
                   <p className="text-muted-foreground">
                     Your profile role controls screens and actions. Admins manage people under{" "}
                     <strong className="font-medium text-foreground">User management</strong>.
-                  </p>
-                </div>
-              </div>
-              <Separator />
-              <div className="flex gap-3">
-                <HelpCircle className="mt-0.5 size-5 shrink-0 text-primary" />
-                <div className="space-y-1 text-sm">
-                  <p className="font-medium text-foreground">Low-stock rules</p>
-                  <p className="text-muted-foreground">
-                    Defaults and per-product overrides are under <strong className="font-medium text-foreground">Reorder levels</strong>. Values are stored in this browser until you move them to the database.
                   </p>
                 </div>
               </div>

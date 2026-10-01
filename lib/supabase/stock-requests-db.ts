@@ -10,7 +10,9 @@ import type { Client } from "@/lib/data"
 import { rowToInventoryItem } from "./inventory-db"
 import type { InventoryItem } from "@/lib/data"
 import type { StockRequestStatus } from "@/lib/stock-request-statuses"
+import { uploadDocument } from "@/lib/upload-documents"
 import { ensureProductLine } from "./product-lines"
+import { fetchAllPages } from "./postgrest-page"
 
 type SB = AppSupabaseClient
 
@@ -39,6 +41,11 @@ export type StockRequestWithRelations = StockRequestRow & {
 const REQUEST_WITH_LINES_SELECT = "*, stock_request_lines(*, product_lines(requires_serial))"
 
 type LineEmbed = { requires_serial?: boolean } | { requires_serial?: boolean }[] | null
+type StockRequestWithLineEmbeds = StockRequestRow & {
+  stock_request_lines: (Database["public"]["Tables"]["stock_request_lines"]["Row"] & {
+    product_lines?: LineEmbed
+  })[]
+}
 
 function foldProductName(name: string): string {
   return name.trim().toLowerCase()
@@ -112,7 +119,7 @@ export async function fetchStockRequests(sb: SB): Promise<StockRequestWithRelati
     .select(REQUEST_WITH_LINES_SELECT)
     .order("created_at", { ascending: false })
   if (error) throw error
-  const rows = (data ?? []) as StockRequestWithRelations[]
+  const rows = (data ?? []) as StockRequestWithLineEmbeds[]
   const clientIds = [...new Set(rows.map((r) => r.client_id))]
   if (clientIds.length === 0) {
     return rows.map((r) => ({
@@ -120,8 +127,10 @@ export async function fetchStockRequests(sb: SB): Promise<StockRequestWithRelati
       stock_request_lines: normalizeLines(r.stock_request_lines ?? []),
     }))
   }
-  const { data: clientsData } = await sb.from("clients").select("*").in("id", clientIds)
-  const byId = new Map((clientsData ?? []).map((c) => [c.id, rowToClient(c)]))
+  const clientsData = await fetchAllPages((from, to) =>
+    sb.from("clients").select("*").in("id", clientIds).order("id", { ascending: true }).range(from, to)
+  )
+  const byId = new Map(clientsData.map((c) => [c.id, rowToClient(c)]))
   return rows.map((r) => ({
     ...r,
     client: byId.get(r.client_id) ?? null,
@@ -137,7 +146,7 @@ export async function fetchStockRequestById(sb: SB, id: string): Promise<StockRe
     .maybeSingle()
   if (error) throw error
   if (!data) return null
-  const row = data as StockRequestWithRelations
+  const row = data as StockRequestWithLineEmbeds
   const { data: clientRow } = await sb.from("clients").select("*").eq("id", row.client_id).maybeSingle()
   return {
     ...row,
@@ -153,7 +162,7 @@ export async function fetchStockRequestsForClient(sb: SB, clientId: string): Pro
     .eq("client_id", clientId)
     .order("created_at", { ascending: false })
   if (error) throw error
-  const rows = (data ?? []) as StockRequestWithRelations[]
+  const rows = (data ?? []) as StockRequestWithLineEmbeds[]
   const { data: clientRow } = await sb.from("clients").select("*").eq("id", clientId).maybeSingle()
   const client = clientRow ? rowToClient(clientRow) : null
   return rows.map((r) => ({
@@ -171,12 +180,14 @@ export async function fetchLatestOpenRequests(sb: SB, limit: number): Promise<St
     .order("created_at", { ascending: false })
     .limit(limit)
   if (error) throw error
-  const rows = (data ?? []) as StockRequestWithRelations[]
+  const rows = (data ?? []) as StockRequestWithLineEmbeds[]
   const clientIds = [...new Set(rows.map((r) => r.client_id))]
   const byId = new Map<string, Client>()
   if (clientIds.length > 0) {
-    const { data: clientsData } = await sb.from("clients").select("*").in("id", clientIds)
-    for (const c of clientsData ?? []) byId.set(c.id, rowToClient(c))
+    const clientsData = await fetchAllPages((from, to) =>
+      sb.from("clients").select("*").in("id", clientIds).order("id", { ascending: true }).range(from, to)
+    )
+    for (const c of clientsData) byId.set(c.id, rowToClient(c))
   }
   return rows.map((r) => ({
     ...r,
@@ -192,16 +203,19 @@ export async function fetchAvailabilityByProductIds(
 ): Promise<Record<string, number>> {
   const unique = [...new Set(productIds.filter(Boolean))]
   if (unique.length === 0) return {}
-  const { data, error } = await sb
-    .from("inventory_items")
-    .select("product_id")
-    .in("product_id", unique)
-    .eq("status", "In Stock")
-    .is("reserved_for_request_line_id", null)
-  if (error) throw error
+  const data = await fetchAllPages((from, to) =>
+    sb
+      .from("inventory_items")
+      .select("product_id")
+      .in("product_id", unique)
+      .eq("status", "In Stock")
+      .is("reserved_for_request_line_id", null)
+      .order("id", { ascending: true })
+      .range(from, to)
+  )
   const counts: Record<string, number> = {}
   for (const id of unique) counts[id] = 0
-  for (const row of data ?? []) {
+  for (const row of data) {
     const pid = row.product_id
     if (pid) counts[pid] = (counts[pid] ?? 0) + 1
   }
@@ -210,14 +224,17 @@ export async function fetchAvailabilityByProductIds(
 
 export async function fetchAssignedCountsByLineId(sb: SB, lineIds: string[]): Promise<Record<string, number>> {
   if (lineIds.length === 0) return {}
-  const { data, error } = await sb
-    .from("inventory_items")
-    .select("reserved_for_request_line_id")
-    .in("reserved_for_request_line_id", lineIds)
-  if (error) throw error
+  const data = await fetchAllPages((from, to) =>
+    sb
+      .from("inventory_items")
+      .select("reserved_for_request_line_id")
+      .in("reserved_for_request_line_id", lineIds)
+      .order("id", { ascending: true })
+      .range(from, to)
+  )
   const counts: Record<string, number> = {}
   for (const id of lineIds) counts[id] = 0
-  for (const row of data ?? []) {
+  for (const row of data) {
     const lid = row.reserved_for_request_line_id
     if (lid) counts[lid] = (counts[lid] ?? 0) + 1
   }
@@ -239,14 +256,17 @@ export async function fetchInventoryItemsForAssignmentByProductIds(
 ): Promise<InventoryItem[]> {
   const unique = [...new Set(productIds.filter(Boolean))]
   if (unique.length === 0) return []
-  const { data, error } = await sb
-    .from("inventory_items")
-    .select("*, product_lines(product_name, vendor)")
-    .in("product_id", unique)
-    .eq("status", "In Stock")
-    .order("date_added", { ascending: true })
-  if (error) throw error
-  return (data ?? []).map(rowToInventoryItem)
+  const data = await fetchAllPages((from, to) =>
+    sb
+      .from("inventory_items")
+      .select("*, product_lines(product_name, vendor)")
+      .in("product_id", unique)
+      .eq("status", "In Stock")
+      .order("date_added", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, to)
+  )
+  return data.map(rowToInventoryItem)
 }
 
 export type CreateRequestInput = {
@@ -467,28 +487,18 @@ export async function markNotificationsRead(sb: SB, ids: string[]): Promise<void
   if (error) throw error
 }
 
-export async function uploadQuotationForRequest(sb: SB, requestId: string, file: File): Promise<string> {
-  const ext = file.name.split(".").pop() || "pdf"
-  const path = `requests/${requestId}/quotation-${Date.now()}.${ext}`
-  const { error } = await sb.storage.from("uploads").upload(path, file, {
-    contentType: file.type || "application/pdf",
-    upsert: false,
-  })
-  if (error) throw error
-  const { data } = sb.storage.from("uploads").getPublicUrl(path)
-  return data.publicUrl
+export async function uploadQuotationForRequest(
+  requestId: string,
+  file: File
+): Promise<string> {
+  return uploadDocument("quotation", requestId, file)
 }
 
-export async function uploadInvoiceDocumentForRequest(sb: SB, requestId: string, file: File): Promise<string> {
-  const ext = file.name.split(".").pop() || "pdf"
-  const path = `requests/${requestId}/invoice-${Date.now()}.${ext}`
-  const { error } = await sb.storage.from("uploads").upload(path, file, {
-    contentType: file.type || "application/pdf",
-    upsert: false,
-  })
-  if (error) throw error
-  const { data } = sb.storage.from("uploads").getPublicUrl(path)
-  return data.publicUrl
+export async function uploadInvoiceDocumentForRequest(
+  requestId: string,
+  file: File
+): Promise<string> {
+  return uploadDocument("invoice", requestId, file)
 }
 
 export function useStockRequests(): {

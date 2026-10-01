@@ -10,32 +10,27 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { StatusPill } from "@/components/fs/status-pill"
+import { EmptyState } from "@/components/fs/empty-state"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useAuth } from "@/lib/auth-context"
 import { canViewFinancials } from "@/lib/permissions"
-import type { TransactionBatchSummary } from "@/lib/transaction-batches"
-import { cn, formatDateDDMMYYYY } from "@/lib/utils"
+import {
+  fetchTransactionBatchPage,
+  type TransactionBatchSummary,
+} from "@/lib/transaction-batches"
+import { BusinessDateLabel } from "@/components/business-date-label"
+import { useOrgTimezone } from "@/hooks/use-org-timezone"
 import { FileText, Loader2 } from "lucide-react"
 import { toastFromApiErrorBody, toastFromCaughtError } from "@/lib/toast-reportable-error"
 import { SESSION_EXPIRED_MESSAGE } from "@/lib/unauthorized"
+import { SignedStorageLink } from "@/components/signed-storage-link"
 
 const RECENT_BATCH_LIMIT = 10
 
-const statusStyles: Record<string, string> = {
-  Inbound: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-  Sale: "bg-red-500/10 text-red-500 dark:text-red-400",
-  "POC Out": "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400",
-  "POC Return": "bg-amber-500/10 text-amber-600 dark:text-amber-400",
-  Rentals: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
-  "Rental Return": "bg-blue-500/10 text-blue-600 dark:text-blue-400",
-  Transfer: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
-  Dispose: "bg-slate-500/10 text-slate-600 dark:text-slate-400",
-  Reversal: "bg-rose-500/10 text-rose-600 dark:text-rose-400",
-}
-
 export function TransactionsTable() {
+  const timeZone = useOrgTimezone()
   const [batches, setBatches] = useState<TransactionBatchSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -46,30 +41,22 @@ export function TransactionsTable() {
     let cancelled = false
     void (async () => {
       try {
-        const res = await fetch("/api/transaction-batches")
+        const page = await fetchTransactionBatchPage({ limit: RECENT_BATCH_LIMIT, offset: 0 })
         if (cancelled) return
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}))
-          toastFromApiErrorBody(data, "Failed to load recent transactions", res.status)
-          setLoadError(
-            res.status === 401 ? SESSION_EXPIRED_MESSAGE : "Could not load recent transactions."
-          )
-          return
-        }
-        const data = await res.json().catch(() => null)
-        if (cancelled) return
-        if (!Array.isArray(data)) {
-          toastFromApiErrorBody(data, "Failed to load recent transactions", res.status)
-          setLoadError("Could not load recent transactions.")
-          return
-        }
         setLoadError(null)
-        setBatches(data as TransactionBatchSummary[])
+        setBatches(page.batches)
       } catch (e) {
-        if (!cancelled) {
+        if (cancelled) return
+        const status = typeof e === "object" && e && "status" in e ? Number(e.status) : 500
+        const body = typeof e === "object" && e && "body" in e ? e.body : {}
+        if (typeof e === "object" && e && "body" in e) {
+          toastFromApiErrorBody(body, "Failed to load recent transactions", status)
+        } else {
           toastFromCaughtError(e, "Failed to load recent transactions")
-          setLoadError("Could not load recent transactions.")
         }
+        setLoadError(
+          status === 401 ? SESSION_EXPIRED_MESSAGE : "Could not load recent transactions."
+        )
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -85,7 +72,7 @@ export function TransactionsTable() {
     <Card className="h-full min-h-[300px] sm:min-h-[340px] flex flex-col">
       <CardHeader className="pb-3 flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
         <CardTitle className="text-base font-semibold text-foreground">Recent transactions</CardTitle>
-        <Button variant="link" asChild className="h-auto p-0 text-sm text-primary shrink-0">
+        <Button variant="link" asChild className="h-auto p-0 text-sm text-brand shrink-0">
           <Link href="/transaction-history">View transaction history</Link>
         </Button>
       </CardHeader>
@@ -99,35 +86,30 @@ export function TransactionsTable() {
             {loadError}
           </p>
         ) : recent.length === 0 ? (
-          <p className="text-sm text-muted-foreground py-8 text-center">No transactions yet.</p>
+          <EmptyState message="No transactions yet." />
         ) : (
           <Table className="min-w-[560px]">
             <TableHeader>
               <TableRow className="hover:bg-transparent">
-                <TableHead className="text-xs text-muted-foreground font-medium hidden lg:table-cell">Date</TableHead>
-                <TableHead className="text-xs text-muted-foreground font-medium">Movement</TableHead>
-                <TableHead className="text-xs text-muted-foreground font-medium">Product</TableHead>
-                <TableHead className="text-xs text-muted-foreground font-medium hidden md:table-cell">Client</TableHead>
-                <TableHead className="text-xs text-muted-foreground font-medium">Items</TableHead>
+                <TableHead className="hidden lg:table-cell">Date</TableHead>
+                <TableHead>Movement</TableHead>
+                <TableHead>Product</TableHead>
+                <TableHead className="hidden md:table-cell">Client</TableHead>
+                <TableHead className="text-right">Items</TableHead>
                 {showFinancials && (
-                  <TableHead className="text-xs text-muted-foreground font-medium hidden lg:table-cell">Invoice</TableHead>
+                  <TableHead className="hidden lg:table-cell">Invoice</TableHead>
                 )}
-                <TableHead className="text-xs text-muted-foreground font-medium hidden xl:table-cell w-24">Delivery note</TableHead>
+                <TableHead className="hidden xl:table-cell w-24">Delivery note</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {recent.map((entry) => (
                 <TableRow key={entry.batchKey}>
                   <TableCell className="text-sm text-muted-foreground hidden lg:table-cell whitespace-nowrap">
-                    {formatDateDDMMYYYY(entry.date)}
+                    <BusinessDateLabel date={entry.date} createdAt={entry.recordedAt} timeZone={timeZone} />
                   </TableCell>
                   <TableCell>
-                    <Badge
-                      variant="secondary"
-                      className={cn("text-[10px] font-medium border-0", statusStyles[entry.movementType] ?? "")}
-                    >
-                      {entry.movementType}
-                    </Badge>
+                    <StatusPill value={entry.movementType ?? ""} />
                   </TableCell>
                   <TableCell className="text-sm text-foreground max-w-[140px] truncate" title={entry.productLabel}>
                     {entry.productLabel}
@@ -135,7 +117,7 @@ export function TransactionsTable() {
                   <TableCell className="text-sm text-muted-foreground hidden md:table-cell max-w-[160px] truncate" title={entry.clientDisplay}>
                     {entry.clientDisplay}
                   </TableCell>
-                  <TableCell className="text-sm text-foreground tabular-nums">
+                  <TableCell className="text-right text-sm tabular-nums text-foreground">
                     {entry.count} item{entry.count !== 1 ? "s" : ""}
                   </TableCell>
                   {showFinancials && (
@@ -145,15 +127,13 @@ export function TransactionsTable() {
                   )}
                   <TableCell className="hidden xl:table-cell">
                     {entry.deliveryNoteUrl ? (
-                      <a
-                        href={entry.deliveryNoteUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                      <SignedStorageLink
+                        path={entry.deliveryNoteUrl}
+                        className="inline-flex items-center gap-1 text-xs text-brand hover:underline"
                       >
                         <FileText className="w-3.5 h-3.5 shrink-0" />
                         View
-                      </a>
+                      </SignedStorageLink>
                     ) : (
                       <span className="text-muted-foreground">—</span>
                     )}

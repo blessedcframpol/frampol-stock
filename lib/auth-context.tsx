@@ -10,7 +10,7 @@ export type Profile = {
   id: string
   email: string
   display_name: string | null
-  /** Set by an admin; null until assigned (self-service users). */
+  /** Set by an admin; null until assigned after the first Microsoft sign-in. */
   role: AppRole | null
   active: boolean
 }

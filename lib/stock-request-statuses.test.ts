@@ -14,7 +14,14 @@ const STATUSES: StockRequestStatus[] = [
   "cancelled",
 ]
 
-const ROLES: Array<AppRole | null> = ["admin", "sales", "accounts", "technicians", null]
+const ROLES: Array<AppRole | null> = [
+  "admin",
+  "sales",
+  "accounts",
+  "technicians",
+  "viewer",
+  null,
+]
 
 /** Expected transitions matching migration 049 + STOCK_REQUEST_TRANSITIONS. */
 function expected(

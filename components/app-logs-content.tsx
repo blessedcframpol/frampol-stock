@@ -11,7 +11,8 @@ import {
 } from "@/components/ui/table"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
+import { StatusPill } from "@/components/fs/status-pill"
+import { EmptyState } from "@/components/fs/empty-state"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -31,11 +32,10 @@ import {
 import { ScrollText, Loader2 } from "lucide-react"
 import { useAuth } from "@/lib/auth-context"
 import { canViewAppLogs } from "@/lib/permissions"
-import { PageBackLink, PageHeader } from "@/components/page-nav"
+import { PageHeader } from "@/components/page-nav"
+import { PageBreadcrumbs } from "@/components/page-breadcrumbs"
 import { toastFromApiErrorBody, toastFromCaughtError } from "@/lib/toast-reportable-error"
 import { formatDateDDMMYYYY } from "@/lib/utils"
-import { cn } from "@/lib/utils"
-
 export type AppEventLogRow = {
   id: string
   created_at: string
@@ -49,11 +49,6 @@ export type AppEventLogRow = {
   request_id: string | null
 }
 
-const severityBadge: Record<string, string> = {
-  error: "bg-destructive/15 text-destructive",
-  warn: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
-  info: "bg-muted text-foreground",
-}
 
 const PAGE_SIZE = 50
 
@@ -154,7 +149,7 @@ export function AppLogsContent() {
   if (!allowed) {
     return (
       <div className="flex flex-col gap-4 min-w-0 items-start">
-        <PageBackLink href="/" label="Dashboard" />
+        <PageBreadcrumbs items={[{ label: "Dashboard", href: "/" }, { label: "Error logs" }]} />
         <p className="text-sm text-muted-foreground">You do not have access to error logs.</p>
       </div>
     )
@@ -209,17 +204,17 @@ export function AppLogsContent() {
               Loading…
             </div>
           ) : rows.length === 0 ? (
-            <p className="text-sm text-muted-foreground py-8 px-4">No log entries match the current filters.</p>
+            <EmptyState message="No log entries match the current filters." />
           ) : (
             <Table className="min-w-[900px]">
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
-                  <TableHead className="text-xs text-muted-foreground font-medium whitespace-nowrap">When</TableHead>
-                  <TableHead className="text-xs text-muted-foreground font-medium">Sev</TableHead>
-                  <TableHead className="text-xs text-muted-foreground font-medium">Src</TableHead>
-                  <TableHead className="text-xs text-muted-foreground font-medium">Context</TableHead>
-                  <TableHead className="text-xs text-muted-foreground font-medium">Message</TableHead>
-                  <TableHead className="text-xs text-muted-foreground font-medium hidden lg:table-cell">Request</TableHead>
+                  <TableHead className="whitespace-nowrap">When</TableHead>
+                  <TableHead>Sev</TableHead>
+                  <TableHead>Src</TableHead>
+                  <TableHead>Context</TableHead>
+                  <TableHead>Message</TableHead>
+                  <TableHead className="hidden lg:table-cell">Request</TableHead>
                   <TableHead className="w-20" />
                 </TableRow>
               </TableHeader>
@@ -230,9 +225,7 @@ export function AppLogsContent() {
                       {formatDateTime(r.created_at)}
                     </TableCell>
                     <TableCell>
-                      <Badge variant="secondary" className={cn("text-[10px] border-0", severityBadge[r.severity] ?? "")}>
-                        {r.severity}
-                      </Badge>
+                      <StatusPill value={r.severity} />
                     </TableCell>
                     <TableCell className="text-xs">{r.source}</TableCell>
                     <TableCell className="text-xs font-mono max-w-[180px] truncate" title={r.context}>
@@ -244,7 +237,7 @@ export function AppLogsContent() {
                     <TableCell className="text-xs font-mono text-muted-foreground hidden lg:table-cell max-w-[120px] truncate">
                       {r.request_id ?? "—"}
                     </TableCell>
-                    <TableCell className="text-xs text-primary">Details</TableCell>
+                    <TableCell className="text-xs text-brand">Details</TableCell>
                   </TableRow>
                 ))}
               </TableBody>

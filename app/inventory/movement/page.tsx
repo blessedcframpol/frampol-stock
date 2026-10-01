@@ -1,10 +1,15 @@
 import { DashboardShell } from "@/components/dashboard-shell"
 import { StockMovementContent } from "@/components/stock-movement-content"
 
-export default function InventoryMovementPage() {
+export default async function InventoryMovementPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ type?: string; serials?: string }>
+}) {
+  const params = await searchParams
   return (
     <DashboardShell>
-      <StockMovementContent />
+      <StockMovementContent prefillType={params.type} prefillSerials={params.serials} />
     </DashboardShell>
   )
 }

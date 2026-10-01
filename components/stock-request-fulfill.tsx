@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
+import { StatusPill } from "@/components/fs/status-pill"
 import {
   Select,
   SelectContent,
@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/select"
 import { useAuth } from "@/lib/auth-context"
 import { getSupabaseClient } from "@/lib/supabase/client"
+import { formatClientLabel } from "@/lib/client-label"
 import {
   assignSerialToLine,
   fetchAssignedCountsByLineId,
@@ -43,11 +44,14 @@ import {
   signedOutLoadError,
 } from "@/lib/unauthorized"
 import { CheckCircle2, Loader2, Unlink } from "lucide-react"
-import { PageBackLink, PageHeader } from "@/components/page-nav"
+import { PageHeader } from "@/components/page-nav"
+import { PageBreadcrumbs } from "@/components/page-breadcrumbs"
+import { canFulfillStockRequests } from "@/lib/permissions"
 
 export function StockRequestFulfill({ requestId }: { requestId: string }) {
   const router = useRouter()
   const { user, role, profile } = useAuth()
+  const canFulfill = canFulfillStockRequests(role)
   const [row, setRow] = useState<StockRequestWithRelations | null>(null)
   const [assigned, setAssigned] = useState<Record<string, number>>({})
   const [poolByLine, setPoolByLine] = useState<Record<string, InventoryItem[]>>({})
@@ -234,6 +238,23 @@ export function StockRequestFulfill({ requestId }: { requestId: string }) {
     }
   }
 
+  if (!canFulfill) {
+    return (
+      <div className="flex flex-col gap-4">
+        <PageBreadcrumbs
+          items={[
+            { label: "Requests", href: "/requests" },
+            { label: requestId, href: `/requests/${requestId}` },
+            { label: "Fulfill" },
+          ]}
+        />
+        <p className="text-sm text-muted-foreground">
+          Your account has read-only access to stock requests.
+        </p>
+      </div>
+    )
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20 text-muted-foreground gap-2">
@@ -246,7 +267,7 @@ export function StockRequestFulfill({ requestId }: { requestId: string }) {
   if (loadError) {
     return (
       <div className="flex flex-col gap-4">
-        <PageBackLink href="/requests" label="Requests" />
+        <PageBreadcrumbs items={[{ label: "Requests", href: "/requests" }, { label: requestId }]} />
         <p role="alert" className="text-sm text-destructive">
           {loadError}
         </p>
@@ -257,7 +278,7 @@ export function StockRequestFulfill({ requestId }: { requestId: string }) {
   if (!row) {
     return (
       <div className="flex flex-col gap-4">
-        <PageBackLink href="/requests" label="Requests" />
+        <PageBreadcrumbs items={[{ label: "Requests", href: "/requests" }, { label: requestId }]} />
         <p className="text-sm text-muted-foreground">Request not found or you don’t have access.</p>
       </div>
     )
@@ -266,7 +287,13 @@ export function StockRequestFulfill({ requestId }: { requestId: string }) {
   if (row.status !== "submitted" && row.status !== "in_progress") {
     return (
       <div className="flex flex-col gap-4 max-w-xl">
-        <PageBackLink href={`/requests/${row.id}`} label="Request" />
+        <PageBreadcrumbs
+          items={[
+            { label: "Requests", href: "/requests" },
+            { label: row.id, href: `/requests/${row.id}` },
+            { label: "Fulfill" },
+          ]}
+        />
         <p className="text-sm text-muted-foreground">
           This request is not in a fulfillment state (current: {row.status}). Open the request overview for next steps.
         </p>
@@ -278,8 +305,14 @@ export function StockRequestFulfill({ requestId }: { requestId: string }) {
     <div className="flex flex-col gap-6 max-w-3xl">
       <PageHeader
         title="Fulfill request"
-        description={`${row.client ? `${row.client.name} — ${row.client.company}` : row.client_id} · ${formatDateDDMMYYYY(row.created_at)} · ${row.status.replace("_", " ")}`}
-        back={{ href: `/requests/${row.id}` }}
+        description={`${row.client ? formatClientLabel(row.client) : row.client_id} · ${formatDateDDMMYYYY(row.created_at)} · ${row.status.replace("_", " ")}`}
+      />
+      <PageBreadcrumbs
+        items={[
+          { label: "Requests", href: "/requests" },
+          { label: row.id, href: `/requests/${row.id}` },
+          { label: "Fulfill" },
+        ]}
       />
 
       <Card>
@@ -302,9 +335,7 @@ export function StockRequestFulfill({ requestId }: { requestId: string }) {
                     <p className="font-medium text-sm">{line.product_name}</p>
                     <p className="text-xs text-muted-foreground">Need {cap} · assigned {count}</p>
                   </div>
-                  <Badge variant="secondary" className="text-[10px]">
-                    {count >= cap ? "Line full" : "Open"}
-                  </Badge>
+                  <StatusPill value={count >= cap ? "Line full" : "Open"} />
                 </div>
 
                 {assignedItems.length > 0 && (
@@ -374,7 +405,7 @@ export function StockRequestFulfill({ requestId }: { requestId: string }) {
             </p>
           </div>
           {blocking.length > 0 ? (
-            <p className="text-sm text-amber-800 dark:text-amber-200">{blockedReason}</p>
+            <p className="text-sm text-warning">{blockedReason}</p>
           ) : null}
         </div>
       ) : null}

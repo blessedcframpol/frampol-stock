@@ -3,6 +3,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
+import { EmptyState } from "@/components/fs/empty-state"
+import { ListToolbar, ListToolbarSearch } from "@/components/fs/list-toolbar"
+import { Pagination } from "@/components/fs/pagination"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -31,18 +34,15 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import {
-  ChevronLeft,
-  ChevronRight,
   Download,
   Loader2,
   Pencil,
-  Plus,
-  Search,
   UsersRound,
 } from "lucide-react"
 import { useAuth } from "@/lib/auth-context"
 import { canManageUsers, isValidRole, ROLES, type AppRole } from "@/lib/permissions"
-import { PageBackLink, pageTitleClass } from "@/components/page-nav"
+import { pageTitleClass } from "@/components/page-nav"
+import { PageBreadcrumbs } from "@/components/page-breadcrumbs"
 import { toast } from "sonner"
 import { toastFromApiErrorBody, toastFromCaughtError } from "@/lib/toast-reportable-error"
 import { buildCsvFilename, cn, formatDateDDMMYYYY } from "@/lib/utils"
@@ -64,6 +64,7 @@ const ROLE_LABELS: Record<AppRole, string> = {
   sales: "Sales",
   accounts: "Accounts",
   technicians: "Technicians",
+  viewer: "Viewer — read-only",
 }
 
 function profileInitials(display: string | null | undefined, email: string | null | undefined): string {
@@ -135,13 +136,6 @@ export function UsersContent() {
     setPageForFilter(pageFilterKey)
     setPage(1)
   }
-
-  const [createOpen, setCreateOpen] = useState(false)
-  const [createEmail, setCreateEmail] = useState("")
-  const [createPassword, setCreatePassword] = useState("")
-  const [createDisplayName, setCreateDisplayName] = useState("")
-  const [createRole, setCreateRole] = useState<string>("technicians")
-  const [creating, setCreating] = useState(false)
 
   const [editOpen, setEditOpen] = useState(false)
   const [editProfile, setEditProfile] = useState<ProfileRow | null>(null)
@@ -225,50 +219,6 @@ export function UsersContent() {
     setEditOpen(true)
   }
 
-  function resetCreateForm() {
-    setCreateEmail("")
-    setCreatePassword("")
-    setCreateDisplayName("")
-    setCreateRole("technicians")
-  }
-
-  async function handleCreateUser(e: React.FormEvent) {
-    e.preventDefault()
-    if (!createEmail.trim() || !createPassword) {
-      toast.error("Email and password required")
-      return
-    }
-    setCreating(true)
-    try {
-      const res = await fetch("/api/admin/profiles", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: createEmail.trim(),
-          password: createPassword,
-          display_name: createDisplayName.trim() || undefined,
-          role: createRole,
-        }),
-      })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        toastFromApiErrorBody(data, "Failed to create user", res.status)
-        return
-      }
-      const name = createDisplayName.trim() || createEmail.trim()
-      toast.success(`‘${name}’ created`, {
-        description: "User account has been created successfully.",
-      })
-      resetCreateForm()
-      setCreateOpen(false)
-      await fetchProfiles()
-    } catch (err) {
-      toastFromCaughtError(err, "Failed to create user")
-    } finally {
-      setCreating(false)
-    }
-  }
-
   async function handleSaveEdit(e: React.FormEvent) {
     e.preventDefault()
     if (!editProfile) return
@@ -309,7 +259,7 @@ export function UsersContent() {
   if (!allowed) {
     return (
       <div className="flex flex-col gap-4 min-w-0 items-start">
-        <PageBackLink href="/" label="Dashboard" />
+        <PageBreadcrumbs items={[{ label: "Dashboard", href: "/" }, { label: "User management" }]} />
         <p className="text-sm text-muted-foreground">You do not have access to user management.</p>
       </div>
     )
@@ -331,22 +281,20 @@ export function UsersContent() {
           </Badge>
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
-          Manage your team members and their account permissions here.
+          People appear here after their first Microsoft sign-in. Assign a role to give them access.
         </p>
       </div>
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center min-w-0 flex-1">
-          <div className="relative w-full sm:max-w-xs">
-            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-            <Input
+      <ListToolbar
+        search={
+          <>
+            <ListToolbarSearch
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search name or email…"
-              className="h-9 pl-9 rounded-lg bg-background"
+              aria-label="Search users"
             />
-          </div>
-          <Select value={roleFilter} onValueChange={setRoleFilter}>
+            <Select value={roleFilter} onValueChange={setRoleFilter}>
             <SelectTrigger className="h-9 w-full sm:w-[9.5rem] rounded-lg bg-background">
               <SelectValue placeholder="Role" />
             </SelectTrigger>
@@ -370,12 +318,13 @@ export function UsersContent() {
               <SelectItem value="inactive">Inactive</SelectItem>
             </SelectContent>
           </Select>
-        </div>
-        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          </>
+        }
+        count={`${filtered.length} of ${profiles.length}`}
+        secondary={
           <Button
             type="button"
-            variant="outline"
-            className="rounded-lg"
+            variant="ghost"
             disabled={loading || profiles.length === 0}
             onClick={() => {
               downloadUsersCsv(profiles)
@@ -385,12 +334,8 @@ export function UsersContent() {
             <Download className="size-4" />
             Export
           </Button>
-          <Button type="button" className="rounded-lg" onClick={() => setCreateOpen(true)}>
-            <Plus className="size-4" />
-            Add user
-          </Button>
-        </div>
-      </div>
+        }
+      />
 
       <div className="overflow-hidden rounded-xl border border-border bg-card/30">
         {loading ? (
@@ -398,9 +343,7 @@ export function UsersContent() {
             <Loader2 className="size-4 animate-spin" /> Loading users…
           </div>
         ) : filtered.length === 0 ? (
-          <p className="p-8 text-sm text-muted-foreground">
-            {profiles.length === 0 ? "No users found." : "No users match your filters."}
-          </p>
+          <EmptyState message={profiles.length === 0 ? "No users found." : "No users match your filters."} />
         ) : (
           <div className="overflow-x-auto">
             <Table>
@@ -445,7 +388,7 @@ export function UsersContent() {
                         <span
                           className={cn(
                             "size-2 rounded-full shrink-0",
-                            p.active ? "bg-emerald-500" : "bg-red-500"
+                            p.active ? "bg-success" : "bg-danger"
                           )}
                           aria-hidden
                         />
@@ -497,115 +440,10 @@ export function UsersContent() {
               </div>
               <span className="tabular-nums">{rangeLabel}</span>
             </div>
-            <div className="flex items-center gap-1">
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                className="size-8 rounded-lg"
-                disabled={safePage <= 1}
-                onClick={() => setPage(Math.max(1, safePage - 1))}
-                aria-label="Previous page"
-              >
-                <ChevronLeft className="size-4" />
-              </Button>
-              <span className="min-w-[4.5rem] text-center text-sm tabular-nums text-muted-foreground">
-                {safePage} / {totalPages}
-              </span>
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                className="size-8 rounded-lg"
-                disabled={safePage >= totalPages}
-                onClick={() => setPage(Math.min(totalPages, safePage + 1))}
-                aria-label="Next page"
-              >
-                <ChevronRight className="size-4" />
-              </Button>
-            </div>
+            <Pagination page={safePage} pageCount={totalPages} onPageChange={setPage} />
           </div>
         ) : null}
       </div>
-
-      <Dialog
-        open={createOpen}
-        onOpenChange={(open) => {
-          setCreateOpen(open)
-          if (!open) resetCreateForm()
-        }}
-      >
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Add user</DialogTitle>
-            <DialogDescription>
-              Create a sign-in and assign a role. The user can log in immediately.
-            </DialogDescription>
-          </DialogHeader>
-          <form onSubmit={handleCreateUser} className="flex flex-col gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="create-email">Email</Label>
-              <Input
-                id="create-email"
-                type="email"
-                placeholder="user@example.com"
-                value={createEmail}
-                onChange={(e) => setCreateEmail(e.target.value)}
-                className="h-11 rounded-lg"
-                autoComplete="off"
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="create-password">Password</Label>
-              <Input
-                id="create-password"
-                type="password"
-                placeholder="••••••••"
-                value={createPassword}
-                onChange={(e) => setCreatePassword(e.target.value)}
-                className="h-11 rounded-lg"
-                autoComplete="new-password"
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="create-name">Display name</Label>
-              <Input
-                id="create-name"
-                placeholder="Optional"
-                value={createDisplayName}
-                onChange={(e) => setCreateDisplayName(e.target.value)}
-                className="h-11 rounded-lg"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Role</Label>
-              <Select value={createRole} onValueChange={setCreateRole}>
-                <SelectTrigger className="h-11 rounded-lg">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {ROLES.map((r) => (
-                    <SelectItem key={r} value={r}>
-                      {ROLE_LABELS[r]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setCreateOpen(false)}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={creating}>
-                {creating ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
-                {creating ? "Creating…" : "Create user"}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
 
       <Dialog
         open={editOpen}

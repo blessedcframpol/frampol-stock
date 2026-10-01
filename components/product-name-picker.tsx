@@ -90,7 +90,7 @@ export function ProductNamePicker({
               {name}
             </SelectItem>
           ))}
-          <SelectItem value={ADD_NEW} className="text-primary">
+          <SelectItem value={ADD_NEW} className="text-brand">
             + Add new product…
           </SelectItem>
         </SelectContent>

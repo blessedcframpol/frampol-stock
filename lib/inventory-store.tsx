@@ -2,9 +2,8 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react"
 import type { InventoryItem, JsonValue, Transaction, TransactionType } from "./data"
-import { inventoryItems as initialInventory, recentTransactions as initialTransactions, clients } from "./data"
-import { getReorderLevelForProduct, getReorderLevelOverrides } from "./settings"
 import { getSupabaseClient } from "./supabase/client"
+import { fetchAllPages } from "./supabase/postgrest-page"
 import {
   rowToInventoryItem,
   inventoryItemToRow,
@@ -24,10 +23,8 @@ import { reportAppEvent } from "./report-app-event"
 import { humanizeStockDbError } from "./parse-api-error"
 import { toast } from "sonner"
 import type { Database } from "./supabase/database.types"
-
-function deepClone<T>(arr: T[]): T[] {
-  return JSON.parse(JSON.stringify(arr))
-}
+import { DEFAULT_ORG_TIMEZONE } from "./business-date.mjs"
+import { fetchAppSettings } from "./settings"
 
 function generateId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
@@ -36,13 +33,9 @@ function generateId(prefix: string): string {
 /** Days before trashed inventory rows are eligible for permanent purge. */
 export const INVENTORY_TRASH_RETENTION_DAYS = 30
 
-/** PostgREST's max rows per response; ledger loads page through this. */
-const LEDGER_PAGE_SIZE = 1000
-
 function getClientDisplay(clientId: string): string {
   if (!clientId || clientId === "internal") return "Internal"
-  const c = clients.find((x) => x.id === clientId)
-  return c ? `${c.name} - ${c.company}` : clientId
+  return clientId
 }
 
 function getSupabaseIfConfigured() {
@@ -59,7 +52,7 @@ export interface MovementParams {
   clientId?: string
   /**
    * Directory label for transactions/inventory (e.g. "Name - Company").
-   * When omitted, falls back to seed-data lookup — use this with live clients from Supabase.
+   * When omitted, the transaction stores the client id. Pass the directory label from live clients.
    */
   clientDisplayOverride?: string
   fromLocation?: string
@@ -74,7 +67,7 @@ export interface MovementParams {
   authorisedBy?: string
   /** Optional batch id; if omitted, one is generated so all rows in this submit share `batch_id`. */
   batchId?: string
-  /** For Inbound: public URL of uploaded delivery note */
+  /** For Inbound: private uploads bucket object path for the delivery note. */
   deliveryNoteUrl?: string
   /** When Inbound: create new rows for unknown serials (and require no conflicting In Stock serial) */
   inboundCreateDefaults?: InboundCreateDefaults
@@ -109,7 +102,6 @@ export interface MovementParams {
 const APPROACHING_DAYS = 7
 
 export interface AlertsResult {
-  lowStock: { groupName: string; vendor: string; inStock: number; threshold: number }[]
   warrantyExpiring: InventoryItem[]
   /** POC items past expected return date */
   pocOverdue: InventoryItem[]
@@ -123,41 +115,11 @@ export interface AlertsResult {
 
 const WARRANTY_DAYS = 30
 
-function getAlertsFromInventory(
-  inventory: InventoryItem[],
-  getThreshold: (productName: string) => number
-): AlertsResult {
+function getAlertsFromInventory(inventory: InventoryItem[]): AlertsResult {
   const now = new Date()
   now.setHours(0, 0, 0, 0)
   const warrantyLimit = new Date(now)
   warrantyLimit.setDate(warrantyLimit.getDate() + WARRANTY_DAYS)
-
-  const byName = new Map<string, InventoryItem[]>()
-  for (const item of inventory) {
-    const list = byName.get(item.name) ?? []
-    list.push(item)
-    byName.set(item.name, list)
-  }
-
-  // Consider all product groups: those in inventory and those with reorder overrides (so we still
-  // show low stock when a product has 0 items). Alert clears only when in-stock count exceeds
-  // the reorder level (i.e. when new items have been scanned in to satisfy it).
-  const overrideProductNames = Object.keys(getReorderLevelOverrides())
-  const allProductNames = new Set<string>([...byName.keys(), ...overrideProductNames])
-  const lowStock: AlertsResult["lowStock"] = []
-  for (const name of allProductNames) {
-    const items = byName.get(name) ?? []
-    const inStock = items.filter((i) => i.status === "In Stock").length
-    const threshold = getThreshold(name)
-    if (inStock <= threshold) {
-      lowStock.push({
-        groupName: name,
-        vendor: items[0]?.vendor?.trim() ? items[0].vendor : "General",
-        inStock,
-        threshold,
-      })
-    }
-  }
 
   const warrantyExpiring = inventory.filter((item) => {
     if (!item.warrantyEndDate) return false
@@ -202,7 +164,7 @@ function getAlertsFromInventory(
     return due >= approachingStart && due <= approachingEnd
   })
 
-  return { lowStock, warrantyExpiring, pocOverdue, pocApproaching, rentalOverdue, rentalApproaching }
+  return { warrantyExpiring, pocOverdue, pocApproaching, rentalOverdue, rentalApproaching }
 }
 
 interface InventoryStoreValue {
@@ -244,12 +206,8 @@ const InventoryStoreContext = createContext<InventoryStoreValue | null>(null)
 export function InventoryStoreProvider({ children }: { children: React.ReactNode }) {
   const { user, loading: authLoading } = useAuth()
   const supabase = useMemo(() => getSupabaseIfConfigured(), [])
-  const [inventory, setInventory] = useState<InventoryItem[]>(() =>
-    supabase ? [] : deepClone(initialInventory)
-  )
-  const [transactions, setTransactions] = useState<Transaction[]>(() =>
-    supabase ? [] : deepClone(initialTransactions)
-  )
+  const [inventory, setInventory] = useState<InventoryItem[]>([])
+  const [transactions, setTransactions] = useState<Transaction[]>([])
   const [trashedInventory, setTrashedInventory] = useState<InventoryItem[]>([])
 
   // Logout must drop the in-memory ledger. Doing it here, when the session id
@@ -269,52 +227,32 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
       const stale = () => opts?.isStale?.() ?? false
       if (!supabase) return
 
-      // PostgREST caps a single response at 1000 rows. Page through with an
-      // explicit range so the in-memory ledger always reflects every live row;
-      // otherwise insert-vs-update decisions are made against a truncated set
-      // and unseen serials get re-inserted as duplicates.
-      type InvRow = Parameters<typeof rowToInventoryItem>[0]
-      const allInvRows: InvRow[] = []
-      for (let from = 0; ; from += LEDGER_PAGE_SIZE) {
-        const { data, error } = await supabase
-          .from("inventory_items")
-          .select(INVENTORY_ITEM_SELECT)
-          .is("deleted_at", null)
-          .order("date_added", { ascending: true })
-          .order("id", { ascending: true })
-          .range(from, from + LEDGER_PAGE_SIZE - 1)
-        if (error) {
-          console.error("refetchLedger inventory_items:", error)
-          return
-        }
+      // Page past PostgREST's cap so insert-vs-update decisions see every live row.
+      // A truncated ledger re-inserts unseen serials as duplicates.
+      try {
+        const allInvRows = await fetchAllPages((from, to) =>
+          supabase
+            .from("inventory_items")
+            .select(INVENTORY_ITEM_SELECT)
+            .is("deleted_at", null)
+            .order("date_added", { ascending: true })
+            .order("id", { ascending: true })
+            .range(from, to)
+        )
         if (stale()) return
-        const page = data ?? []
-        allInvRows.push(...page)
-        if (page.length < LEDGER_PAGE_SIZE) break
-      }
-      if (stale()) return
-      setInventory(allInvRows.map(rowToInventoryItem))
+        setInventory(allInvRows.map(rowToInventoryItem))
 
-      type TxnRow = Parameters<typeof rowToTransaction>[0]
-      const allTxnRows: TxnRow[] = []
-      for (let from = 0; ; from += LEDGER_PAGE_SIZE) {
-        const { data, error } = await supabase
-          .from("transactions")
-          .select("*")
-          .order("date", { ascending: false })
-          .order("id", { ascending: false })
-          .range(from, from + LEDGER_PAGE_SIZE - 1)
-        if (error) {
-          console.error("refetchLedger transactions:", error)
-          return
-        }
-        if (stale()) return
-        const page = data ?? []
-        allTxnRows.push(...page)
-        if (page.length < LEDGER_PAGE_SIZE) break
-      }
-      if (!stale()) {
-        setTransactions(allTxnRows.map(rowToTransaction))
+        const allTxnRows = await fetchAllPages((from, to) =>
+          supabase
+            .from("transactions")
+            .select("*")
+            .order("date", { ascending: false })
+            .order("id", { ascending: false })
+            .range(from, to)
+        )
+        if (!stale()) setTransactions(allTxnRows.map(rowToTransaction))
+      } catch (error) {
+        console.error("refetchLedger:", error)
       }
     },
     [supabase]
@@ -374,6 +312,13 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
       const clientDisplay =
         clientDisplayOverride ?? (clientId ? getClientDisplay(clientId) : "Internal")
       const newBatchId = batchId ?? `BATCH-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+      let orgTimeZone = DEFAULT_ORG_TIMEZONE
+      try {
+        const settings = await fetchAppSettings()
+        if (settings.timezone.trim()) orgTimeZone = settings.timezone.trim()
+      } catch {
+        // app_settings.timezone is the source when the read succeeds. The fallback matches the column default.
+      }
 
       const result = computeMovementResult(inventory, {
         type,
@@ -397,6 +342,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
         expectedProductName,
         expectedVendor,
         movementMetadata,
+        orgTimeZone,
       })
 
       if (result.saleDateError) {
@@ -566,7 +512,8 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
               end_date: endDate,
               status: "open",
               invoice_number: invoiceNumber ?? null,
-              created_at: dateIso,
+              // Transaction date is a business-date midnight. The batch row keeps the recorded instant.
+              created_at: new Date().toISOString(),
             }
           }
 
@@ -695,16 +642,20 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
       setTrashedInventory([])
       return
     }
-    const { data, error } = await supabase
-      .from("inventory_items")
-      .select(INVENTORY_ITEM_SELECT)
-      .not("deleted_at", "is", null)
-      .order("deleted_at", { ascending: false })
-    if (error) {
+    try {
+      const data = await fetchAllPages((from, to) =>
+        supabase
+          .from("inventory_items")
+          .select(INVENTORY_ITEM_SELECT)
+          .not("deleted_at", "is", null)
+          .order("deleted_at", { ascending: false })
+          .order("id", { ascending: true })
+          .range(from, to)
+      )
+      setTrashedInventory(data.map(rowToInventoryItem))
+    } catch (error) {
       console.error("refetchTrashed:", error)
-      return
     }
-    setTrashedInventory((data ?? []).map(rowToInventoryItem))
   }, [supabase])
 
   const softDeleteItem = useCallback(
@@ -752,13 +703,21 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
       setTrashedInventory((prev) => prev.filter((i) => !i.deletedAt || i.deletedAt >= cutoff))
       return { ok: true, removed: 0 }
     }
-    const { data: stale, error: selErr } = await supabase
-      .from("inventory_items")
-      .select("id")
-      .not("deleted_at", "is", null)
-      .lt("deleted_at", cutoff)
-    if (selErr) return { ok: false, error: selErr.message }
-    const ids = (stale ?? []).map((r) => r.id)
+    let stale: { id: string }[]
+    try {
+      stale = await fetchAllPages((from, to) =>
+        supabase
+          .from("inventory_items")
+          .select("id")
+          .not("deleted_at", "is", null)
+          .lt("deleted_at", cutoff)
+          .order("id", { ascending: true })
+          .range(from, to)
+      )
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : "Failed to read trash" }
+    }
+    const ids = stale.map((r) => r.id)
     if (ids.length === 0) return { ok: true, removed: 0 }
     const { error } = await supabase.from("inventory_items").delete().in("id", ids)
     if (error) return { ok: false, error: error.message }
@@ -867,10 +826,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
     [inventory, reassignInventoryItems]
   )
 
-  const getAlerts = useCallback(
-    () => getAlertsFromInventory(inventory, getReorderLevelForProduct),
-    [inventory]
-  )
+  const getAlerts = useCallback(() => getAlertsFromInventory(inventory), [inventory])
 
   const undoTransaction = useCallback(
     async (txnId: string): Promise<{ ok: boolean; error?: string }> => {

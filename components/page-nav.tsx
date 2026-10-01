@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
 export const pageTitleClass =
-  "text-xl md:text-2xl font-bold text-foreground tracking-tight text-balance"
+  "text-3xl font-semibold tracking-tight text-foreground text-balance"
 
 type PageBackLinkProps = {
   href?: string
@@ -42,7 +42,7 @@ export function PageBackLink({ href, onClick, label = "Back", className }: PageB
 
 type PageHeaderProps = {
   title: string
-  description?: string
+  description?: React.ReactNode
   back?: { href?: string; onClick?: () => void; label?: string }
   icon?: React.ComponentType<{ className?: string }>
   actions?: React.ReactNode

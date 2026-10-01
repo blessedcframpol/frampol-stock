@@ -24,7 +24,7 @@ function getBrowserAuthStorage() {
  * That parses `?code=` as soon as the client is constructed — including inside `AuthProvider`
  * on `/auth/callback`, which races manual `exchangeCodeForSession` and yields
  * "PKCE code verifier not found". We use cookie storage from ssr + `createClient` with
- * `detectSessionInUrl: false`; OAuth and email links are completed on `/auth/callback` explicitly.
+ * `detectSessionInUrl: false`; Microsoft OAuth is completed on `/auth/callback` explicitly.
  */
 function createPkceBrowserClient(): SupabaseClient<Database> {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!

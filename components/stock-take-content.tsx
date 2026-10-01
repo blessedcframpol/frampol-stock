@@ -18,7 +18,8 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import { StatusPill } from "@/components/fs/status-pill"
+import { EmptyState } from "@/components/fs/empty-state"
 import {
   ScanBarcode,
   Trash2,
@@ -31,15 +32,17 @@ import {
   Loader2,
   History,
 } from "lucide-react"
-import type { InventoryItem, ItemStatus, StockTakeScopePreset } from "@/lib/data"
+import type { InventoryItem, StockTakeScopePreset } from "@/lib/data"
 import { useInventoryStore } from "@/lib/inventory-store"
 import { compareStockTake, buildStockTakeSnapshot } from "@/lib/stock-take"
 import { StockTakeScopePanel, useStockTakeScope } from "@/components/stock-take-scope-panel"
 import Link from "next/link"
 import { PageHeader } from "@/components/page-nav"
 import { toast } from "sonner"
+import { useAuth } from "@/lib/auth-context"
+import { ADMIN } from "@/lib/permissions"
 import { toastFromApiErrorBody, toastFromCaughtError } from "@/lib/toast-reportable-error"
-import { buildCsvFilename, cn } from "@/lib/utils"
+import { buildCsvFilename } from "@/lib/utils"
 
 const STOCK_TAKE_STORAGE_KEY = "fram-stock-take-scans"
 const STOCK_TAKE_SCOPE_STORAGE_KEY = "fram-stock-take-scope"
@@ -49,17 +52,6 @@ type ScopeSession = {
   vendor: string
   productName: string
   serialAllowList: string[]
-}
-
-const statusStyles: Record<ItemStatus, string> = {
-  "In Stock": "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-  Sold: "bg-red-500/10 text-red-500 dark:text-red-400",
-  POC: "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400",
-  Rented: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
-  Maintenance: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
-  "RMA Hold": "bg-orange-500/10 text-orange-600 dark:text-orange-400",
-  "Pending Inspection": "bg-teal-500/10 text-teal-700 dark:text-teal-400",
-  Disposed: "bg-slate-500/10 text-slate-600 dark:text-slate-400",
 }
 
 function loadSessionFromStorage(): string {
@@ -229,6 +221,7 @@ async function copySerialLinesToClipboard(serials: string[], toastLabel: string)
 
 export function StockTakeContent() {
   const { inventory } = useInventoryStore()
+  const { role } = useAuth()
   const searchParams = useSearchParams()
   const isClient = useIsClient()
   const [urlScope] = useState(() => scopeFromSearchParams(searchParams))
@@ -393,6 +386,15 @@ export function StockTakeContent() {
     toast.success("Section CSV downloaded")
   }
 
+  if (role != null && role !== ADMIN) {
+    return (
+      <div className="flex flex-col gap-4">
+        <PageHeader title="Stock take" description="Stock takes are limited to admins." />
+        <p className="text-sm text-muted-foreground">Your account can review stock take history. Starting a take is an admin action.</p>
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col gap-4 md:gap-6 min-w-0">
       <PageHeader
@@ -420,7 +422,7 @@ export function StockTakeContent() {
       />
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <Card className="border-dashed border-primary/30 bg-primary/[0.02]">
+        <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base font-semibold text-foreground flex items-center gap-2">
               <ScanBarcode className="w-4 h-4 text-primary" />
@@ -505,17 +507,10 @@ export function StockTakeContent() {
           </CardHeader>
           <CardContent>
             {!hasCompared || !result ? (
-              <Empty>
-                <EmptyMedia variant="icon">
-                  <PackageX className="size-6" />
-                </EmptyMedia>
-                <EmptyHeader>
-                  <EmptyTitle>No results yet</EmptyTitle>
-                  <EmptyDescription>
-                    Add serials and click &quot;Compare with system&quot; to see matched items, items not in the system, and items not scanned.
-                  </EmptyDescription>
-                </EmptyHeader>
-              </Empty>
+              <EmptyState
+                icon={<PackageX />}
+                message="No results yet. Add serials and click Compare with system to see matched items, items not in the system, and items not scanned."
+              />
             ) : (
               <Tabs defaultValue="matched" className="w-full">
                 <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 h-auto">
@@ -548,7 +543,6 @@ export function StockTakeContent() {
                     emptyIcon={<CheckCircle2 className="size-6" />}
                     emptyTitle="No matches"
                     emptyDesc="Scanned serials that exist in inventory appear here."
-                    statusStyles={statusStyles}
                   />
                 </TabsContent>
                 <TabsContent value="notInSystem" className="mt-3">
@@ -585,7 +579,6 @@ export function StockTakeContent() {
                     emptyIcon={<AlertTriangle className="size-6" />}
                     emptyTitle="None missing"
                     emptyDesc="Every in-scope inventory item was scanned."
-                    statusStyles={statusStyles}
                   />
                 </TabsContent>
                 <TabsContent value="outOfScope" className="mt-3">
@@ -604,7 +597,6 @@ export function StockTakeContent() {
                     emptyIcon={<CheckCircle2 className="size-6" />}
                     emptyTitle="None"
                     emptyDesc="All scanned serials were within this stock take scope."
-                    statusStyles={statusStyles}
                   />
                 </TabsContent>
               </Tabs>
@@ -621,24 +613,14 @@ function ResultTable({
   emptyIcon,
   emptyTitle,
   emptyDesc,
-  statusStyles,
 }: {
   items: InventoryItem[]
   emptyIcon: React.ReactNode
   emptyTitle: string
   emptyDesc: string
-  statusStyles: Record<ItemStatus, string>
 }) {
   if (items.length === 0) {
-    return (
-      <Empty>
-        <EmptyMedia variant="icon">{emptyIcon}</EmptyMedia>
-        <EmptyHeader>
-          <EmptyTitle>{emptyTitle}</EmptyTitle>
-          <EmptyDescription>{emptyDesc}</EmptyDescription>
-        </EmptyHeader>
-      </Empty>
-    )
+    return <EmptyState icon={emptyIcon} message={`${emptyTitle}. ${emptyDesc}`} />
   }
   return (
     <ScrollArea className="h-[280px] rounded-md border">
@@ -657,9 +639,7 @@ function ResultTable({
               <TableCell className="font-mono text-sm">{item.serialNumber}</TableCell>
               <TableCell>{item.name}</TableCell>
               <TableCell>
-                <Badge className={cn("text-xs", statusStyles[item.status])} variant="secondary">
-                  {item.status}
-                </Badge>
+                <StatusPill value={item.status} />
               </TableCell>
               <TableCell className="text-muted-foreground text-sm">{item.location}</TableCell>
             </TableRow>
@@ -682,15 +662,7 @@ function NotInSystemList({
   emptyDesc: string
 }) {
   if (serials.length === 0) {
-    return (
-      <Empty>
-        <EmptyMedia variant="icon">{emptyIcon}</EmptyMedia>
-        <EmptyHeader>
-          <EmptyTitle>{emptyTitle}</EmptyTitle>
-          <EmptyDescription>{emptyDesc}</EmptyDescription>
-        </EmptyHeader>
-      </Empty>
-    )
+    return <EmptyState icon={emptyIcon} message={`${emptyTitle}. ${emptyDesc}`} />
   }
   return (
     <ScrollArea className="h-[280px] rounded-md border">
@@ -698,9 +670,9 @@ function NotInSystemList({
         {serials.map((s) => (
           <div
             key={s}
-            className="flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 font-mono text-sm"
+            className="flex items-center gap-2 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 font-mono text-sm"
           >
-            <AlertTriangle className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+            <AlertTriangle className="size-4 shrink-0 text-warning" />
             {s}
             <span className="text-muted-foreground text-xs">(not in inventory)</span>
           </div>

@@ -100,11 +100,22 @@ async function main() {
   const list = (scans ?? []) as QScan[]
   console.log(`Found ${list.length} quick_scans rows`)
 
-  const { data: invRows } = await supabase
-    .from("inventory_items")
-    .select("*, product_lines(product_name, vendor)")
+  const { fetchAllPages } = await import("../lib/supabase/postgrest-page")
+  let invRows
+  try {
+    invRows = await fetchAllPages((from, to) =>
+      supabase
+        .from("inventory_items")
+        .select("*, product_lines(product_name, vendor)")
+        .order("id", { ascending: true })
+        .range(from, to)
+    )
+  } catch (error) {
+    console.error("Failed to read inventory_items:", error)
+    process.exit(1)
+  }
   const bySerial = new Map<string, InvRow>()
-  for (const r of invRows ?? []) {
+  for (const r of invRows) {
     const row = r as InvRow
     bySerial.set(String(row.serial_number).trim(), row)
   }

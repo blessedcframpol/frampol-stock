@@ -3,13 +3,14 @@
  * Must stay in sync with public.app_role enum and RLS in the database.
  */
 
-export const ROLES = ["admin", "sales", "accounts", "technicians"] as const
+export const ROLES = ["admin", "sales", "accounts", "technicians", "viewer"] as const
 export type AppRole = (typeof ROLES)[number]
 
 export const ADMIN: AppRole = "admin"
 export const SALES: AppRole = "sales"
 export const ACCOUNTS: AppRole = "accounts"
 export const TECHNICIANS: AppRole = "technicians"
+export const VIEWER: AppRole = "viewer"
 
 export function canManageUsers(role: AppRole | null | undefined): boolean {
   return role === ADMIN
@@ -64,11 +65,11 @@ export function canCreateStockRequest(role: AppRole | null | undefined): boolean
 }
 
 export function canAccessReports(role: AppRole | null | undefined): boolean {
-  return role === ADMIN || role === ACCOUNTS
+  return role === ADMIN || role === ACCOUNTS || role === VIEWER
 }
 
 export function canAccessRequests(role: AppRole | null | undefined): boolean {
-  return role === ADMIN || role === SALES || role === TECHNICIANS || role === ACCOUNTS
+  return role === ADMIN || role === SALES || role === TECHNICIANS || role === ACCOUNTS || role === VIEWER
 }
 
 export function canFulfillStockRequests(role: AppRole | null | undefined): boolean {
@@ -77,6 +78,18 @@ export function canFulfillStockRequests(role: AppRole | null | undefined): boole
 
 export function canInvoiceStockRequests(role: AppRole | null | undefined): boolean {
   return role === ADMIN || role === ACCOUNTS
+}
+
+export function canEditClients(role: AppRole | null | undefined): boolean {
+  return role === ADMIN || role === SALES || role === ACCOUNTS || role === TECHNICIANS
+}
+
+export function canManageRemediation(role: AppRole | null | undefined): boolean {
+  return role === ADMIN || role === SALES || role === ACCOUNTS || role === TECHNICIANS
+}
+
+export function canAccessSettings(role: AppRole | null | undefined): boolean {
+  return role === ADMIN || role === SALES || role === ACCOUNTS || role === TECHNICIANS
 }
 
 export function isValidRole(value: string): value is AppRole {

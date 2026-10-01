@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { EmptyState } from "@/components/fs/empty-state"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
@@ -35,6 +36,7 @@ import { useAuth } from "@/lib/auth-context"
 import { toast } from "sonner"
 import { Loader2 } from "lucide-react"
 import { PageHeader } from "@/components/page-nav"
+import { canManageRemediation } from "@/lib/permissions"
 
 function normalizeVendor(v: string | undefined): string {
   return (v ?? "").trim() || "General"
@@ -49,7 +51,8 @@ export function RemediationContent() {
     }
   }, [])
   const { inventory, refetchLedger } = useInventoryStore()
-  const { user } = useAuth()
+  const { user, role } = useAuth()
+  const canManage = canManageRemediation(role)
 
   const [providers, setProviders] = useState<RemediationProviderRow[]>([])
   const [cases, setCases] = useState<RemediationCaseRow[]>([])
@@ -115,7 +118,7 @@ export function RemediationContent() {
 
   async function handleCreateCase(e: React.FormEvent) {
     e.preventDefault()
-    if (!supabase) return
+    if (!supabase || !canManage) return
     const serial = faultySerial.trim()
     if (!serial) {
       toast.error("Enter faulty kit serial")
@@ -156,7 +159,7 @@ export function RemediationContent() {
   }
 
   async function patchCase(id: string, field: string, value: string) {
-    if (!supabase) return
+    if (!supabase || !canManage) return
     setSaving(true)
     try {
       const patch: Record<string, string | null> = {}
@@ -191,7 +194,7 @@ export function RemediationContent() {
         description="Provider RMA chain (Starlink first). Create a case for a faulty unit on RMA Hold, then issue a loaner from Inventory movement → Rem. loaner using the case ID."
       />
 
-      <Card>
+      {canManage ? <Card>
         <CardHeader>
           <CardTitle className="text-base">New case</CardTitle>
         </CardHeader>
@@ -238,7 +241,7 @@ export function RemediationContent() {
             </Button>
           </form>
         </CardContent>
-      </Card>
+      </Card> : null}
 
       <Card>
         <CardHeader>
@@ -248,7 +251,7 @@ export function RemediationContent() {
           {loading ? (
             <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
           ) : cases.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No remediation cases yet.</p>
+            <EmptyState message="No remediation cases yet." />
           ) : (
             <Table>
               <TableHeader>
@@ -274,62 +277,83 @@ export function RemediationContent() {
                     <TableCell className="font-mono text-xs">{c.loaner_serial ?? "—"}</TableCell>
                     <TableCell className="font-mono text-xs">{c.provider_replacement_serial ?? "—"}</TableCell>
                     <TableCell>
-                      <Select
-                        value={c.status}
-                        onValueChange={(v) => void patchCase(c.id, "status", v)}
-                        disabled={saving}
-                      >
-                        <SelectTrigger className="h-8 w-[140px]">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="pending">pending</SelectItem>
-                          <SelectItem value="sent">sent</SelectItem>
-                          <SelectItem value="replacement_received">replacement_received</SelectItem>
-                          <SelectItem value="closed">closed</SelectItem>
-                        </SelectContent>
-                      </Select>
+                      {canManage ? (
+                        <Select
+                          value={c.status}
+                          onValueChange={(v) => void patchCase(c.id, "status", v)}
+                          disabled={saving}
+                        >
+                          <SelectTrigger className="h-8 w-[140px]">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="pending">pending</SelectItem>
+                            <SelectItem value="sent">sent</SelectItem>
+                            <SelectItem value="replacement_received">replacement_received</SelectItem>
+                            <SelectItem value="closed">closed</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        c.status
+                      )}
                     </TableCell>
                     <TableCell>
-                      <Input
-                        className="h-8 font-mono text-xs min-w-[100px]"
-                        defaultValue={c.tracking_reference ?? ""}
-                        onBlur={(e) => {
-                          if (e.target.value !== (c.tracking_reference ?? ""))
-                            void patchCase(c.id, "tracking_reference", e.target.value)
-                        }}
-                      />
+                      {canManage ? (
+                        <Input
+                          className="h-8 font-mono text-xs min-w-[100px]"
+                          defaultValue={c.tracking_reference ?? ""}
+                          onBlur={(e) => {
+                            if (e.target.value !== (c.tracking_reference ?? ""))
+                              void patchCase(c.id, "tracking_reference", e.target.value)
+                          }}
+                        />
+                      ) : (
+                        c.tracking_reference ?? "—"
+                      )}
                     </TableCell>
                     <TableCell>
-                      <Input
-                        type="date"
-                        className="h-8 w-[130px]"
-                        defaultValue={c.date_sent_to_provider ?? ""}
-                        onBlur={(e) => {
-                          if (e.target.value !== (c.date_sent_to_provider ?? ""))
-                            void patchCase(c.id, "date_sent_to_provider", e.target.value)
-                        }}
-                      />
+                      {canManage ? (
+                        <Input
+                          type="date"
+                          className="h-8 w-[130px]"
+                          defaultValue={c.date_sent_to_provider ?? ""}
+                          onBlur={(e) => {
+                            if (e.target.value !== (c.date_sent_to_provider ?? ""))
+                              void patchCase(c.id, "date_sent_to_provider", e.target.value)
+                          }}
+                        />
+                      ) : (
+                        c.date_sent_to_provider ?? "—"
+                      )}
                     </TableCell>
                     <TableCell>
-                      <Input
-                        type="date"
-                        className="h-8 w-[130px]"
-                        defaultValue={c.date_replacement_received ?? ""}
-                        onBlur={(e) => {
-                          if (e.target.value !== (c.date_replacement_received ?? ""))
-                            void patchCase(c.id, "date_replacement_received", e.target.value)
-                        }}
-                      />
+                      {canManage ? (
+                        <Input
+                          type="date"
+                          className="h-8 w-[130px]"
+                          defaultValue={c.date_replacement_received ?? ""}
+                          onBlur={(e) => {
+                            if (e.target.value !== (c.date_replacement_received ?? ""))
+                              void patchCase(c.id, "date_replacement_received", e.target.value)
+                          }}
+                        />
+                      ) : (
+                        c.date_replacement_received ?? "—"
+                      )}
                     </TableCell>
                     <TableCell className="max-w-[200px]">
-                      <Input
-                        className="h-8 text-xs"
-                        defaultValue={c.notes ?? ""}
-                        onBlur={(e) => {
-                          if (e.target.value !== (c.notes ?? "")) void patchCase(c.id, "notes", e.target.value)
-                        }}
-                      />
+                      {canManage ? (
+                        <Input
+                          className="h-8 text-xs"
+                          defaultValue={c.notes ?? ""}
+                          onBlur={(e) => {
+                            if (e.target.value !== (c.notes ?? ""))
+                              void patchCase(c.id, "notes", e.target.value)
+                          }}
+                        />
+                      ) : (
+                        c.notes ?? "—"
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}

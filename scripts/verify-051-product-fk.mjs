@@ -4,6 +4,8 @@
  *
  * Creates verify-051-* fixtures, runs backfill / FK / requires_serial
  * / assign / concurrency / grant checks, then cleans up in finally.
+ * Also deletes the cancelled audit leftover (a95a25eb / __audit_verify_product__)
+ * if it is present, and fails when any of that residue remains.
  *
  * Requires in .env.local:
  *   NEXT_PUBLIC_SUPABASE_URL
@@ -34,7 +36,15 @@ const EMAIL = {
   tech: "verify-051-tech@example.com",
 }
 
-/** Discovery mappings (6 live lines, including the cancelled audit leftover). */
+/**
+ * Discovery mappings for the real lines that were live when 051 was written.
+ * The cancelled audit leftover (request a95a25eb, product __audit_verify_product__)
+ * is not in this list. cleanupAuditLeftover() deletes it if it reappears.
+ */
+const AUDIT_REQUEST_ID = "a95a25eb-2edb-4baa-a1f6-1449a2bf316a"
+const AUDIT_PRODUCT_ID = "pl-audit-verify"
+const AUDIT_PRODUCT_NAME = "__audit_verify_product__"
+
 const EXPECTED_LIVE_LINES = [
   {
     requestPrefix: "e684584c",
@@ -60,11 +70,6 @@ const EXPECTED_LIVE_LINES = [
     requestPrefix: "06c8bbf9",
     product_name: "Starlink Standard Kit v4",
     product_id: "PL-0f5e21b74e33b8c442fee9330c8b07c6",
-  },
-  {
-    requestPrefix: "a95a25eb",
-    product_name: "__audit_verify_product__",
-    product_id: "pl-audit-verify",
   },
 ]
 
@@ -309,6 +314,71 @@ async function main() {
     }
   }
 
+  /**
+   * Removes the cancelled audit request and catalog row (migration 054's fixture).
+   * Inventory that still points at the product is left in place so a real item is
+   * not deleted; the residue check then fails instead of hiding the reference.
+   */
+  async function cleanupAuditLeftover() {
+    await admin.query(
+      `UPDATE public.inventory_items
+       SET reserved_for_request_line_id = NULL
+       WHERE reserved_for_request_line_id IN (
+         SELECT id FROM public.stock_request_lines WHERE request_id = $1::uuid
+       )`,
+      [AUDIT_REQUEST_ID]
+    )
+    await admin.query(`DELETE FROM public.notifications WHERE metadata->>'request_id' = $1`, [
+      AUDIT_REQUEST_ID,
+    ])
+    await admin.query(`DELETE FROM public.transactions WHERE item_name = $1`, [AUDIT_PRODUCT_NAME])
+    await admin.query(`DELETE FROM public.stock_requests WHERE id = $1::uuid`, [AUDIT_REQUEST_ID])
+    await admin.query(
+      `DELETE FROM public.product_lines AS product
+       WHERE (product.id = $1 OR product.product_name = $2)
+         AND NOT EXISTS (
+           SELECT 1 FROM public.inventory_items AS item WHERE item.product_id = product.id
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM public.stock_request_lines AS line WHERE line.product_id = product.id
+         )`,
+      [AUDIT_PRODUCT_ID, AUDIT_PRODUCT_NAME]
+    )
+  }
+
+  async function cleanupOwnedFixtures() {
+    await admin.query(
+      `UPDATE public.inventory_items
+       SET reserved_for_request_line_id = NULL
+       WHERE id LIKE 'inv-v051-%'
+          OR id = ANY($1::text[])`,
+      [cleanup.inventory]
+    )
+    await admin.query(
+      `DELETE FROM public.inventory_items
+       WHERE id LIKE 'inv-v051-%'
+          OR id = ANY($1::text[])`,
+      [cleanup.inventory]
+    )
+
+    const { rows: reqRows } = await admin.query(
+      `SELECT id::text AS id FROM public.stock_requests WHERE notes LIKE 'verify-051%'`
+    )
+    const requestIds = [...new Set([...cleanup.requests, ...reqRows.map((r) => r.id)])]
+    for (const id of requestIds) {
+      await admin.query(`DELETE FROM public.notifications WHERE metadata->>'request_id' = $1`, [id])
+      await admin.query(`DELETE FROM public.stock_requests WHERE id = $1`, [id])
+    }
+
+    await admin.query(
+      `DELETE FROM public.product_lines
+       WHERE id LIKE 'pl-v051-%'
+          OR id = ANY($1::text[])
+          OR product_name LIKE '\\_\\_verify\\_051\\_anon\\_%' ESCAPE '\\'`,
+      [cleanup.productLines]
+    )
+  }
+
   async function createFixtureUser(email, role) {
     const { data, error } = await supabaseAdmin.auth.admin.createUser({
       email,
@@ -505,27 +575,8 @@ async function main() {
     console.log("051/052 schema present")
 
     await deleteFixtureUsersByEmail()
-
-    // Leftover fixtures from a crashed previous run (same FK order as finally).
-    await admin
-      .query(
-        `UPDATE public.inventory_items SET reserved_for_request_line_id = NULL WHERE id LIKE 'inv-v051-%'`
-      )
-      .catch(() => {})
-    await admin.query(`DELETE FROM public.inventory_items WHERE id LIKE 'inv-v051-%'`).catch(() => {})
-    {
-      const { rows: leftoverReqs } = await admin.query(
-        `SELECT id::text AS id FROM public.stock_requests WHERE notes LIKE 'verify-051%'`
-      )
-      for (const r of leftoverReqs) {
-        await admin.query(`DELETE FROM public.stock_request_events WHERE request_id = $1`, [r.id]).catch(() => {})
-        await admin
-          .query(`DELETE FROM public.notifications WHERE metadata->>'request_id' = $1`, [r.id])
-          .catch(() => {})
-        await admin.query(`DELETE FROM public.stock_requests WHERE id = $1`, [r.id]).catch(() => {})
-      }
-    }
-    await admin.query(`DELETE FROM public.product_lines WHERE id LIKE 'pl-v051-%'`).catch(() => {})
+    await cleanupOwnedFixtures()
+    await cleanupAuditLeftover()
 
     // ================================================================== 1
     console.log("\n=== 1. Live line backfill ===")
@@ -571,9 +622,29 @@ async function main() {
         }
       }
       if (missing.length === 0 && wrong.length === 0) {
-        pass("1_live_lines_expected_ids", `6 discovery rows matched exact product_id`)
+        pass(
+          "1_live_lines_expected_ids",
+          `${EXPECTED_LIVE_LINES.length} discovery rows matched exact product_id`
+        )
       } else {
         fail("1_live_lines_expected_ids", JSON.stringify({ missing, wrong }))
+      }
+
+      const { rows: leftover } = await admin.query(
+        `SELECT
+           (SELECT count(*)::int FROM public.stock_requests WHERE id = $1::uuid) AS requests,
+           (SELECT count(*)::int FROM public.stock_request_lines WHERE request_id = $1::uuid) AS lines,
+           (SELECT count(*)::int FROM public.stock_request_events WHERE request_id = $1::uuid) AS events,
+           (SELECT count(*)::int FROM public.product_lines
+             WHERE id = $2 OR product_name = $3) AS products,
+           (SELECT count(*)::int FROM public.transactions WHERE item_name = $3) AS transactions`,
+        [AUDIT_REQUEST_ID, AUDIT_PRODUCT_ID, AUDIT_PRODUCT_NAME]
+      )
+      const counts = leftover[0]
+      if (Object.values(counts).every((count) => Number(count) === 0)) {
+        pass("1_audit_leftover_absent", JSON.stringify(counts))
+      } else {
+        fail("1_audit_leftover_absent", JSON.stringify(counts))
       }
     }
 
@@ -1205,51 +1276,41 @@ async function main() {
   } finally {
     console.log("\n=== Cleanup ===")
     try {
-      // FK order: inventory_items → parent stock_requests (CASCADE lines) → product_lines.
-      // 051 ON DELETE RESTRICT from stock_request_lines to product_lines means a fixture
-      // catalog row cannot be deleted while a fixture line still references it.
-      await admin
-        .query(
-          `UPDATE public.inventory_items
-           SET reserved_for_request_line_id = NULL
-           WHERE id LIKE 'inv-v051-%'`
-        )
-        .catch(() => {})
-      for (const id of cleanup.inventory) {
-        await admin
-          .query(`UPDATE public.inventory_items SET reserved_for_request_line_id = NULL WHERE id = $1`, [id])
-          .catch(() => {})
-      }
-
-      await admin.query(`DELETE FROM public.inventory_items WHERE id LIKE 'inv-v051-%'`).catch(() => {})
-      for (const id of cleanup.inventory) {
-        await admin.query(`DELETE FROM public.inventory_items WHERE id = $1`, [id]).catch(() => {})
-      }
-
-      const { rows: reqRows } = await admin.query(
-        `SELECT id::text AS id FROM public.stock_requests WHERE notes LIKE 'verify-051%'`
-      )
-      const requestIds = [...new Set([...cleanup.requests, ...reqRows.map((r) => r.id)])]
-      for (const id of requestIds) {
-        await admin.query(`DELETE FROM public.stock_request_events WHERE request_id = $1`, [id]).catch(() => {})
-        await admin
-          .query(`DELETE FROM public.notifications WHERE metadata->>'request_id' = $1`, [id])
-          .catch(() => {})
-        await admin.query(`DELETE FROM public.stock_requests WHERE id = $1`, [id]).catch(() => {})
-      }
-
-      await admin.query(`DELETE FROM public.product_lines WHERE id LIKE 'pl-v051-%'`).catch(() => {})
-      for (const id of cleanup.productLines) {
-        await admin.query(`DELETE FROM public.product_lines WHERE id = $1`, [id]).catch(() => {})
-      }
+      // FK order: clear reservations, delete inventory, then requests (lines cascade),
+      // then product_lines. 051 ON DELETE RESTRICT blocks a catalog delete while a
+      // line still references it.
+      await cleanupOwnedFixtures()
+      await cleanupAuditLeftover()
 
       for (const id of [...new Set(fixtureUserIds)]) {
         const { error } = await supabaseAdmin.auth.admin.deleteUser(id)
         if (error) console.warn(`deleteUser(${id}): ${error.message}`)
       }
       await deleteFixtureUsersByEmail()
+
+      const { rows: residueRows } = await admin.query(
+        `SELECT
+           (SELECT count(*)::int FROM auth.users WHERE email LIKE 'verify-051-%') AS auth_users,
+           (SELECT count(*)::int FROM public.profiles WHERE email LIKE 'verify-051-%') AS profiles,
+           (SELECT count(*)::int FROM public.stock_requests WHERE notes LIKE 'verify-051%') AS requests,
+           (SELECT count(*)::int FROM public.inventory_items WHERE id LIKE 'inv-v051-%') AS inventory_items,
+           (SELECT count(*)::int FROM public.product_lines
+             WHERE id LIKE 'pl-v051-%'
+                OR product_name LIKE '\\_\\_verify\\_051\\_anon\\_%' ESCAPE '\\') AS product_lines,
+           (SELECT count(*)::int FROM public.stock_requests WHERE id = $1::uuid) AS audit_requests,
+           (SELECT count(*)::int FROM public.product_lines
+             WHERE id = $2 OR product_name = $3) AS audit_products,
+           (SELECT count(*)::int FROM public.transactions WHERE item_name = $3) AS audit_transactions`,
+        [AUDIT_REQUEST_ID, AUDIT_PRODUCT_ID, AUDIT_PRODUCT_NAME]
+      )
+      const residue = residueRows[0]
+      if (Object.values(residue).every((count) => Number(count) === 0)) {
+        pass("zero_residue", JSON.stringify(residue))
+      } else {
+        fail("zero_residue", JSON.stringify(residue))
+      }
     } catch (e) {
-      console.warn("Cleanup error:", e.message)
+      fail("zero_residue", e.message)
     }
     await admin.end().catch(() => {})
   }

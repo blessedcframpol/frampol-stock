@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo, useRef } from "react"
+import { useEffect, useState, useMemo, useRef } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -34,7 +34,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
+import { StatusPill } from "@/components/fs/status-pill"
 import { LOCATIONS, INTERNAL_LOCATIONS } from "@/lib/data"
+import { formatClientLabel } from "@/lib/client-label"
 import type { TransactionType, ClientSite, JsonValue } from "@/lib/data"
 import { useClients, insertClient } from "@/lib/supabase/clients-db"
 import { useInventoryStore } from "@/lib/inventory-store"
@@ -55,10 +57,13 @@ import {
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import { toastFromCaughtError } from "@/lib/toast-reportable-error"
-import { getSupabaseClient } from "@/lib/supabase/client"
+import { uploadDocument, type UploadDocumentKind } from "@/lib/upload-documents"
 import { parseSaleDateOverride, type InboundCreateDefaults } from "@/lib/supabase/movement-utils"
+import { DEFAULT_ORG_TIMEZONE, todayBusinessDate } from "@/lib/business-date.mjs"
+import { fetchAppSettings } from "@/lib/settings"
 import { isFortigateProductName, splitDelimitedValues, cloudKeysMapForSerials } from "@/lib/fortigate"
 import { useAuth } from "@/lib/auth-context"
+import { prefillMovementType } from "@/lib/alerts"
 import { canManageUsers, canRecordStockMovement } from "@/lib/permissions"
 import {
   OUTBOUND_LIKE_MOVEMENTS,
@@ -100,7 +105,16 @@ function initialEmbedMovementType(embedMode: StockMovementEmbedMode | undefined)
   return init && allowed.includes(init) ? init : "Transfer"
 }
 
-export function StockMovementContent({ embedMode }: { embedMode?: StockMovementEmbedMode }) {
+export function StockMovementContent({
+  embedMode,
+  prefillType,
+  prefillSerials,
+}: {
+  embedMode?: StockMovementEmbedMode
+  /** Query-param prefill from Alerts. Does not skip movement validation. */
+  prefillType?: string
+  prefillSerials?: string
+}) {
   const isEmbed = Boolean(embedMode)
   const { inventory, applyMovement, addItem } = useInventoryStore()
   const { clients, refetch: refetchClients } = useClients()
@@ -109,10 +123,14 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
   const canMove = canRecordStockMovement(role)
   // Dialog already keys this component on serials + product name, so embed
   // fields are read once here rather than copied again in an effect.
-  const [selectedType, setSelectedType] = useState(() => initialEmbedMovementType(embedMode))
-  const [serialNumbers, setSerialNumbers] = useState(() =>
-    embedMode ? embedMode.fixedSerials.join(", ") : ""
-  )
+  const [selectedType, setSelectedType] = useState(() => {
+    if (embedMode) return initialEmbedMovementType(embedMode)
+    return prefillMovementType(prefillType) ?? "Inbound"
+  })
+  const [serialNumbers, setSerialNumbers] = useState(() => {
+    if (embedMode) return embedMode.fixedSerials.join(", ")
+    return prefillSerials ?? ""
+  })
   const [productName, setProductName] = useState(() => embedMode?.fixedProductName ?? "")
   const [clientId, setClientId] = useState<string>("")
   const [invoiceNumber, setInvoiceNumber] = useState("")
@@ -154,13 +172,29 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
   const [mainClientSites, setMainClientSites] = useState<ClientSite[]>([{ address: "" }])
   const [mainClientOpen, setMainClientOpen] = useState(false)
   const [mainClientSearch, setMainClientSearch] = useState("")
-  /** TEMPORARY (admin): optional sale ledger date until stock-requests workflow */
-  const [adminSaleDate, setAdminSaleDate] = useState("")
+  /** Admin sale business date. Defaults to today in the organisation timezone. */
+  const [adminSaleDate, setAdminSaleDate] = useState(() => todayBusinessDate(DEFAULT_ORG_TIMEZONE))
   const [adminSaleDateError, setAdminSaleDateError] = useState<string | null>(null)
   const [decommissionReason, setDecommissionReason] = useState("")
   const [decommissionReceivedDate, setDecommissionReceivedDate] = useState("")
   const [decommissionDocFile, setDecommissionDocFile] = useState<File | null>(null)
   const [remediationCaseId, setRemediationCaseId] = useState("")
+
+  useEffect(() => {
+    let cancelled = false
+    void fetchAppSettings()
+      .then((settings) => {
+        if (cancelled) return
+        const today = todayBusinessDate(settings.timezone.trim() || DEFAULT_ORG_TIMEZONE)
+        setAdminSaleDate((current) =>
+          current === todayBusinessDate(DEFAULT_ORG_TIMEZONE) ? today : current
+        )
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const serialsList = useMemo(
     () =>
@@ -178,7 +212,7 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
       ? clientId === NEW_CLIENT_SELECT
         ? "New client (unsaved)"
         : "Not selected"
-      : clients.find((c) => c.id === clientId)?.company ?? clientId
+      : formatClientLabel(clients.find((c) => c.id === clientId) ?? { name: clientId }) || clientId
 
   const filteredProductOptions = useMemo(() => {
     const want = normalizeInventoryVendor(scanVendor)
@@ -557,17 +591,11 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
     await doSubmit(outboundDetails)
   }
 
-  async function uploadDeliveryNote(file: File): Promise<string> {
-    const supabase = getSupabaseClient()
-    const ext = file.name.split(".").pop() || "pdf"
-    const path = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}.${ext}`
-    const { error } = await supabase.storage.from("uploads").upload(path, file, {
-      contentType: file.type || "application/pdf",
-      upsert: false,
-    })
-    if (error) throw error
-    const { data } = supabase.storage.from("uploads").getPublicUrl(path)
-    return data.publicUrl
+  async function uploadMovementDocument(
+    file: File,
+    kind: Extract<UploadDocumentKind, "delivery-note" | "decommission-document">
+  ): Promise<string> {
+    return uploadDocument(kind, "transactions", file)
   }
 
   async function handleSubmit() {
@@ -706,7 +734,7 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
       if (selectedType === "Inbound" && deliveryNoteFile) {
         setIsSubmitting(true)
         try {
-          const url = await uploadDeliveryNote(deliveryNoteFile)
+          const url = await uploadMovementDocument(deliveryNoteFile, "delivery-note")
           await doSubmit(undefined, url)
         } catch (e) {
           toastFromCaughtError(
@@ -718,7 +746,10 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
       } else if (selectedType === "Decommissioned" && decommissionDocFile) {
         setIsSubmitting(true)
         try {
-          const url = await uploadDeliveryNote(decommissionDocFile)
+          const url = await uploadMovementDocument(
+            decommissionDocFile,
+            "decommission-document"
+          )
           await doSubmit(undefined, undefined, url)
         } catch (e) {
           toastFromCaughtError(e, "Failed to upload attachment.")
@@ -829,8 +860,8 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
                       className={cn(
                         "flex flex-col items-center gap-1 p-2 sm:p-2.5 rounded-lg border-2 transition-all text-center",
                         isActive
-                          ? "border-primary bg-primary/5"
-                          : "border-border hover:border-primary/30 bg-card"
+                          ? "border-brand bg-brand/5"
+                          : "border-border hover:border-brand/40 bg-card"
                       )}
                     >
                       <div className={cn("flex items-center justify-center w-7 sm:w-8 h-7 sm:h-8 rounded-md", type.bg)}>
@@ -853,7 +884,7 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
           </Card>
 
           {/* Scan Input */}
-          <Card className="border-dashed border-primary/30 bg-primary/[0.02]">
+          <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base font-semibold text-foreground flex items-center gap-2">
                 <ScanBarcode className="w-4 h-4 text-primary" />
@@ -922,13 +953,13 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
                   </div>
                 )}
                 {lastDuplicateMessage && lastDuplicateMessage.length > 0 && (
-                  <p className="text-xs text-amber-600 dark:text-amber-400 bg-amber-500/10 rounded-md px-2 py-1.5">
+                  <p className="text-xs text-warning bg-warning-soft rounded-md px-2 py-1.5">
                     Not found (not recorded): {lastDuplicateMessage.slice(0, 5).join(", ")}
                     {lastDuplicateMessage.length > 5 && ` +${lastDuplicateMessage.length - 5} more`}
                   </p>
                 )}
                 {duplicateSerials && duplicateSerials.length > 0 && (
-                  <div className="flex flex-col gap-1.5 text-xs text-amber-700 dark:text-amber-300 bg-amber-500/10 rounded-md px-2 py-2">
+                  <div className="flex flex-col gap-1.5 text-xs text-warning bg-warning-soft rounded-md px-2 py-2">
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-medium">
                         {duplicateSerials.length} serial{duplicateSerials.length !== 1 ? "s" : ""} already in stock — not recorded (duplicates)
@@ -1151,9 +1182,7 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
                             {clientId === NEW_CLIENT_SELECT
                               ? "Add new client…"
                               : clientId
-                                ? sortedClients.find((c) => c.id === clientId)?.name +
-                                  " – " +
-                                  sortedClients.find((c) => c.id === clientId)?.company
+                                ? formatClientLabel(sortedClients.find((c) => c.id === clientId) ?? {})
                                 : "Select existing client or add new…"}
                           </span>
                           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
@@ -1195,7 +1224,7 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
                                       setMainClientSites([{ address: "" }])
                                     }}
                                   >
-                                    {c.name} – {c.company}
+                                    {formatClientLabel(c)}
                                   </CommandItem>
                                 ))}
                             </CommandGroup>
@@ -1336,7 +1365,8 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
               )}
               {selectedType === "Sale" && isAdmin && (
                 <div className="flex flex-col gap-2">
-                  <Label className="text-foreground">Sale date (optional)</Label>
+                  <Label className="text-foreground">Sale date</Label>
+                  <p className="text-xs text-muted-foreground">Today in the organisation timezone. Stored as that calendar day.</p>
                   <Input
                     type="date"
                     min="2020-01-01"
@@ -1484,26 +1514,7 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
               </div>
               <div className="flex items-center justify-between py-2 border-b border-border">
                 <span className="text-sm text-muted-foreground">Type</span>
-                <Badge
-                  variant="secondary"
-                  className={cn(
-                    "text-xs border-0",
-                    selectedType === "Inbound" && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-                    selectedType === "Sale" && "bg-red-500/10 text-red-500 dark:text-red-400",
-                    selectedType === "Rentals" && "bg-blue-500/10 text-blue-500 dark:text-blue-400",
-                    selectedType === "POC Out" && "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400",
-                    selectedType === "POC Return" && "bg-amber-500/10 text-amber-600 dark:text-amber-400",
-                    selectedType === "Rental Return" && "bg-blue-500/10 text-blue-600 dark:text-blue-400",
-                    selectedType === "Sale Return" && "bg-orange-500/10 text-orange-600 dark:text-orange-400",
-                    selectedType === "Transfer" && "bg-violet-500/10 text-violet-600 dark:text-violet-400",
-                    selectedType === "Dispose" && "bg-slate-500/10 text-slate-600 dark:text-slate-400",
-                    selectedType === "Decommissioned" && "bg-teal-500/10 text-teal-700 dark:text-teal-400",
-                    selectedType === "Remediation Loaner Issue" &&
-                      "bg-rose-500/10 text-rose-700 dark:text-rose-400",
-                  )}
-                >
-                  {selectedType}
-                </Badge>
+                {selectedType ? <StatusPill value={selectedType} /> : <span className="text-sm text-muted-foreground">—</span>}
               </div>
               <div className="flex items-center justify-between py-2 border-b border-border">
                 <span className="text-sm text-muted-foreground">Items Scanned</span>
@@ -1637,9 +1648,7 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
                         {outboundClientId === "new"
                           ? "New client (enter details below)"
                           : outboundClientId
-                            ? sortedClients.find((c) => c.id === outboundClientId)?.name +
-                              " – " +
-                              sortedClients.find((c) => c.id === outboundClientId)?.company
+                            ? formatClientLabel(sortedClients.find((c) => c.id === outboundClientId) ?? {})
                             : "Select or add client..."}
                       </span>
                       <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
@@ -1674,7 +1683,7 @@ export function StockMovementContent({ embedMode }: { embedMode?: StockMovementE
                                   setOutboundClientOpen(false)
                                 }}
                               >
-                                {c.name} – {c.company}
+                                {formatClientLabel(c)}
                               </CommandItem>
                             ))}
                         </CommandGroup>

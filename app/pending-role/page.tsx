@@ -106,9 +106,7 @@ function PendingRoleContent() {
             </>
           ) : (
             <>
-              Your sign-in worked, but an administrator still needs to assign a role to your account before you can use
-              the app. Ask your Fram-Stock admin to open{" "}
-              <strong className="font-medium text-foreground">User management</strong> and set your role.
+              Your account is waiting for an administrator to assign access.
             </>
           )}
         </p>

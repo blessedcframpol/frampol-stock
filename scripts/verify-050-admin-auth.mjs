@@ -4,8 +4,8 @@
  * 050 was an application-layer change (lib/require-admin.ts), not a schema
  * migration. This script does not apply SQL.
  *
- * Creates verify-050-* fixture users, hits GET/POST /api/admin/profiles,
- * PATCH /api/admin/profiles/[id], GET /api/app-logs, and GET
+ * Creates verify-050-* fixture users, verifies POST /api/admin/profiles is removed,
+ * and checks GET /api/admin/profiles, PATCH /api/admin/profiles/[id], GET /api/app-logs, and GET
  * /api/admin/transactions/export with each fixture's session, then deletes
  * fixtures (even on failure). Prefix-sweeps leftover verify-050-* emails.
  *
@@ -27,7 +27,6 @@ import fs from "fs"
 import path from "path"
 import { createClient } from "@supabase/supabase-js"
 
-const FIXTURE_PASSWORD = "Verify050!AdminAuth-Temp"
 const EMAIL_PREFIX = "verify-050-"
 const EMAIL = {
   admin: "verify-050-admin@example.com",
@@ -38,8 +37,6 @@ const EMAIL = {
   norole: "verify-050-norole@example.com",
 }
 
-const PASSWORD_11 = "Vfy050#a9Kq" // 11
-const PASSWORD_12 = "Vfy050#a9Kqx" // 12
 const MAX_COOKIE_CHUNK = 3180
 const APP_PROBE_MS = 4000
 const REQUEST_MS = 20000
@@ -61,10 +58,6 @@ function loadEnvLocal() {
 
 function assert(cond, msg) {
   if (!cond) throw new Error(msg)
-}
-
-function stamp() {
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
 
 function isAuthReject(status) {
@@ -176,7 +169,6 @@ async function main() {
   async function createFixtureUser(email, { role, active }) {
     const { data, error } = await supabaseAdmin.auth.admin.createUser({
       email,
-      password: FIXTURE_PASSWORD,
       email_confirm: true,
     })
     if (error) throw new Error(`createUser(${email}): ${error.message}`)
@@ -203,12 +195,17 @@ async function main() {
   }
 
   async function signIn(email) {
-    const { data, error } = await supabaseAnon.auth.signInWithPassword({
+    const { data: link, error: linkError } = await supabaseAdmin.auth.admin.generateLink({
+      type: "magiclink",
       email,
-      password: FIXTURE_PASSWORD,
+    })
+    if (linkError) throw new Error(`generateLink(${email}): ${linkError.message}`)
+    const { data, error } = await supabaseAnon.auth.verifyOtp({
+      token_hash: link.properties.hashed_token,
+      type: "magiclink",
     })
     if (error || !data.session) {
-      throw new Error(`signIn(${email}): ${error?.message || "no session"}`)
+      throw new Error(`verifyOtp(${email}): ${error?.message || "no session"}`)
     }
     return data.session
   }
@@ -317,28 +314,6 @@ async function main() {
       fail("deactivated_admin_PATCH", e.message)
     }
 
-    try {
-      const res = await api("/api/admin/profiles", {
-        method: "POST",
-        session: sessions.deactivated,
-        body: {
-          email: `${EMAIL_PREFIX}should-not-create-${stamp()}@example.com`,
-          password: PASSWORD_12,
-        },
-      })
-      if (res.status === 200 || res.status === 201) {
-        const createdId = res.json?.id
-        if (createdId) fixtureUserIds.push(createdId)
-        fail("deactivated_admin_POST", `BUG: deactivated admin POST returned ${res.status}`)
-      } else if (isAuthReject(res.status) && hasErrorShape(res.json)) {
-        pass("deactivated_admin_POST", `POST → ${res.status} (${res.json.error})`)
-      } else {
-        fail("deactivated_admin_POST", `expected 401/403, got ${res.status} ${res.text.slice(0, 200)}`)
-      }
-    } catch (e) {
-      fail("deactivated_admin_POST", e.message)
-    }
-
     const nonAdmin = [
       ["sales", sessions.sales],
       ["accounts", sessions.accounts],
@@ -352,38 +327,21 @@ async function main() {
           session,
           body: { display_name: "should-not-apply" },
         })
-        const postRes = await api("/api/admin/profiles", {
-          method: "POST",
-          session,
-          body: {
-            email: `${EMAIL_PREFIX}should-not-create-${role}-${stamp()}@example.com`,
-            password: PASSWORD_12,
-          },
-        })
-        if (postRes.status === 200 || postRes.status === 201) {
-          const createdId = postRes.json?.id
-          if (createdId) fixtureUserIds.push(createdId)
-        }
         const ok =
           isAuthReject(getRes.status) &&
           hasErrorShape(getRes.json) &&
           isAuthReject(patchRes.status) &&
-          hasErrorShape(patchRes.json) &&
-          isAuthReject(postRes.status) &&
-          hasErrorShape(postRes.json)
+          hasErrorShape(patchRes.json)
         if (ok) {
-          pass(
-            `${role}_all_handlers`,
-            `GET ${getRes.status}, PATCH ${patchRes.status}, POST ${postRes.status}`
-          )
+          pass(`${role}_admin_handlers`, `GET ${getRes.status}, PATCH ${patchRes.status}`)
         } else {
           fail(
-            `${role}_all_handlers`,
-            `GET ${getRes.status}, PATCH ${patchRes.status}, POST ${postRes.status}`
+            `${role}_admin_handlers`,
+            `GET ${getRes.status}, PATCH ${patchRes.status}`
           )
         }
       } catch (e) {
-        fail(`${role}_all_handlers`, e.message)
+        fail(`${role}_admin_handlers`, e.message)
       }
     }
 
@@ -394,32 +352,18 @@ async function main() {
         session: sessions.norole,
         body: { display_name: "should-not-apply" },
       })
-      const postRes = await api("/api/admin/profiles", {
-        method: "POST",
-        session: sessions.norole,
-        body: {
-          email: `${EMAIL_PREFIX}should-not-create-norole-${stamp()}@example.com`,
-          password: PASSWORD_12,
-        },
-      })
-      if (postRes.status === 200 || postRes.status === 201) {
-        const createdId = postRes.json?.id
-        if (createdId) fixtureUserIds.push(createdId)
-      }
       const ok =
         isAuthReject(getRes.status) &&
         hasErrorShape(getRes.json) &&
         isAuthReject(patchRes.status) &&
-        hasErrorShape(patchRes.json) &&
-        isAuthReject(postRes.status) &&
-        hasErrorShape(postRes.json)
+        hasErrorShape(patchRes.json)
       if (ok) {
-        pass("norole_all_handlers", `GET ${getRes.status}, PATCH ${patchRes.status}, POST ${postRes.status}`)
+        pass("norole_admin_handlers", `GET ${getRes.status}, PATCH ${patchRes.status}`)
       } else {
-        fail("norole_all_handlers", `GET ${getRes.status}, PATCH ${patchRes.status}, POST ${postRes.status}`)
+        fail("norole_admin_handlers", `GET ${getRes.status}, PATCH ${patchRes.status}`)
       }
     } catch (e) {
-      fail("norole_all_handlers", e.message)
+      fail("norole_admin_handlers", e.message)
     }
 
     try {
@@ -428,111 +372,80 @@ async function main() {
         method: "PATCH",
         body: { display_name: "should-not-apply" },
       })
-      const postRes = await api("/api/admin/profiles", {
-        method: "POST",
-        body: {
-          email: `${EMAIL_PREFIX}should-not-create-anon-${stamp()}@example.com`,
-          password: PASSWORD_12,
-        },
-      })
-      if (postRes.status === 200 || postRes.status === 201) {
-        const createdId = postRes.json?.id
-        if (createdId) fixtureUserIds.push(createdId)
-      }
       const ok =
         getRes.status === 401 &&
         hasErrorShape(getRes.json) &&
         patchRes.status === 401 &&
-        hasErrorShape(patchRes.json) &&
-        postRes.status === 401 &&
-        hasErrorShape(postRes.json)
+        hasErrorShape(patchRes.json)
       if (ok) {
-        pass("no_session_all_handlers", "GET/PATCH/POST all 401")
+        pass("no_session_admin_handlers", "GET/PATCH both 401")
       } else {
         fail(
-          "no_session_all_handlers",
-          `GET ${getRes.status}, PATCH ${patchRes.status}, POST ${postRes.status}`
+          "no_session_admin_handlers",
+          `GET ${getRes.status}, PATCH ${patchRes.status}`
         )
       }
     } catch (e) {
-      fail("no_session_all_handlers", e.message)
+      fail("no_session_admin_handlers", e.message)
     }
 
     try {
-      const tooShort = await api("/api/admin/profiles", {
-        method: "POST",
+      const res = await api(`/api/admin/profiles/${technicians.id}`, {
+        method: "PATCH",
         session: sessions.admin,
         body: {
-          email: `${EMAIL_PREFIX}too-short-${stamp()}@example.com`,
-          password: PASSWORD_11,
+          display_name: "Verify 050 Technician",
           role: "technicians",
+          active: true,
         },
       })
-      if (tooShort.status === 200 || tooShort.status === 201) {
-        const createdId = tooShort.json?.id
-        if (createdId) fixtureUserIds.push(createdId)
-        fail("password_11_rejected", `POST with 11-char password returned ${tooShort.status}`)
-      } else if (tooShort.status === 400 && hasErrorShape(tooShort.json)) {
-        pass("password_11_rejected", `POST 11-char → 400 (${tooShort.json.error})`)
+      if (
+        res.status === 200 &&
+        res.json?.display_name === "Verify 050 Technician" &&
+        res.json?.role === "technicians" &&
+        res.json?.active === true
+      ) {
+        pass("active_admin_PATCH", "PATCH role/active/display_name → 200")
       } else {
         fail(
-          "password_11_rejected",
-          `expected 400, got ${tooShort.status} ${tooShort.text.slice(0, 200)}`
+          "active_admin_PATCH",
+          `expected updated profile, got ${res.status} ${res.text.slice(0, 300)}`
         )
       }
     } catch (e) {
-      fail("password_11_rejected", e.message)
+      fail("active_admin_PATCH", e.message)
     }
 
     try {
-      const createdEmail = `${EMAIL_PREFIX}created-${stamp()}@example.com`
-      const okLen = await api("/api/admin/profiles", {
+      const res = await api("/api/admin/profiles", {
         method: "POST",
         session: sessions.admin,
-        body: {
-          email: createdEmail,
-          password: PASSWORD_12,
-          role: "technicians",
-        },
+        body: {},
       })
-      const createdId = okLen.json?.id
-      if (createdId) fixtureUserIds.push(createdId)
-      if (okLen.status === 201 && createdId) {
-        pass("password_12_accepted", `POST 12-char → 201 id=${createdId}`)
+      if (res.status === 404 || res.status === 405) {
+        pass("admin_profiles_POST_removed", `POST → ${res.status}`)
       } else {
         fail(
-          "password_12_accepted",
-          `expected 201 with id, got ${okLen.status} ${okLen.text.slice(0, 300)}`
+          "admin_profiles_POST_removed",
+          `expected 404/405, got ${res.status} ${res.text.slice(0, 200)}`
         )
       }
     } catch (e) {
-      fail("password_12_accepted", e.message)
+      fail("admin_profiles_POST_removed", e.message)
     }
 
     try {
-      const ws = await api("/api/admin/profiles", {
-        method: "POST",
-        session: sessions.admin,
-        body: {
-          email: `${EMAIL_PREFIX}whitespace-${stamp()}@example.com`,
-          password: "            ",
-          role: "technicians",
-        },
-      })
-      if (ws.status === 200 || ws.status === 201) {
-        const createdId = ws.json?.id
-        if (createdId) fixtureUserIds.push(createdId)
-        fail("password_whitespace_rejected", `POST whitespace-only password returned ${ws.status}`)
-      } else if (ws.status === 400 && hasErrorShape(ws.json)) {
-        pass("password_whitespace_rejected", `POST whitespace → 400 (${ws.json.error})`)
+      const removedRoutes = {}
+      for (const pathname of ["/signup", "/forgot-password", "/reset-password"]) {
+        removedRoutes[pathname] = (await api(pathname, { session: sessions.admin })).status
+      }
+      if (Object.values(removedRoutes).every((status) => status === 404)) {
+        pass("password_pages_removed", JSON.stringify(removedRoutes))
       } else {
-        fail(
-          "password_whitespace_rejected",
-          `expected 400, got ${ws.status} ${ws.text.slice(0, 200)}`
-        )
+        fail("password_pages_removed", JSON.stringify(removedRoutes))
       }
     } catch (e) {
-      fail("password_whitespace_rejected", e.message)
+      fail("password_pages_removed", e.message)
     }
 
     const EXPORT_FORBIDDEN = "Only admins can export all transactions"

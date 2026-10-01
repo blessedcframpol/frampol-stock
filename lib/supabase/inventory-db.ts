@@ -85,6 +85,7 @@ export function rowToTransaction(row: TransactionRow): Transaction {
     delivery_note_url?: string | null
     metadata?: unknown
     created_by?: string | null
+    created_at?: string | null
   }
   return {
     id: row.id,
@@ -93,6 +94,7 @@ export function rowToTransaction(row: TransactionRow): Transaction {
     itemName: row.item_name,
     client: row.client,
     date: row.date,
+    createdAt: r.created_at ?? undefined,
     clientId: row.client_id ?? undefined,
     invoiceNumber: row.invoice_number ?? undefined,
     notes: row.notes ?? undefined,

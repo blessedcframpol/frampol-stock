@@ -1,4 +1,6 @@
 import type { InventoryItem, ItemStatus, JsonValue, Transaction, TransactionType } from "@/lib/data"
+import { businessDateToIso, DEFAULT_ORG_TIMEZONE, todayBusinessDate } from "@/lib/business-date.mjs"
+import { movementResult } from "@/lib/movement-transitions.mjs"
 
 /**
  * Given current inventory and movement params, compute the updated items and new transactions.
@@ -112,60 +114,46 @@ export function validateMovementForItem(
   if (productReason) return productReason
 
   const st = item.status as ItemStatus
+  const next = movementResult(st, type)
+
+  if (type === "Transfer" && next) {
+    if (ctx.fromLocation?.trim() && item.location !== ctx.fromLocation.trim()) {
+      return `Item is at ${item.location}, not ${ctx.fromLocation.trim()}`
+    }
+    return null
+  }
+  if (next) return null
 
   switch (type) {
     case "Sale":
     case "POC Out":
     case "Rentals":
-      if (st !== "In Stock") return `Not available for ${type} (status is ${st}, need In Stock)`
-      return null
+      return `Not available for ${type} (status is ${st}, need In Stock)`
     case "Dispose":
-      if (st !== "In Stock" && st !== "Maintenance" && st !== "RMA Hold" && st !== "Pending Inspection") {
-        return `Cannot dispose (status is ${st})`
-      }
-      return null
+      return `Cannot dispose (status is ${st})`
     case "Transfer":
-      if (st !== "In Stock" && st !== "Maintenance" && st !== "RMA Hold" && st !== "Pending Inspection") {
-        return `Cannot transfer (status is ${st})`
-      }
-      if (ctx.fromLocation?.trim() && item.location !== ctx.fromLocation.trim()) {
-        return `Item is at ${item.location}, not ${ctx.fromLocation.trim()}`
-      }
-      return null
+      return `Cannot transfer (status is ${st})`
     case "Inbound":
       if (st === "In Stock") return "Already in stock — cannot receive again"
       if (st === "Sold" || st === "POC" || st === "Rented" || st === "Disposed") {
         return `Use POC Return, Rental Return, Sale Return, or undo — not Inbound (status is ${st})`
       }
-      if (st === "Maintenance" || st === "RMA Hold") return null
       return `Inbound not allowed (status is ${st})`
     case "POC Return":
-      if (st !== "POC") return `POC Return requires status POC (current: ${st})`
-      return null
+      return `POC Return requires status POC (current: ${st})`
     case "Rental Return":
-      if (st !== "Rented") return `Rental Return requires status Rented (current: ${st})`
-      return null
+      return `Rental Return requires status Rented (current: ${st})`
     case "Sale Return":
-      if (st !== "Sold") return `Sale Return requires status Sold (current: ${st})`
-      return null
+      return `Sale Return requires status Sold (current: ${st})`
     case "Decommissioned":
-      if (st !== "POC" && st !== "Rented" && st !== "Sold") {
-        return `Decommissioned requires status POC, Rented, or Sold (current: ${st})`
-      }
-      return null
+      return `Decommissioned requires status POC, Rented, or Sold (current: ${st})`
     case "Inspection Pass":
     case "Inspection Fail":
-      if (st !== "Pending Inspection") {
-        return `Inspection requires status Pending Inspection (current: ${st})`
-      }
-      return null
+      return `Inspection requires status Pending Inspection (current: ${st})`
     case "Remediation Loaner Issue":
-      if (st !== "In Stock") {
-        return `Remediation loaner issue requires status In Stock (current: ${st})`
-      }
-      return null
+      return `Remediation loaner issue requires status In Stock (current: ${st})`
     default:
-      return null
+      return `Invalid movement: ${type} from ${st}`
   }
 }
 
@@ -209,16 +197,19 @@ export function computeMovementResult(
     authorisedBy?: string
     /** When type is POC Out or Rentals: batch to associate these transactions with */
     batchId?: string
-    /** For Inbound: public URL of uploaded delivery note */
+    /** For Inbound: private uploads bucket object path for the delivery note. */
     deliveryNoteUrl?: string
     /** When Inbound: create new inventory rows for unknown serials */
     inboundCreateDefaults?: InboundCreateDefaults
     /** When moving FortiGate units out: serial → cloud key (not used on inbound) */
     cloudKeysBySerial?: Record<string, string>
     /**
-     * TEMPORARY (admin UI only): Sale ledger date for catch-up entry; ignored unless type === "Sale".
+     * Sale business date (YYYY-MM-DD). Ignored unless type === "Sale".
+     * Every movement stores a business date at midnight; the database sets created_at.
      */
     saleTransactionDateIso?: string
+    /** IANA zone from app_settings.timezone. Today's business date is computed in this zone. */
+    orgTimeZone?: string
     expectedProductName?: string
     expectedVendor?: string
     /** Extra JSON stored on transaction rows (decommission reason, remediation case id, etc.) */
@@ -255,14 +246,13 @@ export function computeMovementResult(
     expectedVendor,
     movementMetadata,
     clientDirectory,
+    orgTimeZone,
   } = params
-  const nowIso = new Date().toISOString()
-  let date: string
+  const businessToday = businessDateToIso(todayBusinessDate(orgTimeZone?.trim() || DEFAULT_ORG_TIMEZONE))
+  let date = businessToday
   if (type === "Sale") {
     const raw = saleTransactionDateIso?.trim()
-    if (!raw) {
-      date = nowIso
-    } else {
+    if (raw) {
       const parsed = parseSaleDateOverride(raw)
       if (!parsed.ok) {
         return {
@@ -276,8 +266,6 @@ export function computeMovementResult(
       }
       date = parsed.iso
     }
-  } else {
-    date = nowIso
   }
   const defaultReturnDate = (() => {
     const d = new Date()
@@ -433,13 +421,32 @@ export function computeMovementResult(
         it.client = undefined
         it.assignedTo = undefined
         break
-      case "Sale":
+      case "Sale": {
+        const converting = it.status === "POC"
+        const keptClient = it.client
+        const keptAssigned = it.assignedTo
+        const pocOutDate = it.pocOutDate
         it.status = "Sold"
-        it.location = "Delivered"
-        it.client = clientDisplay
-        it.assignedTo = assignedTo ?? clientDisplay
-        if (assignedTo) history.push({ date: date.slice(0, 10), assignedTo, notes })
+        if (converting) {
+          it.returnDate = undefined
+          it.client = keptClient
+          it.assignedTo = keptAssigned
+          it.pocOutDate = pocOutDate
+          txnClientDisplay = keptClient?.trim() || txnClientDisplay
+          txnClientId =
+            resolveClientIdFromDirectoryLabel(txnClientDisplay, clientDirectory) ?? txnClientId
+          txnMetadata = mergeRecordMeta(movementMetadata, {
+            converted_from: "POC",
+            poc_out_date: pocOutDate ?? null,
+          })
+        } else {
+          it.location = "Delivered"
+          it.client = clientDisplay
+          it.assignedTo = assignedTo ?? clientDisplay
+          if (assignedTo) history.push({ date: date.slice(0, 10), assignedTo, notes })
+        }
         break
+      }
       case "POC Out":
         it.status = "POC"
         it.location = "Client Site"

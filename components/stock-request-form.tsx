@@ -23,6 +23,7 @@ import {
 import { ProductNamePicker } from "@/components/product-name-picker"
 import { useAuth } from "@/lib/auth-context"
 import type { ClientSite, InventoryItem } from "@/lib/data"
+import { formatClientLabel } from "@/lib/client-label"
 import { useClients, insertClient } from "@/lib/supabase/clients-db"
 import { useInventoryStore } from "@/lib/inventory-store"
 import { getSupabaseClient } from "@/lib/supabase/client"
@@ -37,7 +38,8 @@ import {
 import { toast } from "sonner"
 import { toastFromCaughtError } from "@/lib/toast-reportable-error"
 import { Loader2, Plus, Trash2, Upload, X } from "lucide-react"
-import { PageBackLink } from "@/components/page-nav"
+import { PageBreadcrumbs } from "@/components/page-breadcrumbs"
+import { canCreateStockRequest } from "@/lib/permissions"
 
 export type LineDraft = {
   id: string
@@ -73,7 +75,8 @@ export function StockRequestForm({
   onCancelHref?: string
 }) {
   const router = useRouter()
-  const { user } = useAuth()
+  const { user, role } = useAuth()
+  const canCreate = canCreateStockRequest(role)
   const { clients, refetch: refetchClients } = useClients()
   const { inventory } = useInventoryStore()
 
@@ -140,7 +143,7 @@ export function StockRequestForm({
       }))
     )
     if (quoteFile) {
-      const url = await uploadQuotationForRequest(sb, rid, quoteFile)
+      const url = await uploadQuotationForRequest(rid, quoteFile)
       await updateDraftRequest(sb, rid, { quotationUrl: url })
       setQuoteFile(null)
     }
@@ -171,7 +174,7 @@ export function StockRequestForm({
           })),
         })
         if (quoteFile) {
-          const url = await uploadQuotationForRequest(sb, created.id, quoteFile)
+          const url = await uploadQuotationForRequest(created.id, quoteFile)
           await updateDraftRequest(sb, created.id, { quotationUrl: url })
           setQuoteFile(null)
         }
@@ -217,7 +220,7 @@ export function StockRequestForm({
         })
         rid = created.id
         if (quoteFile) {
-          const url = await uploadQuotationForRequest(sb, rid, quoteFile)
+          const url = await uploadQuotationForRequest(rid, quoteFile)
           await updateDraftRequest(sb, rid, { quotationUrl: url })
           setQuoteFile(null)
         }
@@ -266,9 +269,46 @@ export function StockRequestForm({
     }
   }
 
+  if (!canCreate) {
+    return (
+      <div className="flex flex-col gap-4">
+        <PageBreadcrumbs
+          items={
+            mode === "edit" && initialRequest
+              ? [
+                  { label: "Requests", href: "/requests" },
+                  { label: initialRequest.id, href: onCancelHref },
+                  { label: "Edit" },
+                ]
+              : [
+                  { label: "Requests", href: "/requests" },
+                  { label: "New" },
+                ]
+          }
+        />
+        <p className="text-sm text-muted-foreground">
+          Your account has read-only access to stock requests.
+        </p>
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col gap-6 max-w-3xl">
-      <PageBackLink href={onCancelHref} />
+      <PageBreadcrumbs
+        items={
+          mode === "edit" && initialRequest
+            ? [
+                { label: "Requests", href: "/requests" },
+                { label: initialRequest.id, href: onCancelHref },
+                { label: "Edit" },
+              ]
+            : [
+                { label: "Requests", href: "/requests" },
+                { label: "New" },
+              ]
+        }
+      />
 
       <Card>
         <CardHeader className="pb-3">
@@ -290,7 +330,7 @@ export function StockRequestForm({
               <SelectContent>
                 {clients.map((c) => (
                   <SelectItem key={c.id} value={c.id}>
-                    {c.name} — {c.company}
+                    {formatClientLabel(c)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -352,7 +392,7 @@ export function StockRequestForm({
             {!quoteFile ? (
               <Input
                 type="file"
-                accept=".pdf,image/jpeg,image/png,application/pdf"
+                accept=".pdf,image/jpeg,image/png,image/webp,application/pdf"
                 className="cursor-pointer text-sm file:mr-2 file:rounded-md file:border-0 file:bg-primary/10 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-primary"
                 disabled={busy}
                 onChange={(e) => {

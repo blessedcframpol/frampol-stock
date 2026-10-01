@@ -6,6 +6,8 @@ import {
   validateMovementForItem,
 } from "@/lib/supabase/movement-utils"
 import type { InventoryItem, ItemStatus, Transaction, TransactionType } from "@/lib/data"
+import { businessDateToIso, todayBusinessDate } from "@/lib/business-date.mjs"
+import { movementResult } from "@/lib/movement-transitions.mjs"
 
 function item(overrides: Partial<InventoryItem> & Pick<InventoryItem, "status">): InventoryItem {
   return {
@@ -90,17 +92,19 @@ describe("validateMovementForItem", () => {
       it(`allows ${type} from In Stock`, () => {
         expect(validateMovementForItem(type, item({ status: "In Stock" }), ctx)).toBeNull()
       })
-      for (const st of [
-        "Sold",
-        "POC",
-        "Rented",
-        "Maintenance",
-        "RMA Hold",
-        "Disposed",
-        "Pending Inspection",
-      ] as ItemStatus[]) {
+      const blocked = (
+        type === "Sale"
+          ? ["Sold", "Rented", "Maintenance", "RMA Hold", "Disposed", "Pending Inspection"]
+          : ["Sold", "POC", "Rented", "Maintenance", "RMA Hold", "Disposed", "Pending Inspection"]
+      ) as ItemStatus[]
+      for (const st of blocked) {
         it(`blocks ${type} from ${st}`, () => {
           expect(validateMovementForItem(type, item({ status: st }), ctx)).toMatch(/Not available/)
+        })
+      }
+      if (type === "Sale") {
+        it("allows Sale from POC", () => {
+          expect(validateMovementForItem("Sale", item({ status: "POC" }), ctx)).toBeNull()
         })
       }
     }
@@ -125,7 +129,13 @@ describe("validateMovementForItem", () => {
         expect(validateMovementForItem("Transfer", item({ status: st }), ctx)).toBeNull()
       })
     }
-    for (const st of ["Sold", "POC", "Rented", "Disposed"] as ItemStatus[]) {
+    for (const st of ["POC", "Rented"] as ItemStatus[]) {
+      it(`allows Transfer from ${st} without changing status`, () => {
+        expect(validateMovementForItem("Transfer", item({ status: st, location: "Client Site" }), ctx)).toBeNull()
+        expect(movementResult(st, "Transfer")).toBe(st)
+      })
+    }
+    for (const st of ["Sold", "Disposed"] as ItemStatus[]) {
       it(`blocks Transfer from ${st}`, () => {
         expect(validateMovementForItem("Transfer", item({ status: st }), ctx)).toMatch(/Cannot transfer/)
       })
@@ -276,7 +286,7 @@ describe("computeMovementResult", () => {
       client: "Acme - Acme Co",
       clientId: "client-1",
     })
-    expect(result.newTransactions[0]?.date).toMatch(/^\d{4}-\d{2}-\d{2}T/)
+    expect(result.newTransactions[0]?.date).toBe(businessDateToIso(todayBusinessDate("Africa/Harare")))
   })
 
   it("Sale with sale-date override uses the UTC midnight ISO on the transaction", () => {
@@ -316,6 +326,41 @@ describe("computeMovementResult", () => {
       returnDate: "2026-06-01",
     })
     expect(result.newTransactions[0]?.type).toBe("POC Out")
+    expect(result.newTransactions[0]?.date).toBe(businessDateToIso(todayBusinessDate("Africa/Harare")))
+  })
+
+  it("Sale from POC keeps the client, clears the return date, and records converted_from", () => {
+    const result = computeMovementResult(
+      [
+        item({
+          status: "POC",
+          location: "Client Site",
+          client: "Joseph Shenjere",
+          assignedTo: "Joseph Shenjere",
+          pocOutDate: "2026-06-01",
+          returnDate: "2026-06-01",
+          assignmentHistory: [{ date: "2026-06-01", assignedTo: "Joseph Shenjere", notes: "POC Out" }],
+        }),
+      ],
+      { ...baseParams, type: "Sale", invoiceNumber: "", saleTransactionDateIso: "2026-10-01" }
+    )
+    expect(result.success).toEqual(["SN-1"])
+    expect(result.updatedItems[0]).toMatchObject({
+      status: "Sold",
+      location: "Client Site",
+      client: "Joseph Shenjere",
+      assignedTo: "Joseph Shenjere",
+      pocOutDate: "2026-06-01",
+      returnDate: undefined,
+      assignmentHistory: [{ date: "2026-06-01", assignedTo: "Joseph Shenjere", notes: "POC Out" }],
+    })
+    expect(result.newTransactions[0]).toMatchObject({
+      type: "Sale",
+      client: "Joseph Shenjere",
+      invoiceNumber: "",
+      date: "2026-10-01T00:00:00.000Z",
+      metadata: { converted_from: "POC", poc_out_date: "2026-06-01" },
+    })
   })
 
   it("Rentals: sets Rented / Client Site with returnDate", () => {
@@ -374,6 +419,19 @@ describe("computeMovementResult", () => {
       fromLocation: "Warehouse A",
       toLocation: "Warehouse B",
     })
+  })
+
+  it("Transfer from POC changes location and stays POC", () => {
+    const result = computeMovementResult(
+      [item({ status: "POC", location: "Client Site", client: "Acme" })],
+      {
+        ...baseParams,
+        type: "Transfer",
+        fromLocation: "Client Site",
+        toLocation: "Warehouse B",
+      }
+    )
+    expect(result.updatedItems[0]).toMatchObject({ status: "POC", location: "Warehouse B", client: "Acme" })
   })
 
   it("Dispose: sets Disposed", () => {

@@ -58,6 +58,19 @@ describe("linesBlockingServiced", () => {
     ).toEqual([])
   })
 
+  it("a stocked non-Starlink line blocks serviced once requires_serial is true", () => {
+    const line = {
+      id: "fg",
+      product_name: "FortiGate 50G",
+      quantity_requested: 1,
+      requires_serial: true,
+    }
+    expect(linesBlockingServiced([line], { fg: 0 })).toEqual([
+      { lineId: "fg", productName: "FortiGate 50G", assigned: 0, required: 1 },
+    ])
+    expect(linesBlockingServiced([{ ...line, requires_serial: false }], { fg: 0 })).toEqual([])
+  })
+
   it("requires_serial false with 0 assigned passes even if the name contains starlink", () => {
     expect(
       linesBlockingServiced(
@@ -126,6 +139,22 @@ describe("canMarkRequestInvoiced", () => {
       canMarkRequestInvoiced({
         lines: [{ id: "l1", product_name: "Widget", quantity_requested: 2, requires_serial: true }],
         assignedCountByLineId: { l1: 2 },
+      })
+    ).toEqual({ ok: true })
+  })
+
+  it("a stocked non-Starlink line blocks invoicing once requires_serial is true", () => {
+    const line = {
+      id: "fg",
+      product_name: "FortiGate 50G",
+      quantity_requested: 1,
+      requires_serial: true,
+    }
+    expect(canMarkRequestInvoiced({ lines: [line], assignedCountByLineId: { fg: 0 } }).ok).toBe(false)
+    expect(
+      canMarkRequestInvoiced({
+        lines: [{ ...line, requires_serial: false }],
+        assignedCountByLineId: { fg: 0 },
       })
     ).toEqual({ ok: true })
   })

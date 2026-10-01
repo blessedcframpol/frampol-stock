@@ -4,6 +4,7 @@ import Link from "next/link"
 import type { SearchResults } from "@/lib/search"
 import { Package, Users, User, ChevronRight } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { clientCompanyDetail } from "@/lib/client-label"
 
 const MAX_INVENTORY = 5
 const MAX_CLIENTS = 3
@@ -47,7 +48,7 @@ export function SearchSuggestions({
         <Link
           href={`/search?q=${encodeURIComponent(q)}`}
           onClick={onSeeAll}
-          className="mt-2 inline-block text-sm font-medium text-primary hover:underline"
+          className="mt-2 inline-block text-sm font-medium text-brand hover:underline"
         >
           Go to search results →
         </Link>
@@ -118,9 +119,11 @@ export function SearchSuggestions({
                   <span className="truncate font-medium text-foreground">
                     {client.name}
                   </span>
-                  <span className="text-muted-foreground text-xs truncate max-w-[140px]">
-                    {client.company}
-                  </span>
+                  {clientCompanyDetail(client) ? (
+                    <span className="text-muted-foreground text-xs truncate max-w-[140px]">
+                      {clientCompanyDetail(client)}
+                    </span>
+                  ) : null}
                 </Link>
               </li>
             ))}
@@ -166,7 +169,7 @@ export function SearchSuggestions({
         <Link
           href={`/search?q=${encodeURIComponent(q)}`}
           onClick={onSeeAll}
-          className="flex items-center justify-center gap-1.5 py-2 text-sm font-medium text-primary hover:underline"
+          className="flex items-center justify-center gap-1.5 py-2 text-sm font-medium text-brand hover:underline"
         >
           See all {total} result{total !== 1 ? "s" : ""}
           <ChevronRight className="w-4 h-4" />

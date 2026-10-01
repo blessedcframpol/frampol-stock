@@ -1,4 +1,5 @@
 import type { Transaction, TransactionType } from "@/lib/data"
+import { compareBusinessDatesDesc, latestRecordedAt } from "@/lib/business-date.mjs"
 import { getTransactionOrderGroupKey } from "@/lib/client-transactions"
 
 /** One logical submission / batch for history UI (matches grouped `transactions` rows). */
@@ -8,6 +9,8 @@ export type TransactionBatchSummary = {
   /** `transactions.batch_id` when present — use for quick-scan reverse lookup */
   reverseBatchId: string | null
   date: string
+  /** Latest recorded instant in the batch, when any row has created_at. */
+  recordedAt?: string
   movementType: TransactionType
   productLabel: string
   clientDisplay: string
@@ -36,6 +39,21 @@ export type TransactionBatchSummary = {
   /** Aggregated for Dispose rows (comma-separated if multiple distinct). */
   disposalReasonSummary?: string
   authorisedBySummary?: string
+  /** The reversal batch that undid this one, when a reversal row points here. */
+  reversedByBatchId?: string | null
+  /** Display names of the people who recorded the member rows. */
+  recordedBy?: string
+  /** Member rows already loaded for this page. */
+  lines?: TransactionBatchLine[]
+}
+
+export type TransactionBatchLine = {
+  serialNumber: string
+  client: string
+  invoiceNumber?: string
+  date: string
+  recordedAt?: string
+  assignedTo?: string
 }
 
 function uniqueTrimmedStrings(values: (string | undefined | null)[]): string[] {
@@ -166,7 +184,7 @@ export function groupTransactionsIntoBatches(
   const out: TransactionBatchSummary[] = []
   for (const [batchKey, txns] of map) {
     if (txns.length === 0) continue
-    const sorted = [...txns].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+    const sorted = [...txns].sort((a, b) => compareBusinessDatesDesc(a.date, b.date))
     const first = sorted[0]!
     const batchId = first.batchId ?? null
     const rev = batchId ? reversalByBatchId.get(batchId) : undefined
@@ -184,6 +202,7 @@ export function groupTransactionsIntoBatches(
       batchKey,
       reverseBatchId: batchId,
       date: first.date,
+      recordedAt: latestRecordedAt(sorted.map((txn) => txn.createdAt)),
       movementType: first.type,
       productLabel: productLabelFromTransactions(sorted),
       clientDisplay: clientDisplayFromTransactions(sorted),
@@ -212,7 +231,65 @@ export function groupTransactionsIntoBatches(
     const ar = a.isReversed ? 1 : 0
     const br = b.isReversed ? 1 : 0
     if (ar !== br) return ar - br
-    return new Date(b.date).getTime() - new Date(a.date).getTime()
+    return compareBusinessDatesDesc(a.date, b.date)
   })
   return out
+}
+
+/** Matches the database function's maximum page of complete batches. */
+export const TRANSACTION_BATCH_PAGE_SIZE = 100
+
+export type TransactionBatchQuery = {
+  limit?: number
+  offset?: number
+  movement?: string | null
+  from?: string | null
+  to?: string | null
+  search?: string | null
+}
+
+export async function fetchTransactionBatchPage(
+  query: TransactionBatchQuery = {}
+): Promise<{ batches: TransactionBatchSummary[]; total: number; counts: Record<string, number> }> {
+  const params = new URLSearchParams()
+  params.set("limit", String(query.limit ?? TRANSACTION_BATCH_PAGE_SIZE))
+  params.set("offset", String(query.offset ?? 0))
+  if (query.movement) params.set("movement", query.movement)
+  if (query.from) params.set("from", query.from)
+  if (query.to) params.set("to", query.to)
+  if (query.search) params.set("search", query.search)
+  const res = await fetch(`/api/transaction-batches?${params.toString()}`)
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    const error = new Error(
+      typeof data?.error === "string" ? data.error : "Failed to load transaction history"
+    ) as Error & { status?: number; body?: unknown }
+    error.status = res.status
+    error.body = data
+    throw error
+  }
+  if (!data || !Array.isArray(data.batches) || typeof data.total !== "number" || !data.counts || typeof data.counts !== "object") {
+    throw new Error("Transaction history returned an unexpected page")
+  }
+  return {
+    batches: data.batches as TransactionBatchSummary[],
+    total: data.total,
+    counts: data.counts as Record<string, number>,
+  }
+}
+
+/** Every batch, each one complete. Pages until the reported total is in hand. */
+export async function fetchEveryTransactionBatch(): Promise<TransactionBatchSummary[]> {
+  const all: TransactionBatchSummary[] = []
+  let total = 0
+  for (let offset = 0; ; offset += TRANSACTION_BATCH_PAGE_SIZE) {
+    const page = await fetchTransactionBatchPage({ limit: TRANSACTION_BATCH_PAGE_SIZE, offset })
+    total = page.total
+    all.push(...page.batches)
+    if (page.batches.length < TRANSACTION_BATCH_PAGE_SIZE || all.length >= total) break
+  }
+  if (all.length !== total) {
+    throw new Error(`Transaction history loaded ${all.length} of ${total} batches`)
+  }
+  return all
 }

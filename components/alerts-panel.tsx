@@ -2,13 +2,16 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { EmptyState } from "@/components/fs/empty-state"
 import { useInventoryStore } from "@/lib/inventory-store"
 import { formatDateDDMMYYYY } from "@/lib/utils"
 import { AlertTriangle, Package, ShieldAlert, Clock } from "lucide-react"
+import { useLowStockProducts } from "@/hooks/use-low-stock-products"
 
 export function AlertsPanel() {
   const { getAlerts } = useInventoryStore()
-  const alerts = getAlerts()
+  const { lowStock } = useLowStockProducts()
+  const alerts = { ...getAlerts(), lowStock }
   const total =
     alerts.lowStock.length +
     alerts.warrantyExpiring.length +
@@ -26,18 +29,18 @@ export function AlertsPanel() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-muted-foreground">No alerts at the moment.</p>
+          <EmptyState message="No alerts at the moment." />
         </CardContent>
       </Card>
     )
   }
   return (
-    <Card className="border-amber-500/30 bg-amber-500/5">
+    <Card className="border-warning/40 bg-warning-soft">
       <CardHeader className="pb-2">
         <CardTitle className="text-base font-semibold text-foreground flex items-center gap-2">
-          <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+          <AlertTriangle className="w-4 h-4 text-warning" />
           Alerts
-          <Badge variant="secondary" className="ml-auto text-xs bg-amber-500/20 text-amber-700 dark:text-amber-300 border-0">
+          <Badge variant="secondary" className="ml-auto text-xs bg-warning-soft text-warning border-0">
             {total}
           </Badge>
         </CardTitle>
@@ -47,11 +50,11 @@ export function AlertsPanel() {
           <div>
             <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 mb-1.5">
               <Package className="w-3.5 h-3.5" />
-              Low stock (≤2 in stock)
+              Low stock
             </p>
             <ul className="space-y-1">
               {alerts.lowStock.map((a) => (
-                <li key={a.groupName} className="text-sm text-foreground flex justify-between gap-2">
+                <li key={a.productId} className="text-sm text-foreground flex justify-between gap-2">
                   <span className="truncate">{a.groupName}</span>
                   <span className="text-muted-foreground shrink-0">{a.inStock} left</span>
                 </li>

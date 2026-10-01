@@ -8,8 +8,11 @@ import { Textarea } from "@/components/ui/textarea"
 import { Loader2 } from "lucide-react"
 import { useAuth } from "@/lib/auth-context"
 import { canEditInventory, canRecordStockMovement } from "@/lib/permissions"
+import { BusinessDateLabel } from "@/components/business-date-label"
+import { useOrgTimezone } from "@/hooks/use-org-timezone"
 import { formatDateDDMMYYYY } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { EmptyState } from "@/components/fs/empty-state"
 import {
   Dialog,
   DialogContent,
@@ -50,6 +53,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { toast } from "sonner"
+import { ConvertToSaleDialog, ExtendHoldingDialog } from "@/components/holding-actions"
 
 const HISTORY_LIMIT = 20
 
@@ -57,16 +61,6 @@ function dateToInputValue(iso?: string): string {
   if (!iso?.trim()) return ""
   const s = iso.trim()
   return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : ""
-}
-
-function formatTxnDate(dateStr: string): string {
-  const d = dateStr.trim()
-  if (/^\d{4}-\d{2}-\d{2}/.test(d)) return formatDateDDMMYYYY(d.slice(0, 10))
-  try {
-    return formatDateDDMMYYYY(new Date(d).toISOString().slice(0, 10))
-  } catch {
-    return d
-  }
 }
 
 type Props = {
@@ -169,10 +163,13 @@ function EditItemForm({ item, onClose }: { item: InventoryItem; onClose: () => v
 }
 
 export function InventoryItemActionsMenu({ item, menuTrigger, onRecordMovement, onMoveToGroup }: Props) {
+  const timeZone = useOrgTimezone()
   const { transactions, softDeleteItem, applyMovement, refetchLedger } = useInventoryStore()
   const { role } = useAuth()
   const isAdmin = canEditInventory(role)
   const canMove = canRecordStockMovement(role)
+  const [convertOpen, setConvertOpen] = useState(false)
+  const [extendOpen, setExtendOpen] = useState(false)
 
   const [viewOpen, setViewOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
@@ -266,8 +263,14 @@ export function InventoryItemActionsMenu({ item, menuTrigger, onRecordMovement, 
           {onRecordMovement && canMove && (
             <DropdownMenuItem onSelect={() => onRecordMovement(item)}>Record movement…</DropdownMenuItem>
           )}
-          {item.status === "Pending Inspection" && (
+          {item.status === "Pending Inspection" && canMove && (
             <DropdownMenuItem onSelect={() => setInspectOpen(true)}>Complete inspection…</DropdownMenuItem>
+          )}
+          {item.status === "POC" && canMove && (
+            <DropdownMenuItem onSelect={() => setConvertOpen(true)}>Convert to sale</DropdownMenuItem>
+          )}
+          {(item.status === "POC" || item.status === "Rented") && canMove && (
+            <DropdownMenuItem onSelect={() => setExtendOpen(true)}>Extend</DropdownMenuItem>
           )}
           {isAdmin && (
             <>
@@ -282,6 +285,14 @@ export function InventoryItemActionsMenu({ item, menuTrigger, onRecordMovement, 
           )}
         </DropdownMenuContent>
       </DropdownMenu>
+
+      <ConvertToSaleDialog open={convertOpen} serial={item.serialNumber} onOpenChange={setConvertOpen} />
+      <ExtendHoldingDialog
+        open={extendOpen}
+        itemId={item.id}
+        serial={item.serialNumber}
+        onOpenChange={setExtendOpen}
+      />
 
       <Dialog open={viewOpen} onOpenChange={setViewOpen}>
         <DialogContent className="bg-card text-card-foreground max-w-[calc(100vw-2rem)] sm:max-w-lg max-h-[90vh] flex flex-col">
@@ -307,21 +318,23 @@ export function InventoryItemActionsMenu({ item, menuTrigger, onRecordMovement, 
           <div className="pt-2 border-t border-border">
             <p className="text-xs font-medium text-muted-foreground mb-2">Recent activity (latest {HISTORY_LIMIT})</p>
             {recentTxns.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No transactions logged for this serial.</p>
+              <EmptyState message="No transactions logged for this serial." />
             ) : (
               <div className="rounded-md border border-border overflow-hidden max-h-48 overflow-y-auto">
                 <Table>
                   <TableHeader>
                     <TableRow className="hover:bg-transparent">
-                      <TableHead className="text-xs h-8">Date</TableHead>
-                      <TableHead className="text-xs h-8">Type</TableHead>
-                      <TableHead className="text-xs h-8">Client</TableHead>
+                      <TableHead>Date</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead>Client</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {recentTxns.map((t) => (
                       <TableRow key={t.id}>
-                        <TableCell className="text-xs py-1.5 whitespace-nowrap">{formatTxnDate(t.date)}</TableCell>
+                        <TableCell className="text-xs py-1.5 whitespace-nowrap">
+                          <BusinessDateLabel date={t.date} createdAt={t.createdAt} timeZone={timeZone} />
+                        </TableCell>
                         <TableCell className="text-xs py-1.5">{t.type}</TableCell>
                         <TableCell className="text-xs py-1.5 max-w-[140px] truncate" title={t.client}>
                           {t.client}

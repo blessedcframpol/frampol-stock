@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useState } from "react"
 import Link from "next/link"
 import {
   Table,
@@ -10,239 +10,291 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { Badge } from "@/components/ui/badge"
-import { Card, CardContent } from "@/components/ui/card"
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Input } from "@/components/ui/input"
-import { useInventoryStore } from "@/lib/inventory-store"
-import type { InventoryItem, ItemStatus, TransactionType } from "@/lib/data"
-import { isDispatchedStatus } from "@/lib/inventory-visibility"
-import { formatDateDDMMYYYY } from "@/lib/utils"
+import { StatusPill } from "@/components/fs/status-pill"
+import { EmptyState } from "@/components/fs/empty-state"
+import { FilterChip } from "@/components/fs/filter-chip"
+import { ListToolbar, ListToolbarSearch } from "@/components/fs/list-toolbar"
+import { Pagination } from "@/components/fs/pagination"
+import { BusinessDateLabel } from "@/components/business-date-label"
+import { useOrgTimezone } from "@/hooks/use-org-timezone"
 import { PageHeader } from "@/components/page-nav"
-import { ArrowUpRight, Search } from "lucide-react"
-import { cn } from "@/lib/utils"
+import { ArrowUpRight, Loader2 } from "lucide-react"
+import { toastFromApiErrorBody, toastFromCaughtError } from "@/lib/toast-reportable-error"
+import { BatchLinesDrawer } from "@/components/batch-lines-drawer"
+import { SignedStorageLink } from "@/components/signed-storage-link"
+import {
+  DISPATCHED_MOVEMENTS,
+  LEDGER_PAGE_SIZE,
+  dispatchResultLabel,
+  filteredTotal,
+  movementChipIds,
+  pageCount,
+} from "@/lib/ledger-pages"
+import type { DispatchedResultKind, DispatchedRow } from "@/app/api/dispatched/route"
+import { canViewFinancials } from "@/lib/permissions"
+import { useAuth } from "@/lib/auth-context"
 
-const OUTBOUND_TYPES: TransactionType[] = ["Sale", "POC Out", "Rentals", "Dispose"]
-
-const statusStyles: Record<ItemStatus, string> = {
-  "In Stock": "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-  Sold: "bg-red-500/10 text-red-500 dark:text-red-400",
-  POC: "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400",
-  Rented: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
-  Maintenance: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
-  "RMA Hold": "bg-orange-500/10 text-orange-600 dark:text-orange-400",
-  "Pending Inspection": "bg-teal-500/10 text-teal-700 dark:text-teal-400",
-  Disposed: "bg-slate-500/10 text-slate-600 dark:text-slate-400",
-}
-
-const movementTypeStyles: Record<string, string> = {
-  Sale: "bg-red-500/10 text-red-500 dark:text-red-400",
-  "POC Out": "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400",
-  Rentals: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
-  Dispose: "bg-slate-500/10 text-slate-600 dark:text-slate-400",
-  "Sale Return": "bg-orange-500/10 text-orange-600 dark:text-orange-400",
-  Decommissioned: "bg-teal-500/10 text-teal-700 dark:text-teal-400",
-  "Inspection Pass": "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
-  "Inspection Fail": "bg-orange-500/10 text-orange-600 dark:text-orange-400",
-  "Remediation Loaner Issue": "bg-rose-500/10 text-rose-700 dark:text-rose-400",
-}
-
-type DispatchedRow = {
-  item: InventoryItem
-  movementType: TransactionType | null
-  dateOut: string | null
-}
-
-function buildDispatchedList(
-  inventory: InventoryItem[],
-  transactions: { type: string; serialNumber: string; date: string }[]
-): DispatchedRow[] {
-  const movedOut = inventory.filter((i) => isDispatchedStatus(i.status))
-  const outboundBySerial = new Map<string, { type: TransactionType; date: string }>()
-  const sortedTxns = [...transactions].filter((t) =>
-    OUTBOUND_TYPES.includes(t.type as TransactionType)
-  ).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-  for (const t of sortedTxns) {
-    if (!outboundBySerial.has(t.serialNumber)) {
-      outboundBySerial.set(t.serialNumber, { type: t.type as TransactionType, date: t.date })
-    }
-  }
-
-  const statusToMovementType: Record<string, TransactionType | null> = {
-    Sold: "Sale",
-    POC: "POC Out",
-    Rented: "Rentals",
-    Disposed: "Dispose",
-    Maintenance: null,
-  }
-
-  return movedOut.map((item) => {
-    const out = outboundBySerial.get(item.serialNumber)
-    const dateOut = out?.date ?? (item.pocOutDate ?? item.dateAdded)
-    const movementType = out?.type ?? statusToMovementType[item.status] ?? null
-    return {
-      item,
-      movementType,
-      dateOut: dateOut ?? null,
-    }
-  })
-}
-
-function matchesSearch(row: DispatchedRow, query: string): boolean {
-  if (!query.trim()) return true
-  const q = query.trim().toLowerCase()
-  const serial = (row.item.serialNumber ?? "").toLowerCase()
-  const name = (row.item.name ?? "").toLowerCase()
-  const assigned = ((row.item.assignedTo ?? row.item.client) ?? "").toLowerCase()
-  const movement = (row.movementType ?? "").toLowerCase()
-  const status = (row.item.status ?? "").toLowerCase()
-  return (
-    serial.includes(q) ||
-    name.includes(q) ||
-    assigned.includes(q) ||
-    movement.includes(q) ||
-    status.includes(q)
-  )
+type DispatchedPage = {
+  rows: DispatchedRow[]
+  total: number
+  counts: Record<string, number>
+  resultKind: DispatchedResultKind
 }
 
 export function DispatchedContent() {
-  const { inventory, transactions } = useInventoryStore()
-  const [typeFilter, setTypeFilter] = useState<string>("all")
+  const timeZone = useOrgTimezone()
+  const { role } = useAuth()
+  const showFinancials = canViewFinancials(role)
   const [search, setSearch] = useState("")
+  const [appliedSearch, setAppliedSearch] = useState("")
+  const [movement, setMovement] = useState<string | null>(null)
+  const [from, setFrom] = useState("")
+  const [to, setTo] = useState("")
+  const [page, setPage] = useState(1)
+  const [data, setData] = useState<DispatchedPage>({ rows: [], total: 0, counts: {}, resultKind: "batch" })
+  const [viewing, setViewing] = useState<DispatchedRow | null>(null)
 
-  const dispatched = useMemo(
-    () => buildDispatchedList(inventory, transactions.map((t) => ({ type: t.type, serialNumber: t.serialNumber, date: t.date }))),
-    [inventory, transactions]
-  )
+  useEffect(() => {
+    const timer = setTimeout(() => setAppliedSearch(search.trim()), 300)
+    return () => clearTimeout(timer)
+  }, [search])
 
-  const filtered = useMemo(() => {
-    let list = dispatched
-    if (typeFilter !== "all") {
-      list = list.filter((row) => row.movementType === typeFilter)
+  const filterKey = `${movement ?? ""}|${from}|${to}|${appliedSearch}`
+  const [pageFilter, setPageFilter] = useState(filterKey)
+  if (pageFilter !== filterKey) {
+    setPageFilter(filterKey)
+    setPage(1)
+  }
+
+  const requestKey = `${page}|${filterKey}`
+  const [settledKey, setSettledKey] = useState<string | null>(null)
+  const loading = settledKey !== requestKey
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const params = new URLSearchParams({
+          limit: String(LEDGER_PAGE_SIZE),
+          offset: String((page - 1) * LEDGER_PAGE_SIZE),
+        })
+        if (movement) params.set("movement", movement)
+        if (from) params.set("from", from)
+        if (to) params.set("to", to)
+        if (appliedSearch) params.set("search", appliedSearch)
+        const res = await fetch(`/api/dispatched?${params.toString()}`)
+        const body = await res.json().catch(() => ({}))
+        if (cancelled) return
+        if (!res.ok) {
+          toastFromApiErrorBody(body, "Failed to load dispatched items", res.status)
+          setData({ rows: [], total: 0, counts: {}, resultKind: "batch" })
+          return
+        }
+        setData({
+          rows: Array.isArray(body.rows) ? body.rows : [],
+          total: typeof body.total === "number" ? body.total : 0,
+          counts: body.counts && typeof body.counts === "object" ? body.counts : {},
+          resultKind: body.resultKind === "serial" || body.resultKind === "mixed" ? body.resultKind : "batch",
+        })
+      } catch (error) {
+        if (!cancelled) {
+          toastFromCaughtError(error, "Failed to load dispatched items")
+          setData({ rows: [], total: 0, counts: {}, resultKind: "batch" })
+        }
+      } finally {
+        if (!cancelled) setSettledKey(requestKey)
+      }
+    })()
+    return () => {
+      cancelled = true
     }
-    if (search.trim()) {
-      list = list.filter((row) => matchesSearch(row, search))
-    }
-    return list
-  }, [dispatched, typeFilter, search])
+  }, [requestKey, page, movement, from, to, appliedSearch])
 
-  const sorted = useMemo(
-    () => [...filtered].sort((a, b) => {
-      const dateA = a.dateOut ? new Date(a.dateOut).getTime() : 0
-      const dateB = b.dateOut ? new Date(b.dateOut).getTime() : 0
-      return dateB - dateA
-    }),
-    [filtered]
-  )
+  const chips = movementChipIds(data.counts, movement, DISPATCHED_MOVEMENTS)
+  const total = data.total
+  const pages = pageCount(total)
 
   return (
     <div className="flex flex-col gap-6 min-w-0">
       <PageHeader
         title="Dispatched"
-        description="Items that have been moved out: sales, POC, rentals, and disposed."
+        description={
+          <>
+            Where dispatched items are now.{" "}
+            <Link href="/transaction-history" className="text-brand hover:underline">
+              Transaction history
+            </Link>
+          </>
+        }
       />
 
-      <Card className="border-border">
-        <CardContent className="p-0">
-          <div className="p-4 border-b border-border space-y-4">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input
-                placeholder="Search by serial, product, client..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="pl-9 bg-card text-foreground border-border"
+      <ListToolbar
+        search={
+          <ListToolbarSearch
+            type="search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search by serial, product, client, invoice..."
+            aria-label="Search dispatched items"
+          />
+        }
+        count={loading ? "Loading…" : dispatchResultLabel(total, data.resultKind)}
+        secondary={
+          <>
+            <label className="flex items-center gap-2 text-sm text-muted-foreground">
+              From
+              <input
+                type="date"
+                value={from}
+                onChange={(event) => setFrom(event.target.value)}
+                className="h-10 rounded-full bg-card px-3 text-foreground"
               />
+            </label>
+            <label className="flex items-center gap-2 text-sm text-muted-foreground">
+              To
+              <input
+                type="date"
+                value={to}
+                onChange={(event) => setTo(event.target.value)}
+                className="h-10 rounded-full bg-card px-3 text-foreground"
+              />
+            </label>
+          </>
+        }
+        primary={<Pagination page={page} pageCount={pages} onPageChange={setPage} />}
+      />
+
+      <div className="flex flex-wrap gap-2">
+        <FilterChip label="All" count={filteredTotal(data.counts, null)} selected={movement == null} onSelect={() => setMovement(null)} />
+        {chips.map((id) => (
+          <FilterChip
+            key={id}
+            label={id}
+            count={data.counts[id] ?? 0}
+            selected={movement === id}
+            onSelect={() => setMovement(movement === id ? null : id)}
+          />
+        ))}
+      </div>
+
+      {loading ? (
+            <div className="flex items-center justify-center py-16 text-muted-foreground">
+              <Loader2 className="size-8 animate-spin" />
             </div>
-            <div className="space-y-2">
-              <p className="text-xs font-medium text-muted-foreground">Filter by movement type</p>
-              <Tabs value={typeFilter} onValueChange={setTypeFilter}>
-                <TabsList className="flex flex-wrap h-auto gap-1.5 bg-muted/70 rounded-md p-1.5">
-                  <TabsTrigger value="all" className="text-sm px-4 py-2 data-[state=active]:bg-background data-[state=active]:shadow-sm">
-                    All
-                  </TabsTrigger>
-                  <TabsTrigger value="Sale" className="text-sm px-4 py-2 data-[state=active]:bg-background data-[state=active]:shadow-sm">Sale</TabsTrigger>
-                  <TabsTrigger value="POC Out" className="text-sm px-4 py-2 data-[state=active]:bg-background data-[state=active]:shadow-sm">POC Out</TabsTrigger>
-                  <TabsTrigger value="Rentals" className="text-sm px-4 py-2 data-[state=active]:bg-background data-[state=active]:shadow-sm">Rentals</TabsTrigger>
-                  <TabsTrigger value="Dispose" className="text-sm px-4 py-2 data-[state=active]:bg-background data-[state=active]:shadow-sm">Dispose</TabsTrigger>
-                </TabsList>
-              </Tabs>
-            </div>
-          </div>
-          {sorted.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-center">
-              <ArrowUpRight className="w-12 h-12 text-muted-foreground/50 mb-3" />
-              <p className="text-sm font-medium text-foreground">No dispatched items</p>
-              <p className="text-sm text-muted-foreground mt-1">
-                {search.trim()
-                  ? "No items match your search. Try a different serial, product name, or client."
-                  : typeFilter === "all"
-                    ? "Items moved out (sold, POC, rentals, disposed) will appear here."
-                    : `No items with movement type "${typeFilter}".`}
-              </p>
-            </div>
+          ) : data.rows.length === 0 ? (
+            <EmptyState
+              icon={<ArrowUpRight />}
+              message={
+                appliedSearch || movement || from || to
+                  ? "No dispatched items match these filters."
+                  : "Items moved out (sold, POC, rentals, disposed) will appear here."
+              }
+            />
           ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow className="hover:bg-transparent">
-                    <TableHead className="text-xs text-muted-foreground font-medium">Serial</TableHead>
-                    <TableHead className="text-xs text-muted-foreground font-medium">Product</TableHead>
-                    <TableHead className="text-xs text-muted-foreground font-medium">Status</TableHead>
-                    <TableHead className="text-xs text-muted-foreground font-medium">Movement</TableHead>
-                    <TableHead className="text-xs text-muted-foreground font-medium">Client / Assigned to</TableHead>
-                    <TableHead className="text-xs text-muted-foreground font-medium">Date out</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {sorted.map((row) => (
-                    <TableRow key={row.item.id}>
-                      <TableCell className="font-mono text-sm text-foreground">
-                        <Link
-                          href={`/inventory?serial=${encodeURIComponent(row.item.serialNumber)}`}
-                          className="text-primary hover:underline"
-                        >
-                          {row.item.serialNumber}
-                        </Link>
-                      </TableCell>
-                      <TableCell className="text-sm text-foreground">{row.item.name}</TableCell>
-                      <TableCell>
-                        <Badge
-                          variant="secondary"
-                          className={cn("text-[10px] font-medium border-0", statusStyles[row.item.status])}
-                        >
-                          {row.item.status}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        {row.movementType ? (
-                          <Badge
-                            variant="secondary"
-                            className={cn(
-                              "text-[10px] font-medium border-0",
-                              movementTypeStyles[row.movementType] ?? "bg-muted text-muted-foreground"
-                            )}
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Movement</TableHead>
+                  <TableHead>Product</TableHead>
+                  <TableHead>Client</TableHead>
+                  <TableHead className="text-right">Items</TableHead>
+                  <TableHead>Date out</TableHead>
+                  {showFinancials ? <TableHead>Invoice</TableHead> : null}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {data.rows.map((row) => (
+                  <TableRow key={row.id} className="cursor-pointer" onClick={() => setViewing(row)}>
+                    <TableCell>
+                      {row.movement ? <StatusPill value={row.movement} /> : <span className="text-muted-foreground">—</span>}
+                    </TableCell>
+                    <TableCell className="max-w-[220px] truncate text-sm text-foreground" title={row.productName}>
+                      {row.productName}
+                    </TableCell>
+                    <TableCell className="max-w-[180px] truncate text-sm text-muted-foreground" title={row.clientDisplay}>
+                      {row.clientDisplay}
+                    </TableCell>
+                    <TableCell className="text-right text-sm tabular-nums text-foreground">
+                      {row.grain === "serial" && row.serialNumber ? (
+                        <span className="flex w-full items-center justify-end gap-2">
+                          <Link
+                            href={`/inventory?serial=${encodeURIComponent(row.serialNumber)}`}
+                            className="font-mono text-brand hover:underline"
+                            onClick={(event) => event.stopPropagation()}
                           >
-                            {row.movementType}
-                          </Badge>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">—</span>
-                        )}
+                            {row.serialNumber}
+                          </Link>
+                          <button
+                            type="button"
+                            className="text-xs text-brand hover:underline"
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              setViewing(row)
+                            }}
+                          >
+                            Batch
+                          </button>
+                        </span>
+                      ) : (
+                        <span className="tabular-nums">{row.itemCount}</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {row.dateOut ? (
+                        <BusinessDateLabel date={row.dateOut} createdAt={row.recordedAt} timeZone={timeZone} />
+                      ) : (
+                        "—"
+                      )}
+                    </TableCell>
+                    {showFinancials ? (
+                      <TableCell className="font-mono text-xs text-muted-foreground">
+                        {row.invoiceNumber || "—"}
                       </TableCell>
-                      <TableCell className="text-sm text-muted-foreground max-w-[180px] truncate" title={row.item.assignedTo ?? row.item.client ?? ""}>
-                        {row.item.assignedTo ?? row.item.client ?? "—"}
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
-                        {row.dateOut ? formatDateDDMMYYYY(row.dateOut) : "—"}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                    ) : null}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+      )}
+
+      <BatchLinesDrawer
+        open={viewing != null}
+        onOpenChange={(open) => {
+          if (!open) setViewing(null)
+        }}
+        title={viewing ? `${viewing.movement ?? "Dispatch"} — ${viewing.productName}` : "Dispatch"}
+        description={
+          viewing ? `${viewing.lines.length} item${viewing.lines.length === 1 ? "" : "s"}` : null
+        }
+        detail={
+          viewing
+            ? {
+                movement: viewing.movement ?? "—",
+                client: viewing.clientDisplay,
+                date: viewing.dateOut ? (
+                  <BusinessDateLabel date={viewing.dateOut} createdAt={viewing.recordedAt} timeZone={timeZone} />
+                ) : (
+                  "—"
+                ),
+                invoice: viewing.invoiceNumber || "—",
+                deliveryNote: viewing.deliveryNoteUrl ? (
+                  <SignedStorageLink path={viewing.deliveryNoteUrl} className="text-brand hover:underline">
+                    View
+                  </SignedStorageLink>
+                ) : (
+                  "—"
+                ),
+                recordedBy: viewing.recordedBy || "—",
+              }
+            : undefined
+        }
+        lines={(viewing?.lines ?? []).map((line) => ({
+          serialNumber: line.serialNumber,
+          status: line.status,
+          assignedTo: line.assignedTo ?? undefined,
+        }))}
+        showInvoice={showFinancials}
+      />
     </div>
   )
 }

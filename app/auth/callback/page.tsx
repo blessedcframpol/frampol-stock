@@ -3,20 +3,13 @@
 import { Suspense, useEffect, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Loader2 } from "lucide-react"
+import { exchangeAuthCodeOnce } from "@/lib/auth/exchange-auth-code"
 import { createAuthReturnBrowserClient } from "@/lib/supabase/browser"
 
 function safeNextPath(next: string): string {
   if (!next.startsWith("/") || next.startsWith("//")) return "/"
   return next
 }
-
-/**
- * React 18 Strict Mode (dev) mounts, unmounts, and remounts effects. A second
- * `exchangeCodeForSession` burns the PKCE verifier and surfaces
- * "PKCE code verifier not found". This Set lives for the page load and ensures
- * we only exchange once per auth `code`.
- */
-const pkceExchangeStartedForCode = new Set<string>()
 
 function AuthCallbackContent() {
   const router = useRouter()
@@ -28,12 +21,6 @@ function AuthCallbackContent() {
 
     const oauthError = searchParams.get("error")
     const oauthDesc = searchParams.get("error_description")
-    if (oauthError) {
-      const msg = oauthDesc?.replace(/\+/g, " ") || oauthError || "Sign-in was cancelled or failed."
-      router.replace(`/login?error=${encodeURIComponent(msg)}`)
-      return
-    }
-
     const code = searchParams.get("code")
     const next = safeNextPath(searchParams.get("next") ?? "/")
 
@@ -64,33 +51,21 @@ function AuthCallbackContent() {
           return
         }
 
-        if (code) {
-          const duplicateStrictModePass = pkceExchangeStartedForCode.has(code)
-          if (!duplicateStrictModePass) {
-            pkceExchangeStartedForCode.add(code)
+        if (oauthError) {
+          const msg = oauthDesc?.replace(/\+/g, " ") || oauthError || "Sign-in was cancelled or failed."
+          if (!cancelled) {
+            router.replace(`/login?error=${encodeURIComponent(msg)}`)
           }
+          return
+        }
 
-          if (!duplicateStrictModePass) {
-            const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code)
-            if (exchangeError) {
-              const ok = await waitForSession(supabase, 40)
-              if (!ok) {
-                if (!cancelled) {
-                  router.replace(`/login?error=${encodeURIComponent(exchangeError.message)}`)
-                }
-                return
-              }
+        if (code) {
+          const result = await exchangeAuthCodeOnce(supabase, code, { sessionPollAttempts: 40 })
+          if (!result.ok) {
+            if (!cancelled) {
+              router.replace(`/login?error=${encodeURIComponent(result.message)}`)
             }
-          } else {
-            const ok = await waitForSession(supabase)
-            if (!ok) {
-              if (!cancelled) {
-                router.replace(
-                  `/login?error=${encodeURIComponent("Sign-in did not complete. Please try Microsoft sign-in again.")}`
-                )
-              }
-              return
-            }
+            return
           }
         } else {
           const ok = await waitForSession(supabase, 48)
@@ -127,7 +102,7 @@ function AuthCallbackContent() {
         <p className="text-center text-sm text-muted-foreground">{errorMessage}</p>
         <button
           type="button"
-          className="text-sm font-medium text-primary underline"
+          className="text-sm font-medium text-brand underline"
           onClick={() => router.replace("/login")}
         >
           Back to sign in

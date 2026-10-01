@@ -1,24 +1,32 @@
 /**
- * Apply 046_stock_request_events.sql and run Part B verification checks.
+ * Apply 046_stock_request_events.sql and verify request-event behavior.
+ *
+ * WARNING: this legacy helper applies migration 046 directly. Do not run it
+ * against production. It creates only verify-events-* fixtures and removes all
+ * fixtures in finally, with a zero-residue assertion.
  *
  * Requires in .env.local:
  *   NEXT_PUBLIC_SUPABASE_URL
  *   SUPABASE_SERVICE_ROLE_KEY
- *   SUPABASE_DB_URL  (or DATABASE_URL) — direct/pooler Postgres URI for DDL + auth.uid() tests
+ *   SUPABASE_DB_URL (or DATABASE_URL)
  *
- * Optional for check 1 via app client path:
- *   VERIFY_USER_EMAIL / VERIFY_USER_PASSWORD (non-admin sales or technicians user)
- *   NEXT_PUBLIC_SUPABASE_ANON_KEY
- *
- * Usage: node scripts/apply-and-verify-stock-request-events.mjs
+ * Safety:
+ *   VERIFY_EVENTS_I_KNOW_THIS_IS_NOT_PROD=1 — required or the script exits.
  */
 import fs from "fs"
 import path from "path"
 import { createRequire } from "module"
-import { execSync } from "child_process"
 import { createClient } from "@supabase/supabase-js"
 
 const require = createRequire(import.meta.url)
+const EMAIL_PREFIX = "verify-events-"
+const EMAIL = {
+  admin: "verify-events-admin@test.local",
+  sales: "verify-events-sales@test.local",
+  tech: "verify-events-tech@test.local",
+  accounts: "verify-events-accounts@test.local",
+}
+const FIXTURE_PASSWORD = "VerifyEvents!Temporary"
 
 function loadEnvLocal() {
   const p = path.join(process.cwd(), ".env.local")
@@ -27,376 +35,454 @@ function loadEnvLocal() {
     const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/)
     if (!m) continue
     const key = m[1]
-    let val = m[2].trim()
-    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-      val = val.slice(1, -1)
+    let value = m[2].trim()
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1)
     }
-    if (process.env[key] === undefined) process.env[key] = val
+    if (process.env[key] === undefined) process.env[key] = value
   }
 }
 
-function assert(cond, msg) {
-  if (!cond) throw new Error(msg)
+function assert(condition, message) {
+  if (!condition) throw new Error(message)
+}
+
+function stamp() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
 
 async function main() {
   loadEnvLocal()
+  if (process.env.VERIFY_EVENTS_I_KNOW_THIS_IS_NOT_PROD !== "1") {
+    console.error(
+      "Refusing to apply migration 046 without VERIFY_EVENTS_I_KNOW_THIS_IS_NOT_PROD=1"
+    )
+    process.exit(1)
+  }
+
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
   const dbUrl = process.env.SUPABASE_DB_URL || process.env.DATABASE_URL
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-  const verifyEmail = process.env.VERIFY_USER_EMAIL
-  const verifyPassword = process.env.VERIFY_USER_PASSWORD
-
   assert(url, "Missing NEXT_PUBLIC_SUPABASE_URL")
   assert(serviceKey, "Missing SUPABASE_SERVICE_ROLE_KEY")
-  assert(dbUrl, "Missing SUPABASE_DB_URL or DATABASE_URL (needed for DDL + SET ROLE verification)")
+  assert(dbUrl, "Missing SUPABASE_DB_URL or DATABASE_URL")
 
-  let pg
-  try {
-    pg = require("pg")
-  } catch {
-    console.error("Installing pg…")
-    execSync("npm install pg --no-save", { stdio: "inherit" })
-    pg = require("pg")
-  }
-
-  const sqlPath = path.join(process.cwd(), "supabase/migrations/046_stock_request_events.sql")
-  const migrationSql = fs.readFileSync(sqlPath, "utf8")
-
-  const admin = new pg.Client({ connectionString: dbUrl, ssl: { rejectUnauthorized: false } })
+  const pg = require("pg")
+  const supabaseAdmin = createClient(url, serviceKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  })
+  const admin = new pg.Client({
+    connectionString: dbUrl,
+    ssl: { rejectUnauthorized: false },
+  })
   await admin.connect()
-  console.log("Connected to Postgres")
 
-  console.log("\n=== Applying migration 046_stock_request_events ===")
-  await admin.query(migrationSql)
-  console.log("Migration applied OK")
+  const results = {}
+  const fixtureUserIds = []
+  const requestIds = []
+  const inventoryIds = []
+  const productLineIds = []
+  const clientIds = []
 
-  const report = {
-    check1_actor_resolution: null,
-    check1_actor_ids: [],
-    check2_serial_events: null,
-    check3_immutability: null,
-    check4_read_scope: null,
-    check5_non_blocking: null,
-    set_config_fallback_needed: false,
+  function pass(name, reason) {
+    results[name] = { result: "PASS", reason }
+    console.log(`PASS  ${name} — ${reason}`)
   }
 
-  // Pick users by role
-  const { rows: profiles } = await admin.query(`
-    SELECT id, email, role::text AS role
-    FROM public.profiles
-    WHERE active = true AND role IS NOT NULL
-    ORDER BY role, email
-  `)
-  const byRole = (r) => profiles.find((p) => p.role === r)
-  const sales = byRole("sales") || byRole("technicians")
-  const tech = byRole("technicians") || byRole("admin")
-  const accounts = byRole("accounts")
-  const adminUser = byRole("admin")
-  assert(sales, "Need an active sales or technicians profile for checks")
-  assert(adminUser, "Need an active admin profile for checks")
+  function fail(name, reason) {
+    results[name] = { result: "FAIL", reason }
+    console.log(`FAIL  ${name} — ${reason}`)
+  }
+
+  async function setJwt(client, userId) {
+    await client.query(`SELECT set_config('request.jwt.claim.sub', $1, true)`, [userId])
+    await client.query(`SELECT set_config('request.jwt.claims', $1, true)`, [
+      JSON.stringify({ sub: userId, role: "authenticated" }),
+    ])
+    const { rows } = await client.query(`SELECT auth.uid()::text AS uid`)
+    assert(rows[0]?.uid === userId, `auth.uid() did not resolve for ${userId}`)
+  }
 
   async function asUser(userId, fn) {
-    const client = new pg.Client({ connectionString: dbUrl, ssl: { rejectUnauthorized: false } })
+    const client = new pg.Client({
+      connectionString: dbUrl,
+      ssl: { rejectUnauthorized: false },
+    })
     await client.connect()
     try {
       await client.query("BEGIN")
-      await client.query(`SELECT set_config('request.jwt.claim.sub', $1, true)`, [userId])
-      await client.query(
-        `SELECT set_config('request.jwt.claims', $1, true)`,
-        [JSON.stringify({ sub: userId, role: "authenticated" })]
-      )
-      await client.query(`SET LOCAL ROLE authenticated`)
+      await setJwt(client, userId)
+      await client.query("SET LOCAL ROLE authenticated")
       const result = await fn(client)
       await client.query("COMMIT")
       return result
-    } catch (e) {
-      try {
-        await client.query("ROLLBACK")
-      } catch {
-        /* ignore */
-      }
-      throw e
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {})
+      throw error
     } finally {
       await client.end()
     }
   }
 
-  // Ensure a client exists
-  let clientId
-  {
-    const { rows } = await admin.query(`SELECT id FROM public.clients LIMIT 1`)
-    if (rows[0]) clientId = rows[0].id
-    else {
-      const ins = await admin.query(
-        `INSERT INTO public.clients (id, name, email) VALUES (gen_random_uuid()::text, 'Audit Verify Client', 'audit-verify@example.com') RETURNING id`
-      )
-      clientId = ins.rows[0].id
+  async function deleteFixtureUsersByPrefix() {
+    const { rows } = await admin.query(
+      `SELECT id::text AS id FROM public.profiles WHERE email LIKE $1`,
+      [`${EMAIL_PREFIX}%`]
+    )
+    for (const row of rows) {
+      const { error } = await supabaseAdmin.auth.admin.deleteUser(row.id)
+      if (error) throw new Error(`deleteUser(${row.id}): ${error.message}`)
     }
   }
 
-  console.log("\n=== Check 1: actor_id under authenticated JWT ===")
-  let requestId
-  await asUser(sales.id, async (c) => {
-    const ins = await c.query(
-      `INSERT INTO public.stock_requests (client_id, created_by, status, notes)
-       VALUES ($1, $2, 'draft', 'audit-verify')
-       RETURNING id`,
-      [clientId, sales.id]
+  async function createFixtureUser(email, role) {
+    const { data, error } = await supabaseAdmin.auth.admin.createUser({
+      email,
+      password: FIXTURE_PASSWORD,
+      email_confirm: true,
+    })
+    if (error) throw new Error(`createUser(${email}): ${error.message}`)
+    const id = data.user.id
+    fixtureUserIds.push(id)
+    await admin.query(
+      `UPDATE public.profiles SET role = $2::public.app_role, active = true WHERE id = $1`,
+      [id, role]
     )
-    requestId = ins.rows[0].id
-    await c.query(`UPDATE public.stock_requests SET status = 'submitted' WHERE id = $1`, [requestId])
-    await c.query(`UPDATE public.stock_requests SET status = 'in_progress' WHERE id = $1`, [requestId])
-    await c.query(
-      `UPDATE public.stock_requests SET status = 'serviced', serviced_at = now() WHERE id = $1`,
+    return { id, email, role }
+  }
+
+  async function cleanupRequests() {
+    const { rows } = await admin.query(
+      `SELECT id::text AS id FROM public.stock_requests WHERE notes LIKE 'verify-events %'`
+    )
+    const ids = [...new Set([...requestIds, ...rows.map((row) => row.id)])]
+    for (const id of ids) {
+      await admin.query(`DELETE FROM public.stock_request_events WHERE request_id = $1`, [id])
+      await admin.query(
+        `DELETE FROM public.notifications WHERE metadata->>'request_id' = $1`,
+        [id]
+      )
+      await admin.query(`DELETE FROM public.stock_request_lines WHERE request_id = $1`, [id])
+      await admin.query(`DELETE FROM public.stock_requests WHERE id = $1`, [id])
+    }
+  }
+
+  try {
+    await cleanupRequests()
+    await admin.query(`DELETE FROM public.inventory_items WHERE id LIKE 'inv-verify-events-%'`)
+    await admin.query(`DELETE FROM public.product_lines WHERE id LIKE 'pl-verify-events-%'`)
+    await admin.query(`DELETE FROM public.clients WHERE id LIKE 'CLT-VERIFY-EVENTS-%'`)
+    await deleteFixtureUsersByPrefix()
+
+    console.log("\n=== Applying migration 046 (non-production only) ===")
+    const migrationSql = fs.readFileSync(
+      path.join(process.cwd(), "supabase/migrations/046_stock_request_events.sql"),
+      "utf8"
+    )
+    await admin.query(migrationSql)
+    pass("migration_046", "applied")
+
+    console.log("\n=== Creating dedicated identities and data ===")
+    const adminUser = await createFixtureUser(EMAIL.admin, "admin")
+    const salesUser = await createFixtureUser(EMAIL.sales, "sales")
+    const techUser = await createFixtureUser(EMAIL.tech, "technicians")
+    const accountsUser = await createFixtureUser(EMAIL.accounts, "accounts")
+
+    const clientId = `CLT-VERIFY-EVENTS-${stamp()}`
+    clientIds.push(clientId)
+    await admin.query(
+      `INSERT INTO public.clients (id, name, company, email)
+       VALUES ($1, 'Verify Events', 'Verify Events', $2)`,
+      [clientId, `verify-events-${stamp()}@test.local`]
+    )
+
+    const productId = `pl-verify-events-${stamp()}`
+    const productName = `Verify Events Product ${stamp()}`
+    productLineIds.push(productId)
+    await admin.query(
+      `INSERT INTO public.product_lines (id, product_name, vendor, requires_serial)
+       VALUES ($1, $2, 'General', false)`,
+      [productId, productName]
+    )
+
+    let requestId
+    await asUser(salesUser.id, async (client) => {
+      const { rows } = await client.query(
+        `INSERT INTO public.stock_requests (client_id, created_by, status, notes)
+         VALUES ($1, $2, 'draft', $3)
+         RETURNING id::text AS id`,
+        [clientId, salesUser.id, `verify-events ${stamp()}`]
+      )
+      requestId = rows[0].id
+      requestIds.push(requestId)
+      await client.query(
+        `INSERT INTO public.stock_request_lines
+           (request_id, product_name, quantity_requested, sort_order, product_id)
+         VALUES ($1, $2, 1, 0, $3)`,
+        [requestId, productName, productId]
+      )
+      await client.query(`UPDATE public.stock_requests SET status = 'submitted' WHERE id = $1`, [
+        requestId,
+      ])
+    })
+    await asUser(techUser.id, async (client) => {
+      await client.query(`UPDATE public.stock_requests SET status = 'in_progress' WHERE id = $1`, [
+        requestId,
+      ])
+      await client.query(`UPDATE public.stock_requests SET status = 'serviced' WHERE id = $1`, [
+        requestId,
+      ])
+    })
+
+    console.log("\n=== 1. Lifecycle actor resolution ===")
+    const { rows: lifecycleEvents } = await admin.query(
+      `SELECT event_type, actor_id::text AS actor_id
+       FROM public.stock_request_events
+       WHERE request_id = $1
+       ORDER BY created_at, id`,
       [requestId]
     )
-  })
-
-  const { rows: lifecycleEvents } = await admin.query(
-    `SELECT event_type, actor_id::text AS actor_id, from_status, to_status
-     FROM public.stock_request_events
-     WHERE request_id = $1
-     ORDER BY created_at, event_type`,
-    [requestId]
-  )
-  console.log("Lifecycle events:", JSON.stringify(lifecycleEvents, null, 2))
-  report.check1_actor_ids = lifecycleEvents.map((e) => e.actor_id)
-  const expectedTypes = ["created", "submitted", "in_progress", "serviced"]
-  const gotTypes = lifecycleEvents.map((e) => e.event_type)
-  const actorsOk = lifecycleEvents.every((e) => e.actor_id === sales.id)
-  const typesOk = expectedTypes.every((t) => gotTypes.includes(t))
-  if (actorsOk && typesOk) {
-    report.check1_actor_resolution = "PASS"
-  } else if (lifecycleEvents.some((e) => e.actor_id == null)) {
-    report.check1_actor_resolution = "FAIL (actor_id null)"
-    report.set_config_fallback_needed = true
-  } else {
-    report.check1_actor_resolution = `FAIL types=${gotTypes.join(",")} actors=${report.check1_actor_ids.join(",")}`
-  }
-  console.log("Check 1:", report.check1_actor_resolution, "| expected actor", sales.id)
-
-  console.log("\n=== Check 2: serial_assigned / serial_released ===")
-  // Need in_progress request + matching In Stock item. Reset request to in_progress.
-  await admin.query(`UPDATE public.stock_requests SET status = 'in_progress' WHERE id = $1`, [requestId])
-  let lineId
-  let invId
-  let serial
-  {
-    const line = await admin.query(
-      `INSERT INTO public.stock_request_lines (request_id, product_name, quantity_requested, sort_order)
-       VALUES ($1, $2, 1, 0) RETURNING id, product_name`,
-      [requestId, "__audit_verify_product__"]
-    )
-    lineId = line.rows[0].id
-    // Ensure product line + inventory item
-    let productId
-    const pl = await admin.query(
-      `SELECT id FROM public.product_lines WHERE lower(trim(product_name)) = lower(trim($1)) LIMIT 1`,
-      ["__audit_verify_product__"]
-    )
-    if (pl.rows[0]) productId = pl.rows[0].id
-    else {
-      const created = await admin.query(
-        `INSERT INTO public.product_lines (id, product_name, vendor)
-         VALUES ('pl-audit-verify', '__audit_verify_product__', 'General') RETURNING id`
-      )
-      productId = created.rows[0].id
+    const expectedActors = {
+      created: salesUser.id,
+      submitted: salesUser.id,
+      in_progress: techUser.id,
+      serviced: techUser.id,
     }
-    serial = `AUDIT-VERIFY-${Date.now()}`
-    invId = `inv-audit-${Date.now()}`
+    const lifecycleOk = Object.entries(expectedActors).every(([eventType, actorId]) =>
+      lifecycleEvents.some(
+        (event) => event.event_type === eventType && event.actor_id === actorId
+      )
+    )
+    if (lifecycleOk) pass("lifecycle_actor_resolution", JSON.stringify(expectedActors))
+    else fail("lifecycle_actor_resolution", JSON.stringify(lifecycleEvents))
+
+    console.log("\n=== 2. Serial event capture ===")
+    await asUser(techUser.id, (client) =>
+      client.query(`UPDATE public.stock_requests SET status = 'in_progress' WHERE id = $1`, [
+        requestId,
+      ])
+    )
+    const inventoryId = `inv-verify-events-${stamp()}`
+    const serial = `VERIFY-EVENTS-${stamp()}`
+    inventoryIds.push(inventoryId)
     await admin.query(
-      `INSERT INTO public.inventory_items (
-         id, product_id, serial_number, status, date_added, location
-       ) VALUES ($1, $2, $3, 'In Stock', current_date::text, 'Warehouse')
-       ON CONFLICT (id) DO NOTHING`,
-      [invId, productId, serial]
+      `INSERT INTO public.inventory_items
+         (id, product_id, serial_number, status, date_added, location)
+       VALUES ($1, $2, $3, 'In Stock', current_date::text, 'Warehouse A')`,
+      [inventoryId, productId, serial]
     )
-  }
-
-  // Tech/admin for assign RPC
-  const assignActor = tech?.role === "technicians" || tech?.role === "admin" ? tech.id : adminUser.id
-  await asUser(assignActor, async (c) => {
-    await c.query(`SELECT public.assign_serial_to_request_line($1::uuid, $2)`, [lineId, invId])
-    await c.query(`SELECT public.release_serial_from_request_line($1)`, [invId])
-  })
-
-  const { rows: serialEvents } = await admin.query(
-    `SELECT event_type, actor_id::text AS actor_id, payload
-     FROM public.stock_request_events
-     WHERE request_id = $1 AND event_type IN ('serial_assigned', 'serial_released')
-     ORDER BY created_at`,
-    [requestId]
-  )
-  console.log("Serial events:", JSON.stringify(serialEvents, null, 2))
-  const hasAssigned = serialEvents.some(
-    (e) => e.event_type === "serial_assigned" && e.actor_id === assignActor && e.payload?.serial_number === serial
-  )
-  const hasReleased = serialEvents.some(
-    (e) => e.event_type === "serial_released" && e.actor_id === assignActor && e.payload?.serial_number === serial
-  )
-  report.check2_serial_events = hasAssigned && hasReleased ? "PASS" : "FAIL"
-  console.log("Check 2:", report.check2_serial_events)
-
-  console.log("\n=== Check 3: immutability (direct INSERT/UPDATE/DELETE denied) ===")
-  const immut = { insert: null, update: null, delete: null }
-  await asUser(sales.id, async (c) => {
-    try {
-      await c.query(
-        `INSERT INTO public.stock_request_events (request_id, event_type) VALUES ($1, 'created')`,
-        [requestId]
-      )
-      immut.insert = "ALLOWED (bad)"
-    } catch (e) {
-      immut.insert = `DENIED: ${e.code || e.message}`
-    }
-    try {
-      await c.query(
-        `UPDATE public.stock_request_events SET event_type = 'tampered' WHERE request_id = $1`,
-        [requestId]
-      )
-      // RLS: UPDATE with no policy → 0 rows, not always error
-      const { rowCount } = await c.query(
-        `UPDATE public.stock_request_events SET payload = '{"x":1}'::jsonb WHERE request_id = $1 RETURNING id`,
-        [requestId]
-      )
-      immut.update = rowCount === 0 ? "DENIED (0 rows)" : "ALLOWED (bad)"
-    } catch (e) {
-      immut.update = `DENIED: ${e.code || e.message}`
-    }
-    try {
-      const { rowCount } = await c.query(
-        `DELETE FROM public.stock_request_events WHERE request_id = $1 RETURNING id`,
-        [requestId]
-      )
-      immut.delete = rowCount === 0 ? "DENIED (0 rows)" : "ALLOWED (bad)"
-    } catch (e) {
-      immut.delete = `DENIED: ${e.code || e.message}`
-    }
-  })
-  // Confirm rows still intact
-  const { rows: stillThere } = await admin.query(
-    `SELECT count(*)::int AS n FROM public.stock_request_events WHERE request_id = $1`,
-    [requestId]
-  )
-  const immutOk =
-    String(immut.insert).startsWith("DENIED") &&
-    String(immut.update).startsWith("DENIED") &&
-    String(immut.delete).startsWith("DENIED") &&
-    stillThere[0].n > 0
-  report.check3_immutability = immutOk ? "PASS" : `FAIL ${JSON.stringify(immut)}`
-  console.log("Check 3:", report.check3_immutability, immut)
-
-  console.log("\n=== Check 4: read scope admin/accounts vs sales/technicians ===")
-  async function countAs(userId) {
-    return asUser(userId, async (c) => {
-      const { rows } = await c.query(
-        `SELECT count(*)::int AS n FROM public.stock_request_events WHERE request_id = $1`,
-        [requestId]
-      )
-      return rows[0].n
+    const { rows: lineRows } = await admin.query(
+      `SELECT id::text AS id FROM public.stock_request_lines WHERE request_id = $1`,
+      [requestId]
+    )
+    await asUser(techUser.id, async (client) => {
+      await client.query(`SELECT public.assign_serial_to_request_line($1::uuid, $2)`, [
+        lineRows[0].id,
+        inventoryId,
+      ])
+      await client.query(`SELECT public.release_serial_from_request_line($1)`, [inventoryId])
     })
-  }
-  const nAdmin = await countAs(adminUser.id)
-  const nAccounts = accounts ? await countAs(accounts.id) : null
-  const nSales = await countAs(sales.id)
-  const nTech = tech && tech.id !== sales.id ? await countAs(tech.id) : nSales
-  console.log({ nAdmin, nAccounts, nSales, nTech })
-  const readOk =
-    nAdmin > 0 &&
-    (nAccounts === null || nAccounts > 0) &&
-    nSales === 0 &&
-    nTech === 0
-  report.check4_read_scope = readOk
-    ? "PASS"
-    : `FAIL admin=${nAdmin} accounts=${nAccounts} sales=${nSales} tech=${nTech}`
-  console.log("Check 4:", report.check4_read_scope)
+    const { rows: serialEvents } = await admin.query(
+      `SELECT event_type, actor_id::text AS actor_id, payload
+       FROM public.stock_request_events
+       WHERE request_id = $1
+         AND event_type IN ('serial_assigned', 'serial_released')`,
+      [requestId]
+    )
+    const serialOk = ["serial_assigned", "serial_released"].every((eventType) =>
+      serialEvents.some(
+        (event) =>
+          event.event_type === eventType &&
+          event.actor_id === techUser.id &&
+          event.payload?.serial_number === serial
+      )
+    )
+    if (serialOk) pass("serial_events", "assigned and released events captured")
+    else fail("serial_events", JSON.stringify(serialEvents))
 
-  console.log("\n=== Check 5: non-blocking status_changed path ===")
-  // CHECK constraint prevents illegal status on stock_requests; verify CASE ELSE maps unknown → status_changed
-  // and that a normal status update still succeeds after event machinery is in place.
-  const mapSql = `
-    SELECT CASE $1::text
-      WHEN 'submitted' THEN 'submitted'
-      WHEN 'in_progress' THEN 'in_progress'
-      WHEN 'serviced' THEN 'serviced'
-      WHEN 'invoiced' THEN 'invoiced'
-      WHEN 'cancelled' THEN 'cancelled'
-      ELSE 'status_changed'
-    END AS event_type`
-  const { rows: mapRows } = await admin.query(mapSql, ["weird_future_status"])
-  assert(mapRows[0].event_type === "status_changed", "ELSE branch broken")
-  // Parent write still works: cancel
-  await asUser(adminUser.id, async (c) => {
-    await c.query(`UPDATE public.stock_requests SET status = 'cancelled' WHERE id = $1`, [requestId])
-  })
-  const { rows: cancelEv } = await admin.query(
-    `SELECT event_type, from_status, to_status FROM public.stock_request_events
-     WHERE request_id = $1 AND event_type = 'cancelled' ORDER BY created_at DESC LIMIT 1`,
-    [requestId]
-  )
-  report.check5_non_blocking =
-    mapRows[0].event_type === "status_changed" && cancelEv[0]?.to_status === "cancelled"
-      ? "PASS (ELSE→status_changed present; legitimate cancel succeeded)"
-      : "FAIL"
-  console.log("Check 5:", report.check5_non_blocking)
-
-  // Optional: app client path (pooled) if credentials provided
-  if (anonKey && verifyEmail && verifyPassword) {
-    console.log("\n=== Bonus: app client (anon+password) create draft ===")
-    const browser = createClient(url, anonKey)
-    const { data: authData, error: authErr } = await browser.auth.signInWithPassword({
-      email: verifyEmail,
-      password: verifyPassword,
-    })
-    if (authErr) {
-      console.log("Bonus skipped: sign-in failed", authErr.message)
+    console.log("\n=== 3. Event immutability ===")
+    async function mutationDenied(sql, params) {
+      try {
+        const rowCount = await asUser(salesUser.id, async (client) => {
+          const result = await client.query(sql, params)
+          return result.rowCount
+        })
+        return rowCount === 0
+      } catch (error) {
+        return error.code === "42501" || /permission denied|row-level security/i.test(error.message)
+      }
+    }
+    const mutationDeniedResults = {
+      insert: await mutationDenied(
+        `INSERT INTO public.stock_request_events (request_id, event_type)
+         VALUES ($1, 'tampered')`,
+        [requestId]
+      ),
+      update: await mutationDenied(
+        `UPDATE public.stock_request_events SET payload = '{"bad":true}' WHERE request_id = $1`,
+        [requestId]
+      ),
+      delete: await mutationDenied(
+        `DELETE FROM public.stock_request_events WHERE request_id = $1`,
+        [requestId]
+      ),
+    }
+    if (Object.values(mutationDeniedResults).every(Boolean)) {
+      pass("event_immutability", "insert denied; update/delete affected zero rows")
     } else {
-      const uid = authData.user.id
-      const { data: req, error: reqErr } = await browser
-        .from("stock_requests")
-        .insert({ client_id: clientId, created_by: uid, status: "draft", notes: "pooled-client-verify" })
-        .select("id")
-        .single()
-      if (reqErr) console.log("Bonus insert failed", reqErr.message)
-      else {
-        const { rows } = await admin.query(
-          `SELECT actor_id::text AS actor_id FROM public.stock_request_events
-           WHERE request_id = $1 AND event_type = 'created'`,
-          [req.id]
+      fail("event_immutability", JSON.stringify(mutationDeniedResults))
+    }
+
+    console.log("\n=== 4. Event read scope ===")
+    async function countEvents(userId) {
+      return asUser(userId, async (client) => {
+        const { rows } = await client.query(
+          `SELECT count(*)::int AS n FROM public.stock_request_events WHERE request_id = $1`,
+          [requestId]
         )
-        console.log("Pooled client created actor_id:", rows[0]?.actor_id, "expected", uid)
-        if (rows[0]?.actor_id !== uid) {
-          report.set_config_fallback_needed = true
-          report.check1_actor_resolution += " | BONUS pooled path actor mismatch"
+        return rows[0].n
+      })
+    }
+    const scope = {
+      admin: await countEvents(adminUser.id),
+      accounts: await countEvents(accountsUser.id),
+      sales: await countEvents(salesUser.id),
+      tech: await countEvents(techUser.id),
+    }
+    if (scope.admin > 0 && scope.accounts > 0 && scope.sales === 0 && scope.tech === 0) {
+      pass("event_read_scope", JSON.stringify(scope))
+    } else {
+      fail("event_read_scope", JSON.stringify(scope))
+    }
+
+    console.log("\n=== 5. Non-blocking status-change path ===")
+    const { rows: mapping } = await admin.query(
+      `SELECT CASE $1::text
+         WHEN 'submitted' THEN 'submitted'
+         WHEN 'in_progress' THEN 'in_progress'
+         WHEN 'serviced' THEN 'serviced'
+         WHEN 'invoiced' THEN 'invoiced'
+         WHEN 'cancelled' THEN 'cancelled'
+         ELSE 'status_changed'
+       END AS event_type`,
+      ["future_status"]
+    )
+    await asUser(adminUser.id, (client) =>
+      client.query(`UPDATE public.stock_requests SET status = 'cancelled' WHERE id = $1`, [
+        requestId,
+      ])
+    )
+    const { rows: cancelledEvents } = await admin.query(
+      `SELECT event_type, from_status, to_status
+       FROM public.stock_request_events
+       WHERE request_id = $1
+         AND event_type = 'cancelled'
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [requestId]
+    )
+    if (
+      mapping[0]?.event_type === "status_changed" &&
+      cancelledEvents[0]?.to_status === "cancelled"
+    ) {
+      pass("non_blocking_status_change", "ELSE mapping present; legitimate cancel succeeded")
+    } else {
+      fail(
+        "non_blocking_status_change",
+        JSON.stringify({ mapping: mapping[0], cancelled: cancelledEvents[0] })
+      )
+    }
+  } finally {
+    console.log("\n=== Cleanup and residue assertion ===")
+    try {
+      for (const id of inventoryIds) {
+        await admin
+          .query(
+            `UPDATE public.inventory_items
+             SET reserved_for_request_line_id = NULL
+             WHERE id = $1`,
+            [id]
+          )
+          .catch(() => {})
+      }
+      await admin.query(`DELETE FROM public.inventory_items WHERE id LIKE 'inv-verify-events-%'`)
+      await cleanupRequests()
+      await admin.query(`DELETE FROM public.product_lines WHERE id LIKE 'pl-verify-events-%'`)
+      await admin.query(`DELETE FROM public.clients WHERE id LIKE 'CLT-VERIFY-EVENTS-%'`)
+
+      if (fixtureUserIds.length > 0 && (await tableExists(admin, "profile_access_events"))) {
+        await admin.query(
+          `DELETE FROM public.profile_access_events WHERE profile_id = ANY($1::uuid[])`,
+          [fixtureUserIds]
+        )
+      }
+      for (const id of [...new Set(fixtureUserIds)]) {
+        const { error } = await supabaseAdmin.auth.admin.deleteUser(id)
+        if (error && !/not found/i.test(error.message)) {
+          throw new Error(`deleteUser(${id}): ${error.message}`)
         }
       }
-      await browser.auth.signOut()
+      await deleteFixtureUsersByPrefix()
+
+      const profileAuditCount = (await tableExists(admin, "profile_access_events"))
+        ? `(SELECT count(*)::int
+            FROM public.profile_access_events e
+            LEFT JOIN public.profiles p ON p.id = e.profile_id
+            WHERE e.profile_id = ANY($1::uuid[]) OR p.email LIKE $2)`
+        : "0"
+      const { rows } = await admin.query(
+        `SELECT
+          (SELECT count(*)::int FROM public.stock_requests
+            WHERE notes LIKE 'verify-events %') AS requests,
+          (SELECT count(*)::int FROM public.stock_request_lines
+            WHERE request_id = ANY($3::uuid[])) AS lines,
+          (SELECT count(*)::int FROM public.stock_request_events
+            WHERE request_id = ANY($3::uuid[])) AS request_events,
+          (SELECT count(*)::int FROM public.notifications
+            WHERE metadata->>'request_id' = ANY($4::text[])) AS notifications,
+          (SELECT count(*)::int FROM public.inventory_items
+            WHERE id LIKE 'inv-verify-events-%') AS inventory,
+          (SELECT count(*)::int FROM public.product_lines
+            WHERE id LIKE 'pl-verify-events-%') AS products,
+          (SELECT count(*)::int FROM public.clients
+            WHERE id LIKE 'CLT-VERIFY-EVENTS-%') AS clients,
+          (SELECT count(*)::int FROM public.profiles
+            WHERE email LIKE $2) AS profiles,
+          ${profileAuditCount} AS profile_events`,
+        [fixtureUserIds, `${EMAIL_PREFIX}%`, requestIds, requestIds]
+      )
+      const residue = rows[0]
+      if (Object.values(residue).every((count) => count === 0)) {
+        pass("zero_residue", JSON.stringify(residue))
+      } else {
+        fail("zero_residue", JSON.stringify(residue))
+      }
+    } catch (error) {
+      fail("zero_residue", error.message)
+    } finally {
+      await admin.end().catch(() => {})
     }
   }
 
-  // Cleanup verification inventory (keep events for inspection unless asked)
-  await admin.query(`UPDATE public.inventory_items SET reserved_for_request_line_id = NULL WHERE id = $1`, [invId])
-  await admin.query(`DELETE FROM public.inventory_items WHERE id = $1`, [invId])
-
-  await admin.end()
-
-  console.log("\n========== PART B REPORT ==========")
-  console.log(JSON.stringify(report, null, 2))
-  console.log("set_config fallback needed:", report.set_config_fallback_needed)
-  console.log("===================================")
-
-  if (report.set_config_fallback_needed) {
-    process.exitCode = 2
-  } else if (
-    Object.values(report).some((v) => typeof v === "string" && v.startsWith("FAIL"))
-  ) {
+  console.log("\n========== STOCK REQUEST EVENTS REPORT ==========")
+  console.log(JSON.stringify(results, null, 2))
+  console.log("=================================================")
+  if (Object.values(results).some((result) => result.result === "FAIL")) {
     process.exitCode = 1
   }
 }
 
-main().catch((e) => {
-  console.error(e)
+async function tableExists(client, tableName) {
+  const { rows } = await client.query(`SELECT to_regclass($1) IS NOT NULL AS exists`, [
+    `public.${tableName}`,
+  ])
+  return rows[0].exists
+}
+
+main().catch((error) => {
+  console.error(error)
   process.exit(1)
 })

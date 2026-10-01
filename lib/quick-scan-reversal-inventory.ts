@@ -1,3 +1,5 @@
+import { businessDateToIso, DEFAULT_ORG_TIMEZONE, todayBusinessDate } from "@/lib/business-date.mjs"
+import { fetchAppSettings } from "@/lib/settings"
 import type { AppSupabaseClient } from "@/lib/supabase/app-client"
 import type { Database } from "@/lib/supabase/database.types"
 import type { InternalLocation, InventoryItem, ItemStatus, JsonValue } from "@/lib/data"
@@ -7,6 +9,7 @@ import {
   INVENTORY_ITEM_SELECT,
   type InventoryItemQueryRow,
 } from "@/lib/supabase/inventory-db"
+import { fetchAllPages } from "@/lib/supabase/postgrest-page"
 
 const SUPPORTED_STOCK_REVERSAL = ["Inbound", "Sale", "POC Out", "Rentals", "Dispose", "Transfer"] as const
 export type QuickScanStockReversibleType = (typeof SUPPORTED_STOCK_REVERSAL)[number]
@@ -27,6 +30,7 @@ export type QuickScanBatchTxn = {
   serial_number: string
   movement_type: string | null
   date: string
+  created_at: string | null
   metadata: JsonValue | null
   from_location: string | null
   to_location: string | null
@@ -45,20 +49,29 @@ export async function fetchActiveBatchTransactions(
     return []
   }
 
-  const { data, error } = await supabase
-    .from("transactions")
-    .select("id, serial_number, type, date, metadata, from_location, to_location, item_name, client, client_id")
-    .eq("batch_id", batchId)
-    .order("serial_number")
-  if (error) {
+  let data
+  try {
+    data = await fetchAllPages((from, to) =>
+      supabase
+        .from("transactions")
+        .select(
+          "id, serial_number, type, date, created_at, metadata, from_location, to_location, item_name, client, client_id"
+        )
+        .eq("batch_id", batchId)
+        .order("serial_number", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, to)
+    )
+  } catch (error) {
     console.error("fetchActiveBatchTransactions:", error)
     return null
   }
-  return (data ?? []).map((r) => ({
+  return data.map((r) => ({
     id: r.id,
     serial_number: r.serial_number,
     movement_type: r.type,
     date: r.date,
+    created_at: r.created_at ?? null,
     metadata: (r.metadata ?? null) as JsonValue | null,
     from_location: r.from_location ?? null,
     to_location: r.to_location ?? null,
@@ -191,27 +204,88 @@ function inferPriorStateFromTxn(
   }
 }
 
+type TransactionOrderPoint = {
+  date: string
+  created_at: string | null
+}
+
+function effectiveMovementTime(row: TransactionOrderPoint): number {
+  return Date.parse(row.created_at ?? row.date)
+}
+
+function isReversalLedger(row: { type?: string | null; metadata?: JsonValue | null }): boolean {
+  if (row.type === "Reversal") return true
+  const meta = row.metadata
+  return Boolean(
+    meta && typeof meta === "object" && !Array.isArray(meta) && "reversedBatchId" in meta && meta.reversedBatchId
+  )
+}
+
+/**
+ * True when candidate is provably later, or its same-day NULL created_at makes
+ * the order unknowable. Reversal must fail closed for that legacy ambiguity.
+ */
+export function isSubsequentMovement(
+  candidate: TransactionOrderPoint,
+  original: TransactionOrderPoint
+): boolean {
+  const candidateTime = effectiveMovementTime(candidate)
+  const originalTime = effectiveMovementTime(original)
+  if (!Number.isFinite(candidateTime) || !Number.isFinite(originalTime)) return true
+  if (candidateTime > originalTime) return true
+  return candidate.date === original.date && candidate.created_at === null
+}
+
+function isEarlierMovement(
+  candidate: TransactionOrderPoint,
+  original: TransactionOrderPoint
+): boolean {
+  if (
+    candidate.date === original.date &&
+    (candidate.created_at === null || original.created_at === null)
+  ) {
+    return false
+  }
+  const candidateTime = effectiveMovementTime(candidate)
+  const originalTime = effectiveMovementTime(original)
+  return (
+    Number.isFinite(candidateTime) &&
+    Number.isFinite(originalTime) &&
+    candidateTime < originalTime
+  )
+}
+
 async function hasSubsequentMovement(
   supabase: AppSupabaseClient,
   serial: string,
   inboundTxnId: string,
   inboundDate: string,
+  inboundCreatedAt: string | null,
   batchId: string
 ): Promise<boolean> {
-  const { data, error } = await supabase
-    .from("transactions")
-    .select("id, batch_id, date")
-    .eq("serial_number", serial)
-    .neq("id", inboundTxnId)
-  if (error) {
+  let data
+  try {
+    data = await fetchAllPages((from, to) =>
+      supabase
+        .from("transactions")
+        .select("id, batch_id, date, created_at, type, metadata")
+        .eq("serial_number", serial)
+        .neq("id", inboundTxnId)
+        .order("id", { ascending: true })
+        .range(from, to)
+    )
+  } catch (error) {
     console.error("hasSubsequentMovement:", error)
     return true
   }
-  return (data ?? []).some((row) => {
-    if (row.batch_id === batchId) return false
+  return data.some((row) => {
+    if (row.batch_id === batchId || isReversalLedger(row)) return false
     const rowDate = row.date?.trim() ?? ""
     if (!rowDate) return true
-    return rowDate > inboundDate
+    return isSubsequentMovement(
+      { date: rowDate, created_at: row.created_at },
+      { date: inboundDate, created_at: inboundCreatedAt }
+    )
   })
 }
 
@@ -295,7 +369,7 @@ async function planInboundEntry(
     return null
   }
 
-  if (await hasSubsequentMovement(supabase, serial, txn.id, txn.date, batchId)) {
+  if (await hasSubsequentMovement(supabase, serial, txn.id, txn.date, txn.created_at, batchId)) {
     errors.push(`${serial}: has later movements — reverse those first or correct manually`)
     return null
   }
@@ -306,13 +380,32 @@ async function planInboundEntry(
     meta.inboundCreated === true || (meta.inboundCreated !== false && item.dateAdded === inboundDateOnly)
 
   if (createdByInbound) {
-    const { count: priorCount } = await supabase
-      .from("transactions")
-      .select("id", { count: "exact", head: true })
-      .eq("serial_number", serial)
-      .neq("id", txn.id)
-      .lt("date", txn.date)
-    if ((priorCount ?? 0) > 0) {
+    let otherTransactions
+    try {
+      otherTransactions = await fetchAllPages((from, to) =>
+        supabase
+          .from("transactions")
+          .select("id, batch_id, date, created_at, type, metadata")
+          .eq("serial_number", serial)
+          .neq("id", txn.id)
+          .order("id", { ascending: true })
+          .range(from, to)
+      )
+    } catch (error) {
+      console.error("planInboundEntry prior history:", error)
+      errors.push(`${serial}: could not read transaction history`)
+      return null
+    }
+    const hasPriorHistory = otherTransactions.some(
+      (row) =>
+        row.batch_id !== batchId &&
+        !isReversalLedger(row) &&
+        isEarlierMovement(
+          { date: row.date, created_at: row.created_at },
+          { date: txn.date, created_at: txn.created_at }
+        )
+    )
+    if (hasPriorHistory) {
       errors.push(`${serial}: cannot delete — prior transaction history exists`)
       return null
     }
@@ -336,15 +429,37 @@ async function planInboundEntry(
     priorClient = meta.previousClient ?? undefined
     priorAssignedTo = meta.previousAssignedTo ?? undefined
   } else {
-    const { data: priorTxn } = await supabase
-      .from("transactions")
-      .select("type, to_location")
-      .eq("serial_number", serial)
-      .neq("id", txn.id)
-      .lt("date", txn.date)
-      .order("date", { ascending: false })
-      .limit(1)
-      .maybeSingle()
+    let priorTransactions
+    try {
+      priorTransactions = await fetchAllPages((from, to) =>
+        supabase
+          .from("transactions")
+          .select("type, to_location, batch_id, date, created_at, metadata")
+          .eq("serial_number", serial)
+          .neq("id", txn.id)
+          .order("id", { ascending: true })
+          .range(from, to)
+      )
+    } catch (error) {
+      console.error("planInboundEntry prior movement:", error)
+      errors.push(`${serial}: could not read transaction history`)
+      return null
+    }
+    const priorTxn = priorTransactions
+      .filter(
+        (row) =>
+          row.batch_id !== batchId &&
+          !isReversalLedger(row) &&
+          isEarlierMovement(
+            { date: row.date, created_at: row.created_at },
+            { date: txn.date, created_at: txn.created_at }
+          )
+      )
+      .sort(
+        (a, b) =>
+          effectiveMovementTime({ date: b.date, created_at: b.created_at }) -
+          effectiveMovementTime({ date: a.date, created_at: a.created_at })
+      )[0]
     if (priorTxn?.type) {
       const inferred = inferPriorStateFromTxn(priorTxn.type, priorTxn.to_location, returnLocation)
       priorStatus = inferred.status
@@ -376,9 +491,10 @@ function buildReversalLedgerRow(options: {
   returnLocation: InternalLocation
   originalMovementType: string
   createdBy?: string
-  nowIso?: string
+  businessDate?: string
 }): Database["public"]["Tables"]["transactions"]["Insert"] {
-  const nowIso = options.nowIso ?? new Date().toISOString()
+  const businessDate =
+    options.businessDate ?? businessDateToIso(todayBusinessDate(DEFAULT_ORG_TIMEZONE))
   const serials = [...new Set(options.batchTxns.map((t) => t.serial_number.trim()).filter(Boolean))].sort()
   const productNames = [...new Set(options.batchTxns.map((t) => t.item_name.trim()).filter(Boolean))].sort()
   let itemName = "Batch reversal"
@@ -397,7 +513,7 @@ function buildReversalLedgerRow(options: {
     serial_number: "(batch)",
     item_name: itemName,
     client,
-    date: nowIso,
+    date: businessDate,
     client_id: clientId,
     notes: options.reversalReason,
     batch_id: options.reversalBatchId,
@@ -557,6 +673,13 @@ export async function revertInventoryAndTransactionsForQuickScan(
   }))
 
   const reversalBatchId = `BATCH-REV-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+  let orgTimeZone = DEFAULT_ORG_TIMEZONE
+  try {
+    const settings = await fetchAppSettings(supabase)
+    if (settings.timezone.trim()) orgTimeZone = settings.timezone.trim()
+  } catch {
+    // app_settings.timezone is the source when the read succeeds. The fallback matches the column default.
+  }
   const reversalLedgerRow = buildReversalLedgerRow({
     batchId,
     batchTxns,
@@ -565,6 +688,7 @@ export async function revertInventoryAndTransactionsForQuickScan(
     returnLocation,
     originalMovementType: movementType,
     createdBy,
+    businessDate: businessDateToIso(todayBusinessDate(orgTimeZone)),
   })
 
   const { data, error } = await supabase.rpc("reverse_quick_scan_batch", {
@@ -723,16 +847,22 @@ export async function getQuickScanBatchReversalCompleteness(
     return null
   }
 
-  const { data: txRows, error: txErr } = await supabase
-    .from("transactions")
-    .select("serial_number, type, to_location")
-    .eq("batch_id", batchId)
-  if (txErr) {
+  let txRows
+  try {
+    txRows = await fetchAllPages((from, to) =>
+      supabase
+        .from("transactions")
+        .select("serial_number, type, to_location")
+        .eq("batch_id", batchId)
+        .order("id", { ascending: true })
+        .range(from, to)
+    )
+  } catch (txErr) {
     console.error("getQuickScanBatchReversalCompleteness transactions:", txErr)
     return null
   }
 
-  const remainingTransactions = (txRows ?? []).length
+  const remainingTransactions = txRows.length
   if (remainingTransactions === 0) {
     return {
       batchId,
@@ -742,17 +872,23 @@ export async function getQuickScanBatchReversalCompleteness(
     }
   }
 
-  const serials = [...new Set((txRows ?? []).map((t) => t.serial_number?.trim()).filter(Boolean) as string[])]
-  const { data: invRows, error: invErr } = await supabase
-    .from("inventory_items")
-    .select("serial_number, status, location, deleted_at")
-    .in("serial_number", serials)
-  if (invErr) {
+  const serials = [...new Set(txRows.map((t) => t.serial_number?.trim()).filter(Boolean) as string[])]
+  let invRows
+  try {
+    invRows = await fetchAllPages((from, to) =>
+      supabase
+        .from("inventory_items")
+        .select("serial_number, status, location, deleted_at")
+        .in("serial_number", serials)
+        .order("id", { ascending: true })
+        .range(from, to)
+    )
+  } catch (invErr) {
     console.error("getQuickScanBatchReversalCompleteness inventory_items:", invErr)
     return null
   }
 
-  const invBySerial = new Map((invRows ?? []).map((r) => [r.serial_number, r]))
+  const invBySerial = new Map(invRows.map((r) => [r.serial_number, r]))
   const outgoingStatus: Record<string, string> = {
     Inbound: "In Stock",
     Sale: "Sold",
@@ -761,7 +897,7 @@ export async function getQuickScanBatchReversalCompleteness(
     Dispose: "Disposed",
   }
   const nonRevertedSerials = new Set<string>()
-  for (const tx of txRows ?? []) {
+  for (const tx of txRows) {
     const serial = tx.serial_number?.trim()
     if (!serial) continue
     const inv = invBySerial.get(serial)

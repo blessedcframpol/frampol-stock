@@ -14,7 +14,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { Badge } from "@/components/ui/badge"
+import { StatusPill } from "@/components/fs/status-pill"
 import { formatDateDDMMYYYY } from "@/lib/utils"
 import { toast } from "sonner"
 import { Loader2, Trash2, RotateCcw, Eraser } from "lucide-react"
@@ -150,12 +150,12 @@ export function InventoryTrashContent() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="text-xs">Serial</TableHead>
-                  <TableHead className="text-xs">Product</TableHead>
-                  <TableHead className="text-xs">Status</TableHead>
-                  <TableHead className="text-xs">Deleted</TableHead>
-                  <TableHead className="text-xs">Days left</TableHead>
-                  <TableHead className="text-xs w-[200px]">Actions</TableHead>
+                  <TableHead>Serial</TableHead>
+                  <TableHead>Product</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Deleted</TableHead>
+                  <TableHead>Days left</TableHead>
+                  <TableHead className="w-[200px]">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -169,9 +169,7 @@ export function InventoryTrashContent() {
                         {item.name}
                       </TableCell>
                       <TableCell>
-                        <Badge variant="secondary" className="text-[10px]">
-                          {item.status}
-                        </Badge>
+                        <StatusPill value={item.status} />
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">
                         {item.deletedAt ? formatDateDDMMYYYY(item.deletedAt.slice(0, 10)) : "—"}

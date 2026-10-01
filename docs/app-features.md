@@ -50,7 +50,7 @@ Separate **who can change stock**, **who can fulfill requests**, **who can invoi
 | **Batch reversal** | admin only — enforced in the DB function body (`reverse_quick_scan_batch`), not only at the API route (`canReverseQuickScanBatches`) |
 | **Inventory add / edit / trash** | admin only (`canEditInventory`) — deliberately stricter than RLS write policies on `inventory_items` |
 
-`requireAdmin()` (`lib/require-admin.ts`) is **application-only** — no schema change. It extracted the shared admin-auth preamble and closed a missing `profiles.active` check on GET/POST `/api/admin/profiles` and PATCH `/api/admin/profiles/[id]`: a deactivated admin previously passed those handlers because they checked role only, while `get_my_role()` and `/api/quick-scan/reverse` already required `active`. Covered by `scripts/verify-050-admin-auth.mjs`.
+`requireAdmin()` (`lib/require-admin.ts`) is **application-only** — no schema change. It provides the shared admin-auth preamble for GET `/api/admin/profiles` and PATCH `/api/admin/profiles/[id]`, including the `profiles.active` check. The former admin POST user-creation handler was removed when authentication became Microsoft-only. Covered by `scripts/verify-050-admin-auth.mjs`.
 
 Migration **050 does not exist**. The later sequence is 047, 048, 049, 051, 052, 053. Numbers are ordered, not contiguous. The verify-050 script name is the admin-auth gate, not a missing SQL file.
 
@@ -111,7 +111,7 @@ Operational snapshot: how much is sellable, what is out, whether reorder is need
 - **Total inventory** — Count of items with status **In Stock** (sellable pool). Not the same as “every row in DB.”
 - **Items sold** — Count of **Sold** rows (historical footprint still in inventory table).
 - **POC active** — Count **POC** (trial units at client site).
-- **Low stock alerts** — Number of **product groups** (by name/vendor grouping in alert logic) under reorder threshold. Uses `getReorderLevelForProduct` / overrides from **Settings**; values hydrate on client after mount to match `localStorage` reorder settings (avoids SSR/client mismatch).
+- **Low stock alerts** — Active product lines that have at least one non-deleted inventory row and whose live **In Stock** count is at or below the effective reorder threshold. Never-stocked catalogue lines are omitted; sold-out lines still alert. Dashboard, Alerts, navigation, and the header bell all read `low_stock_products`, the only low-stock definition.
 
 ### Quick Scan panel
 
@@ -141,7 +141,8 @@ Operational snapshot: how much is sellable, what is out, whether reorder is need
 
 ### Login (`/login`)
 
-- User authenticates via Supabase (method depends on project config: OAuth providers, magic link, etc.).
+- The only sign-in method is Microsoft via the Supabase Azure provider. Email/password sign-in, self-service email sign-up, and password recovery are not exposed by the app.
+- Supabase Auth sign-ups stay enabled so a first-time Microsoft user can create an auth identity and profile.
 
 ### Callback (`/auth/callback`)
 
@@ -166,7 +167,7 @@ Chunking in `@supabase/ssr` **0.5.2** works; that version already emits leftover
 
 - **When:** Logged in but `hasAppAccess(profile)` is false (`!active` or `role == null`).
 - **UX:** Explains **inactive** vs **no role**; offers refresh/poll so when an admin fixes the profile, the user can continue without re-login.
-- **Why:** Self-service signup can create users before an admin assigns a role.
+- **Why:** A first-time Microsoft sign-in creates a profile before an admin assigns a role.
 
 ---
 
@@ -374,11 +375,12 @@ Proactive operations list: reorder, warranty, return discipline.
 
 ### Data source
 
-- **`getAlerts()`** on inventory store — pure function over current `inventory` + reorder settings.
+- **Low stock** — `low_stock_products`. The app helper only maps rows the view already classified; it does not recount stock or reapply a threshold.
+- **Other alerts** — `getAlerts()` on the inventory store, for warranty and return dates only.
 
 ### Tabs / categories
 
-- **Low stock** — Groups **In Stock** items by product (and vendor where applicable) vs threshold; links or copy suggest going to Inventory / Movement.
+- **Low stock** — One row per product from `low_stock_products` where `is_low` is true.
 - **Warranty** — Items with **warranty end** in upcoming window; excludes statuses that should not alert (per store logic).
 - **Returns** — **POC** and **Rented** items: **overdue** (past `returnDate`) and **approaching** (within N days). Uses `pocOutDate` / `returnDate` fields.
 
@@ -473,15 +475,11 @@ Sales-driven workflow: quote → submit → technician fulfills with real serial
 
 ### Purpose
 
-High-level analytics: revenue, sales counts, top clients, charts.
+Placeholder until live reporting ships (stock cover, POC pipeline, overdue rentals). Admin and accounts can open `/reports`; there are no charts, numbers, or export.
 
 ### Current implementation note
 
-- **`reports-content.tsx`** largely consumes **static/demo aggregates** from `lib/data.ts` (`monthlySales`, `clients`, etc.). It is useful for **UI demonstration**; for production you would point charts at Supabase views or API aggregates.
-
-### Export
-
-- **Export CSV** button is present in the UI; verify it exports live data if you extend the module.
+- **`reports-content.tsx`** is a static “in development” card. It does not read mock aggregates or live queries.
 
 ---
 
@@ -489,26 +487,27 @@ High-level analytics: revenue, sales counts, top clients, charts.
 
 ### Purpose
 
-Per-user profile, local notification preferences, inventory thresholds, and **admin user management**.
+Per-user profile, database-backed low-stock settings, inventory thresholds, and **admin user management**.
 
 ### Profile tab
 
 - Update **display name** (stored in `profiles`).
 
-### Notifications tab
+### Email alerts tab
 
-- **Low stock email** — Enable/disable and comma-separated recipient list stored in **`localStorage`** via `lib/settings.ts` (browser-only; not a server cron by itself).
+- **Low stock email** — Database-backed enable flag and recipient list in the singleton `app_settings` row. No sender exists yet, so the UI states that emails are not being sent.
 
-### Inventory tab
+### Reorder levels tab
 
 - **Default reorder level** — Applies to any product without an override.
-- **Per-product overrides** — Table of product names (from current inventory name set) with individual thresholds. Drives **low stock** alerts and dashboard stat.
+- **Per-product settings** — Admin-editable `product_lines.reorder_level` and `is_active`, with current in-stock count. Blank thresholds use the default; inactive products are excluded from alerts.
+- Sales, accounts, and technicians retain Settings access but see reorder and email settings read-only. Viewer access remains blocked, matching existing Settings rules.
 
 ### User management (`/users`, admin)
 
 - Lists **`profiles`**: name, email, role, active status, joined date.
-- Search and filter by role / status; create users and edit name, role, and active flag via **`/api/admin/profiles`**.
-- New OAuth users appear here with **no role** until admin assigns one (see **Pending role** page).
+- Search and filter by role / status; edit name, role, and active flag via **`PATCH /api/admin/profiles/[id]`**.
+- People appear after their first Microsoft sign-in. New users have **no role** until an admin assigns one (see **Pending role** page).
 - Settings → Users links admins to this page.
 
 ### Theme

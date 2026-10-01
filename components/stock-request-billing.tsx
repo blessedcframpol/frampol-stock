@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/table"
 import { useAuth } from "@/lib/auth-context"
 import { getSupabaseClient } from "@/lib/supabase/client"
+import { formatClientLabel } from "@/lib/client-label"
 import {
   fetchAssignedCountsByLineId,
   fetchStockRequestById,
@@ -34,11 +35,15 @@ import {
   signedOutLoadError,
 } from "@/lib/unauthorized"
 import { AlertCircle, ExternalLink, Loader2 } from "lucide-react"
-import { PageBackLink, PageHeader } from "@/components/page-nav"
+import { PageHeader } from "@/components/page-nav"
+import { PageBreadcrumbs } from "@/components/page-breadcrumbs"
+import { SignedStorageLink } from "@/components/signed-storage-link"
+import { canInvoiceStockRequests } from "@/lib/permissions"
 
 export function StockRequestBilling({ requestId }: { requestId: string }) {
   const router = useRouter()
-  const { user } = useAuth()
+  const { user, role } = useAuth()
+  const canInvoice = canInvoiceStockRequests(role)
   const [row, setRow] = useState<StockRequestWithRelations | null>(null)
   const [assigned, setAssigned] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(true)
@@ -132,7 +137,7 @@ export function StockRequestBilling({ requestId }: { requestId: string }) {
       const sb = getSupabaseClient()
       let docUrl: string | null = null
       if (file) {
-        docUrl = await uploadInvoiceDocumentForRequest(sb, row.id, file)
+        docUrl = await uploadInvoiceDocumentForRequest(row.id, file)
       }
       await markRequestInvoiced(sb, row.id, {
         invoiceNumber: invoiceNumber.trim(),
@@ -149,6 +154,23 @@ export function StockRequestBilling({ requestId }: { requestId: string }) {
     }
   }
 
+  if (!canInvoice) {
+    return (
+      <div className="flex flex-col gap-4">
+        <PageBreadcrumbs
+          items={[
+            { label: "Requests", href: "/requests" },
+            { label: requestId, href: `/requests/${requestId}` },
+            { label: "Billing" },
+          ]}
+        />
+        <p className="text-sm text-muted-foreground">
+          Your account has read-only access to stock requests.
+        </p>
+      </div>
+    )
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20 text-muted-foreground gap-2">
@@ -161,7 +183,7 @@ export function StockRequestBilling({ requestId }: { requestId: string }) {
   if (loadError) {
     return (
       <div className="flex flex-col gap-4">
-        <PageBackLink href="/requests" label="Requests" />
+        <PageBreadcrumbs items={[{ label: "Requests", href: "/requests" }, { label: requestId }]} />
         <p role="alert" className="text-sm text-destructive">
           {loadError}
         </p>
@@ -172,7 +194,7 @@ export function StockRequestBilling({ requestId }: { requestId: string }) {
   if (!row) {
     return (
       <div className="flex flex-col gap-4">
-        <PageBackLink href="/requests" label="Requests" />
+        <PageBreadcrumbs items={[{ label: "Requests", href: "/requests" }, { label: requestId }]} />
         <p className="text-sm text-muted-foreground">Request not found.</p>
       </div>
     )
@@ -181,7 +203,13 @@ export function StockRequestBilling({ requestId }: { requestId: string }) {
   if (row.status !== "serviced" && row.status !== "invoiced") {
     return (
       <div className="flex flex-col gap-4 max-w-xl">
-        <PageBackLink href={`/requests/${row.id}`} label="Request" />
+        <PageBreadcrumbs
+          items={[
+            { label: "Requests", href: "/requests" },
+            { label: row.id, href: `/requests/${row.id}` },
+            { label: "Billing" },
+          ]}
+        />
         <p className="text-sm text-muted-foreground">
           Billing is available once the request is serviced (current: {row.status}).
         </p>
@@ -195,14 +223,20 @@ export function StockRequestBilling({ requestId }: { requestId: string }) {
     <div className="flex flex-col gap-6 max-w-3xl">
       <PageHeader
         title="Billing"
-        description={row.client ? `${row.client.name} — ${row.client.company}` : row.client_id}
-        back={{ href: `/requests/${row.id}` }}
+        description={row.client ? formatClientLabel(row.client) : row.client_id}
+      />
+      <PageBreadcrumbs
+        items={[
+          { label: "Requests", href: "/requests" },
+          { label: row.id, href: `/requests/${row.id}` },
+          { label: "Billing" },
+        ]}
       />
 
       {row.status === "serviced" && !gate.ok && (
         <div
           role="alert"
-          className="flex gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-900 dark:text-amber-100"
+          className="flex gap-3 rounded-lg border border-warning/40 bg-warning-soft px-4 py-3 text-sm text-warning"
         >
           <AlertCircle className="size-5 shrink-0" />
           <p>{gate.message}</p>
@@ -247,15 +281,13 @@ export function StockRequestBilling({ requestId }: { requestId: string }) {
       </Card>
 
       {row.quotation_url && (
-        <a
-          href={row.quotation_url}
-          target="_blank"
-          rel="noreferrer"
-          className="text-sm text-primary inline-flex items-center gap-1 w-fit"
+        <SignedStorageLink
+          path={row.quotation_url}
+          className="text-sm text-brand inline-flex items-center gap-1 w-fit"
         >
           Quotation
           <ExternalLink className="size-3.5" />
-        </a>
+        </SignedStorageLink>
       )}
 
       {readOnlyInvoiced ? (
@@ -273,10 +305,13 @@ export function StockRequestBilling({ requestId }: { requestId: string }) {
               </p>
             ) : null}
             {row.invoice_document_url ? (
-              <a href={row.invoice_document_url} target="_blank" rel="noreferrer" className="text-primary inline-flex items-center gap-1">
+              <SignedStorageLink
+                path={row.invoice_document_url}
+                className="text-brand inline-flex items-center gap-1"
+              >
                 Invoice document
                 <ExternalLink className="size-3.5" />
-              </a>
+              </SignedStorageLink>
             ) : null}
           </CardContent>
         </Card>
@@ -302,7 +337,7 @@ export function StockRequestBilling({ requestId }: { requestId: string }) {
                 <Label>Invoice PDF (optional)</Label>
                 <Input
                   type="file"
-                  accept=".pdf,image/jpeg,image/png,application/pdf"
+                  accept=".pdf,image/jpeg,image/png,image/webp,application/pdf"
                   className="cursor-pointer text-sm"
                   disabled={!gate.ok || busy}
                   onChange={(e) => {

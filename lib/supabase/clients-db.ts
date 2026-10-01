@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react"
 import type { Client, ClientSite } from "@/lib/data"
-import { clients as staticClients } from "@/lib/data"
 import type { Database } from "./database.types"
 import { getSupabaseClient } from "./client"
+import { fetchAllPages } from "./postgrest-page"
 
 type ClientRow = Database["public"]["Tables"]["clients"]["Row"]
 
@@ -67,34 +67,27 @@ function getSupabaseIfConfigured() {
   }
 }
 
-const CLIENT_PAGE_SIZE = 1000
-
 async function fetchAllClientRows(supabase: NonNullable<ReturnType<typeof getSupabaseIfConfigured>>): Promise<ClientRow[]> {
-  const rows: ClientRow[] = []
-  for (let from = 0; ; from += CLIENT_PAGE_SIZE) {
-    const { data, error } = await supabase
+  return fetchAllPages((from, to) =>
+    supabase
       .from("clients")
       .select("*")
-      .order("company")
-      .range(from, from + CLIENT_PAGE_SIZE - 1)
-    if (error) throw error
-    const page = data ?? []
-    rows.push(...page)
-    if (page.length < CLIENT_PAGE_SIZE) break
-  }
-  return rows
+      .order("company", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, to)
+  )
 }
 
 export async function fetchClients(): Promise<Client[]> {
   const supabase = getSupabaseIfConfigured()
-  if (!supabase) return staticClients
+  if (!supabase) return []
   const rows = await fetchAllClientRows(supabase)
   return rows.map(rowToClient)
 }
 
 export async function fetchClientById(id: string): Promise<Client | null> {
   const supabase = getSupabaseIfConfigured()
-  if (!supabase) return staticClients.find((c) => c.id === id) ?? null
+  if (!supabase) return null
   const { data, error } = await supabase
     .from("clients")
     .select("*")
@@ -169,7 +162,7 @@ export function useClients(): {
   error: Error | null
   refetch: () => Promise<void>
 } {
-  const [clients, setClients] = useState<Client[]>(() => staticClients)
+  const [clients, setClients] = useState<Client[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<Error | null>(null)
 
@@ -186,13 +179,13 @@ export function useClients(): {
     try {
       const result = await fetchClientRows()
       if (!result.ok) {
-        setClients(staticClients)
+        setClients([])
         return
       }
       setClients(result.rows.map(rowToClient))
     } catch (e) {
       setError(e instanceof Error ? e : new Error(String(e)))
-      setClients(staticClients)
+      setClients([])
     } finally {
       setIsLoading(false)
     }
@@ -205,14 +198,14 @@ export function useClients(): {
         const result = await fetchClientRows()
         if (cancelled) return
         if (!result.ok) {
-          setClients(staticClients)
+          setClients([])
           return
         }
         setClients(result.rows.map(rowToClient))
       } catch (e) {
         if (!cancelled) {
           setError(e instanceof Error ? e : new Error(String(e)))
-          setClients(staticClients)
+          setClients([])
         }
       } finally {
         if (!cancelled) setIsLoading(false)

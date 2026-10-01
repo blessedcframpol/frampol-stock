@@ -3,6 +3,7 @@ import { apiErrorResponse } from "@/lib/api-error-response"
 import { requireAdmin } from "@/lib/require-admin"
 import { buildCsvFilename } from "@/lib/utils"
 import { rowToTransaction } from "@/lib/supabase/inventory-db"
+import { fetchAllPages } from "@/lib/supabase/postgrest-page"
 
 function csvEscape(value: unknown): string {
   if (value == null) return ""
@@ -22,18 +23,32 @@ export async function GET() {
     if (!auth.ok) return auth.response
     const { supabase } = auth
 
-    const { data: txnRows, error: txnError } = await supabase
-      .from("transactions")
-      .select("*")
-      .order("date", { ascending: false })
-    if (txnError) {
-      return apiErrorResponse(500, "Failed to load transactions for export", {
-        cause: txnError,
-        logLabel: "admin transactions export query",
-      })
+    const countTransactions = async () => {
+      const { count, error } = await supabase
+        .from("transactions")
+        .select("id", { count: "exact", head: true })
+      if (error) throw new Error(error.message)
+      if (count == null) throw new Error("Transaction count was missing")
+      return count
     }
 
-    const transactions = (txnRows ?? []).map(rowToTransaction)
+    const countBefore = await countTransactions()
+    const txnRows = await fetchAllPages((from, to) =>
+      supabase
+        .from("transactions")
+        .select("*")
+        .order("date", { ascending: false })
+        .order("id", { ascending: false })
+        .range(from, to)
+    )
+    const countAfter = await countTransactions()
+    const transactions = txnRows.map(rowToTransaction)
+    if (transactions.length !== countBefore || transactions.length !== countAfter) {
+      return apiErrorResponse(409, "Export row count did not match the transaction table", {
+        detail: `CSV rows ${transactions.length}, table before ${countBefore}, table after ${countAfter}`,
+        logLabel: "admin transactions export count",
+      })
+    }
     const rows: string[][] = [
       [
         "ID",
@@ -54,6 +69,7 @@ export async function GET() {
         "Notes",
         "Created By",
         "Metadata",
+        "Recorded At",
       ],
     ]
 
@@ -77,17 +93,22 @@ export async function GET() {
         txn.notes ?? "",
         txn.createdBy ?? "",
         txn.metadata == null ? "" : JSON.stringify(txn.metadata),
+        txn.createdAt ?? "",
       ])
     }
 
     const csv = `\uFEFF${toCsv(rows)}`
-    const filename = buildCsvFilename(["all transactions"], new Date().toISOString())
+    const filename = buildCsvFilename(
+      ["all transactions", String(countAfter)],
+      new Date().toISOString()
+    )
     return new NextResponse(csv, {
       status: 200,
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
         "Content-Disposition": `attachment; filename="${filename}"`,
         "Cache-Control": "no-store",
+        "X-Transaction-Count": String(countAfter),
       },
     })
   } catch (error) {

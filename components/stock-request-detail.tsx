@@ -5,7 +5,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
+import { StatusPill } from "@/components/fs/status-pill"
 import {
   Table,
   TableBody,
@@ -21,6 +21,7 @@ import {
   canCreateStockRequest,
 } from "@/lib/permissions"
 import { getSupabaseClient } from "@/lib/supabase/client"
+import { formatClientLabel } from "@/lib/client-label"
 import {
   cancelStockRequest,
   fetchAssignedCountsByLineId,
@@ -48,8 +49,8 @@ import {
   notifySessionExpired,
   signedOutLoadError,
 } from "@/lib/unauthorized"
-import { PageBackLink, pageTitleClass } from "@/components/page-nav"
-import { cn } from "@/lib/utils"
+import { pageTitleClass } from "@/components/page-nav"
+import { PageBreadcrumbs } from "@/components/page-breadcrumbs"
 import {
   ExternalLink,
   FileUp,
@@ -65,15 +66,7 @@ import {
 } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-
-const statusVariant: Record<string, string> = {
-  draft: "bg-muted text-foreground",
-  submitted: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
-  in_progress: "bg-blue-500/15 text-blue-700 dark:text-blue-400",
-  serviced: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
-  invoiced: "bg-slate-500/15 text-slate-700 dark:text-slate-300",
-  cancelled: "bg-destructive/15 text-destructive",
-}
+import { SignedStorageLink } from "@/components/signed-storage-link"
 
 export function StockRequestDetail({ requestId }: { requestId: string }) {
   const router = useRouter()
@@ -283,7 +276,7 @@ export function StockRequestDetail({ requestId }: { requestId: string }) {
     setQuoteUploading(true)
     try {
       const sb = getSupabaseClient()
-      const url = await uploadQuotationForRequest(sb, row.id, file)
+      const url = await uploadQuotationForRequest(row.id, file)
       await updateDraftRequest(sb, row.id, { quotationUrl: url })
       toast.success("Quotation uploaded.")
       await load()
@@ -306,7 +299,7 @@ export function StockRequestDetail({ requestId }: { requestId: string }) {
   if (loadError) {
     return (
       <div className="flex flex-col gap-4">
-        <PageBackLink href="/requests" label="Requests" />
+        <PageBreadcrumbs items={[{ label: "Requests", href: "/requests" }, { label: requestId }]} />
         <p role="alert" className="text-sm text-destructive">
           {loadError}
         </p>
@@ -317,7 +310,7 @@ export function StockRequestDetail({ requestId }: { requestId: string }) {
   if (!row) {
     return (
       <div className="flex flex-col gap-4">
-        <PageBackLink href="/requests" label="Requests" />
+        <PageBreadcrumbs items={[{ label: "Requests", href: "/requests" }, { label: requestId }]} />
         <p className="text-sm text-muted-foreground">Request not found or you don’t have access.</p>
       </div>
     )
@@ -326,19 +319,17 @@ export function StockRequestDetail({ requestId }: { requestId: string }) {
   return (
     <div className="flex flex-col gap-6 min-w-0 max-w-4xl">
       <div className="flex flex-col gap-2 min-w-0 items-start">
-        <PageBackLink href="/requests" label="Requests" />
+        <PageBreadcrumbs items={[{ label: "Requests", href: "/requests" }, { label: requestId }]} />
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between w-full min-w-0">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <h1 className={pageTitleClass}>Request</h1>
-              <Badge variant="secondary" className={cn("text-[10px] border-0", statusVariant[row.status] ?? "")}>
-                {row.status.replace("_", " ")}
-              </Badge>
+              <StatusPill value={row.status} />
             </div>
             <p className="text-sm text-muted-foreground mt-1">
               {row.client ? (
                 <>
-                  {row.client.name} — {row.client.company}
+                  {formatClientLabel(row.client)}
                 </>
               ) : (
                 row.client_id
@@ -417,36 +408,32 @@ export function StockRequestDetail({ requestId }: { requestId: string }) {
             </Label>
             <Input
               type="file"
-              accept=".pdf,image/jpeg,image/png,application/pdf"
+              accept=".pdf,image/jpeg,image/png,image/webp,application/pdf"
               disabled={quoteUploading}
               className="cursor-pointer text-sm max-w-md"
               onChange={(e) => void onQuoteFile(e)}
             />
             {row.quotation_url && (
-              <a
-                href={row.quotation_url}
-                target="_blank"
-                rel="noreferrer"
-                className="text-sm text-primary inline-flex items-center gap-1 w-fit"
+              <SignedStorageLink
+                path={row.quotation_url}
+                className="text-sm text-brand inline-flex items-center gap-1 w-fit"
               >
                 Current file
                 <ExternalLink className="size-3.5" />
-              </a>
+              </SignedStorageLink>
             )}
           </CardContent>
         </Card>
       )}
 
       {row.quotation_url && row.status !== "draft" && (
-        <a
-          href={row.quotation_url}
-          target="_blank"
-          rel="noreferrer"
-          className="text-sm text-primary inline-flex items-center gap-1 w-fit"
+        <SignedStorageLink
+          path={row.quotation_url}
+          className="text-sm text-brand inline-flex items-center gap-1 w-fit"
         >
           View quotation
           <ExternalLink className="size-3.5" />
-        </a>
+        </SignedStorageLink>
       )}
 
       {row.notes ? (
@@ -497,7 +484,7 @@ export function StockRequestDetail({ requestId }: { requestId: string }) {
         </CardContent>
       </Card>
 
-      {row.serviced_at ? (
+      {row.serviced_at && (row.status === "serviced" || row.status === "invoiced") ? (
         <p className="text-xs text-muted-foreground">Serviced {formatDateDDMMYYYY(row.serviced_at)}</p>
       ) : null}
       {row.status === "invoiced" && row.invoice_number ? (

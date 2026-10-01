@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo, useRef } from "react"
+import { useEffect, useState, useMemo, useRef } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -35,10 +35,13 @@ import {
 } from "@/components/ui/dialog"
 import { ScanBarcode, Camera, Loader2, ChevronsUpDown, Plus, MapPin, Trash2 } from "lucide-react"
 import type { TransactionType, ClientSite } from "@/lib/data"
+import { formatClientLabel } from "@/lib/client-label"
 import { INTERNAL_LOCATIONS } from "@/lib/data"
 import { useClients, insertClient } from "@/lib/supabase/clients-db"
 import { useInventoryStore } from "@/lib/inventory-store"
 import { parseSaleDateOverride } from "@/lib/supabase/movement-utils"
+import { DEFAULT_ORG_TIMEZONE, todayBusinessDate } from "@/lib/business-date.mjs"
+import { fetchAppSettings } from "@/lib/settings"
 import { toast } from "sonner"
 import { toastFromCaughtError } from "@/lib/toast-reportable-error"
 import { cn } from "@/lib/utils"
@@ -114,8 +117,8 @@ export function QuickScan() {
   const [newClientPhone, setNewClientPhone] = useState("")
   const [sites, setSites] = useState<ClientSite[]>([{ address: "" }])
   const [outboundReturnDate, setOutboundReturnDate] = useState("")
-  /** TEMPORARY (admin): optional sale ledger date until stock-requests workflow */
-  const [adminSaleDate, setAdminSaleDate] = useState("")
+  /** Admin sale business date. Defaults to today in the organisation timezone. */
+  const [adminSaleDate, setAdminSaleDate] = useState(() => todayBusinessDate(DEFAULT_ORG_TIMEZONE))
   const [adminSaleDateError, setAdminSaleDateError] = useState<string | null>(null)
 
   // When some serials are not in inventory for outbound: offer to add them first
@@ -125,6 +128,22 @@ export function QuickScan() {
   const [inboundReceiveLocation, setInboundReceiveLocation] = useState<string>("Warehouse A")
   const [scanVendor, setScanVendor] = useState<string>("General")
   const [returnLocation, setReturnLocation] = useState<string>("Warehouse A")
+
+  useEffect(() => {
+    let cancelled = false
+    void fetchAppSettings()
+      .then((settings) => {
+        if (cancelled) return
+        const today = todayBusinessDate(settings.timezone.trim() || DEFAULT_ORG_TIMEZONE)
+        setAdminSaleDate((current) =>
+          current === todayBusinessDate(DEFAULT_ORG_TIMEZONE) ? today : current
+        )
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const vendorOptions = useMemo(() => {
     const fromInv = inventory
@@ -558,7 +577,7 @@ export function QuickScan() {
   }
 
   return (
-    <Card className="h-full min-h-[300px] sm:min-h-[340px] flex flex-col border-dashed border-primary/30 bg-primary/[0.02]">
+    <Card className="h-full min-h-[300px] sm:min-h-[340px] flex flex-col">
       <CardHeader className="pb-3">
         <CardTitle className="text-base font-semibold text-foreground flex items-center gap-2">
           <ScanBarcode className="w-4 h-4 text-primary" />
@@ -666,7 +685,7 @@ export function QuickScan() {
             </div>
           )}
           {lastDuplicateMessage && lastDuplicateMessage.length > 0 && (
-            <p className="text-xs text-amber-600 dark:text-amber-400 bg-amber-500/10 rounded-md px-2 py-1.5">
+            <p className="text-xs text-warning bg-warning-soft rounded-md px-2 py-1.5">
               Already scanned (not added): {lastDuplicateMessage.slice(0, 5).join(", ")}
               {lastDuplicateMessage.length > 5 && ` +${lastDuplicateMessage.length - 5} more`}
             </p>
@@ -779,7 +798,7 @@ export function QuickScan() {
                         {outboundClientId === "new"
                           ? "New client (enter details below)"
                           : outboundClientId
-                            ? clients.find((c) => c.id === outboundClientId)?.name + " – " + clients.find((c) => c.id === outboundClientId)?.company
+                            ? formatClientLabel(clients.find((c) => c.id === outboundClientId) ?? {})
                             : "Select or add client..."}
                       </span>
                       <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
@@ -815,7 +834,7 @@ export function QuickScan() {
                                   setOutboundClientSearch("")
                                 }}
                               >
-                                {c.name} – {c.company}
+                                {formatClientLabel(c)}
                               </CommandItem>
                             ))}
                         </CommandGroup>
@@ -839,7 +858,8 @@ export function QuickScan() {
 
               {pendingOutbound.movementType === "Sale" && isAdmin && (
                 <div className="flex flex-col gap-2">
-                  <Label className="text-xs font-medium">Sale date (optional)</Label>
+                  <Label className="text-xs font-medium">Sale date</Label>
+                  <p className="text-xs text-muted-foreground">Today in the organisation timezone. Stored as that calendar day.</p>
                   <Input
                     type="date"
                     min="2020-01-01"

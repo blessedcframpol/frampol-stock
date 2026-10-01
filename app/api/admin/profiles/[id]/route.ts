@@ -33,7 +33,7 @@ export async function PATCH(
     } = {
       updated_at: new Date().toISOString(),
     }
-    const validRoles = ["admin", "sales", "accounts", "technicians"] as const
+    const validRoles = ["admin", "sales", "accounts", "technicians", "viewer"] as const
     if (body.role !== undefined) {
       if (validRoles.includes(body.role as (typeof validRoles)[number])) {
         updates.role = body.role

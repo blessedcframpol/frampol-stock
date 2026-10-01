@@ -2,7 +2,8 @@
 
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
+import { StatusPill } from "@/components/fs/status-pill"
+import { EmptyState } from "@/components/fs/empty-state"
 import { Card, CardContent } from "@/components/ui/card"
 import {
   Table,
@@ -17,16 +18,8 @@ import { useAuth } from "@/lib/auth-context"
 import { canCreateStockRequest } from "@/lib/permissions"
 import type { StockRequestWithRelations } from "@/lib/supabase/stock-requests-db"
 import { formatDateDDMMYYYY } from "@/lib/utils"
+import { formatClientLabel } from "@/lib/client-label"
 import { PageHeader } from "@/components/page-nav"
-
-const statusVariant: Record<string, string> = {
-  draft: "bg-muted text-foreground",
-  submitted: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
-  in_progress: "bg-blue-500/15 text-blue-700 dark:text-blue-400",
-  serviced: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
-  invoiced: "bg-slate-500/15 text-slate-700 dark:text-slate-300",
-  cancelled: "bg-destructive/15 text-destructive",
-}
 
 export function StockRequestsList({ requests }: { requests: StockRequestWithRelations[] }) {
   const { role } = useAuth()
@@ -50,18 +43,16 @@ export function StockRequestsList({ requests }: { requests: StockRequestWithRela
       />
 
       {requests.length === 0 ? (
-        <Card>
-          <CardContent className="py-12 text-center text-sm text-muted-foreground">
-            No stock requests yet.
-            {canCreate && (
-              <div className="mt-3">
-                <Button asChild variant="outline" size="sm">
-                  <Link href="/requests/new">Create one</Link>
-                </Button>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        <EmptyState
+          message="No stock requests yet."
+          action={
+            canCreate ? (
+              <Button asChild variant="outline" size="sm">
+                <Link href="/requests/new">Create one</Link>
+              </Button>
+            ) : undefined
+          }
+        />
       ) : (
         <Card>
           <CardContent className="p-0 overflow-x-auto">
@@ -79,16 +70,14 @@ export function StockRequestsList({ requests }: { requests: StockRequestWithRela
                 {requests.map((r) => (
                   <TableRow key={r.id}>
                     <TableCell className="font-medium">
-                      {r.client ? `${r.client.name} — ${r.client.company}` : r.client_id}
+                      {r.client ? formatClientLabel(r.client) : r.client_id}
                     </TableCell>
                     <TableCell className="text-muted-foreground text-sm">
                       {(r.stock_request_lines ?? []).length} line
                       {(r.stock_request_lines ?? []).length !== 1 ? "s" : ""}
                     </TableCell>
                     <TableCell>
-                      <Badge variant="secondary" className={`text-[10px] border-0 ${statusVariant[r.status] ?? ""}`}>
-                        {r.status.replace("_", " ")}
-                      </Badge>
+                      <StatusPill value={r.status} />
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
                       {formatDateDDMMYYYY(r.created_at)}

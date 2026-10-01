@@ -12,15 +12,19 @@ import {
 } from "@/components/ui/table"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import { EmptyState } from "@/components/fs/empty-state"
 import { History, Loader2, ChevronRight, ClipboardList } from "lucide-react"
 import type { StockTakeRecord } from "@/lib/data"
 import { buildStockTakeScopeLabel } from "@/lib/stock-take"
 import { formatDateDDMMYYYY } from "@/lib/utils"
 import { toastFromApiErrorBody, toastFromCaughtError } from "@/lib/toast-reportable-error"
 import { PageHeader } from "@/components/page-nav"
+import { PageBreadcrumbs } from "@/components/page-breadcrumbs"
+import { useAuth } from "@/lib/auth-context"
+import { ADMIN } from "@/lib/permissions"
 
 export function StockTakeHistoryContent() {
+  const { role } = useAuth()
   const [list, setList] = useState<StockTakeRecord[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -53,10 +57,16 @@ export function StockTakeHistoryContent() {
 
   return (
     <div className="flex flex-col gap-4 md:gap-6 min-w-0">
+      <PageBreadcrumbs
+        items={[
+          { label: "Inventory", href: "/inventory" },
+          { label: "Stock take", href: "/inventory/stock-take" },
+          { label: "History" },
+        ]}
+      />
       <PageHeader
         title="Stock take history"
         description="Read-only list of completed stock takes. Open one to see how it went."
-        back={{ href: "/inventory/stock-take", label: "Stock take" }}
       />
 
       <Card>
@@ -73,20 +83,17 @@ export function StockTakeHistoryContent() {
               Loading…
             </div>
           ) : list.length === 0 ? (
-            <Empty>
-              <EmptyMedia variant="icon">
-                <ClipboardList className="size-6" />
-              </EmptyMedia>
-              <EmptyHeader>
-                <EmptyTitle>No stock takes yet</EmptyTitle>
-                <EmptyDescription>
-                  Complete a stock take and click &quot;Save to history&quot; to see it here.
-                </EmptyDescription>
-              </EmptyHeader>
-              <Link href="/inventory/stock-take">
-                <Button variant="outline">Go to Stock take</Button>
-              </Link>
-            </Empty>
+            <EmptyState
+              icon={<ClipboardList />}
+              message="No stock takes yet. Complete a stock take and click Save to history to see it here."
+              action={
+                role === ADMIN ? (
+                  <Button variant="outline" asChild>
+                    <Link href="/inventory/stock-take">Go to Stock take</Link>
+                  </Button>
+                ) : undefined
+              }
+            />
           ) : (
             <Table>
               <TableHeader>

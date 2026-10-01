@@ -1,143 +1,177 @@
-/**
- * Settings persisted to localStorage (client-only).
- * Used for low-stock email recipients and reorder levels until a DB is connected.
- */
+import type { SupabaseClient } from "@supabase/supabase-js"
+import { getSupabaseClient } from "@/lib/supabase/client"
+import type { Database } from "@/lib/supabase/database.types"
+import { getLowStockAlerts as mapLowStockAlerts } from "@/lib/low-stock-helper.mjs"
+import { fetchAllPages } from "@/lib/supabase/postgrest-page"
 
-const PREFIX = "fram-stock-settings"
-const KEY_EMAILS_ENABLED = `${PREFIX}-low-stock-emails-enabled`
-const KEY_EMAIL_RECIPIENTS = `${PREFIX}-low-stock-email-recipients`
-const KEY_REORDER_DEFAULT = `${PREFIX}-reorder-level-default`
-const KEY_REORDER_OVERRIDES = `${PREFIX}-reorder-level-overrides`
+export const SETTINGS_UPDATED_EVENT = "fram-stock-settings-updated"
 
-const DEFAULT_REORDER_LEVEL = 2
+export type AppSettings = {
+  defaultReorderLevel: number
+  lowStockEmailsEnabled: boolean
+  lowStockRecipients: string[]
+  timezone: string
+  updatedAt: string
+  updatedBy: string | null
+}
 
-function getItem<T>(key: string, defaultValue: T, parse: (s: string) => T): T {
-  if (typeof window === "undefined") return defaultValue
-  try {
-    const raw = localStorage.getItem(key)
-    if (raw == null) return defaultValue
-    return parse(raw)
-  } catch {
-    return defaultValue
+export type ProductLineSetting = {
+  productId: string
+  productName: string
+  vendor: string
+  reorderLevel: number | null
+  isActive: boolean
+}
+
+export type LowStockProduct = {
+  productId: string
+  productName: string
+  vendor: string
+  inStockCount: number
+  effectiveReorderLevel: number
+  isLow: boolean
+}
+
+export type LowStockAlert = {
+  productId: string
+  groupName: string
+  vendor: string
+  inStock: number
+  threshold: number
+}
+
+type SettingsClient = SupabaseClient<Database>
+
+function client(provided?: SettingsClient): SettingsClient {
+  return provided ?? getSupabaseClient()
+}
+
+function announceSettingsUpdate(): void {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(SETTINGS_UPDATED_EVENT))
   }
 }
 
-function setItem(key: string, value: string): void {
-  if (typeof window === "undefined") return
-  try {
-    localStorage.setItem(key, value)
-  } catch {
-    // ignore
+export async function fetchAppSettings(provided?: SettingsClient): Promise<AppSettings> {
+  const { data, error } = await client(provided)
+    .from("app_settings")
+    .select(
+      "default_reorder_level, low_stock_emails_enabled, low_stock_recipients, timezone, updated_at, updated_by"
+    )
+    .eq("id", true)
+    .single()
+  if (error) throw error
+  return {
+    defaultReorderLevel: data.default_reorder_level,
+    lowStockEmailsEnabled: data.low_stock_emails_enabled,
+    lowStockRecipients: data.low_stock_recipients,
+    timezone: data.timezone,
+    updatedAt: data.updated_at,
+    updatedBy: data.updated_by,
   }
 }
 
-export function getLowStockEmailsEnabled(): boolean {
-  return getItem(KEY_EMAILS_ENABLED, true, (s) => s === "true")
-}
-
-export function setLowStockEmailsEnabled(enabled: boolean): void {
-  setItem(KEY_EMAILS_ENABLED, String(enabled))
-}
-
-export function getLowStockEmailRecipients(): string[] {
-  return getItem(KEY_EMAIL_RECIPIENTS, [], (s) => {
-    try {
-      const arr = JSON.parse(s) as unknown
-      return Array.isArray(arr) && arr.every((x) => typeof x === "string") ? arr : []
-    } catch {
-      return []
-    }
-  })
-}
-
-export function setLowStockEmailRecipients(emails: string[]): void {
-  setItem(KEY_EMAIL_RECIPIENTS, JSON.stringify(emails))
-}
-
-export function getReorderLevelDefault(): number {
-  const n = getItem(KEY_REORDER_DEFAULT, DEFAULT_REORDER_LEVEL, (s) => parseInt(s, 10))
-  return Number.isFinite(n) && n >= 0 ? n : DEFAULT_REORDER_LEVEL
-}
-
-export function setReorderLevelDefault(value: number): void {
-  const n = Number.isFinite(value) && value >= 0 ? value : DEFAULT_REORDER_LEVEL
-  setItem(KEY_REORDER_DEFAULT, String(n))
-}
-
-export function getReorderLevelOverrides(): Record<string, number> {
-  return getItem(KEY_REORDER_OVERRIDES, {}, (s) => {
-    try {
-      const obj = JSON.parse(s) as unknown
-      if (obj == null || typeof obj !== "object") return {}
-      const out: Record<string, number> = {}
-      for (const [k, v] of Object.entries(obj)) {
-        if (typeof k === "string" && typeof v === "number" && Number.isFinite(v) && v >= 0) {
-          out[k] = v
-        }
-      }
-      return out
-    } catch {
-      return {}
-    }
-  })
-}
-
-export function setReorderLevelOverrides(overrides: Record<string, number>): void {
-  setItem(KEY_REORDER_OVERRIDES, JSON.stringify(overrides))
-}
-
-export type ClientSettingsSnapshot = {
-  emailsEnabled: boolean
-  emailRecipients: string[]
-  reorderDefault: number
-  overrides: Record<string, number>
-}
-
-const SERVER_SETTINGS: ClientSettingsSnapshot = {
-  emailsEnabled: true,
-  emailRecipients: [],
-  reorderDefault: DEFAULT_REORDER_LEVEL,
-  overrides: {},
-}
-
-let settingsSnapshot: ClientSettingsSnapshot = SERVER_SETTINGS
-let settingsSnapshotKey = ""
-
-function settingsStorageKey(): string {
-  if (typeof window === "undefined") return ""
-  return [
-    localStorage.getItem(KEY_EMAILS_ENABLED),
-    localStorage.getItem(KEY_EMAIL_RECIPIENTS),
-    localStorage.getItem(KEY_REORDER_DEFAULT),
-    localStorage.getItem(KEY_REORDER_OVERRIDES),
-  ].join("\0")
-}
-
-export function subscribeClientSettings(onStoreChange: () => void): () => void {
-  window.addEventListener("storage", onStoreChange)
-  return () => window.removeEventListener("storage", onStoreChange)
-}
-
-export function getClientSettingsSnapshot(): ClientSettingsSnapshot {
-  const key = settingsStorageKey()
-  if (key === settingsSnapshotKey) return settingsSnapshot
-  settingsSnapshotKey = key
-  settingsSnapshot = {
-    emailsEnabled: getLowStockEmailsEnabled(),
-    emailRecipients: getLowStockEmailRecipients(),
-    reorderDefault: getReorderLevelDefault(),
-    overrides: getReorderLevelOverrides(),
+export async function updateAppSettings(
+  updates: Partial<
+    Pick<
+      AppSettings,
+      "defaultReorderLevel" | "lowStockEmailsEnabled" | "lowStockRecipients" | "timezone"
+    >
+  >,
+  provided?: SettingsClient
+): Promise<AppSettings> {
+  const row: Database["public"]["Tables"]["app_settings"]["Update"] = {}
+  if (updates.defaultReorderLevel !== undefined) {
+    row.default_reorder_level = updates.defaultReorderLevel
   }
-  return settingsSnapshot
+  if (updates.lowStockEmailsEnabled !== undefined) {
+    row.low_stock_emails_enabled = updates.lowStockEmailsEnabled
+  }
+  if (updates.lowStockRecipients !== undefined) {
+    row.low_stock_recipients = updates.lowStockRecipients
+  }
+  if (updates.timezone !== undefined) row.timezone = updates.timezone
+
+  const { data, error } = await client(provided)
+    .from("app_settings")
+    .update(row)
+    .eq("id", true)
+    .select(
+      "default_reorder_level, low_stock_emails_enabled, low_stock_recipients, timezone, updated_at, updated_by"
+    )
+    .single()
+  if (error) throw error
+  announceSettingsUpdate()
+  return {
+    defaultReorderLevel: data.default_reorder_level,
+    lowStockEmailsEnabled: data.low_stock_emails_enabled,
+    lowStockRecipients: data.low_stock_recipients,
+    timezone: data.timezone,
+    updatedAt: data.updated_at,
+    updatedBy: data.updated_by,
+  }
 }
 
-export function getClientSettingsServerSnapshot(): ClientSettingsSnapshot {
-  return SERVER_SETTINGS
+export async function fetchProductLineSettings(
+  provided?: SettingsClient
+): Promise<ProductLineSetting[]> {
+  const supabase = client(provided)
+  const rows = await fetchAllPages((from, to) =>
+    supabase
+      .from("product_lines")
+      .select("id, product_name, vendor, reorder_level, is_active")
+      .order("product_name", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, to)
+  )
+  return rows.map((row) => ({
+    productId: row.id,
+    productName: row.product_name,
+    vendor: row.vendor,
+    reorderLevel: row.reorder_level,
+    isActive: row.is_active,
+  }))
 }
 
-/** Threshold for a product: override if set, otherwise default. */
-export function getReorderLevelForProduct(productName: string): number {
-  const overrides = getReorderLevelOverrides()
-  if (productName in overrides) return overrides[productName]
-  return getReorderLevelDefault()
+export async function updateProductLineSetting(
+  productId: string,
+  updates: Pick<ProductLineSetting, "reorderLevel" | "isActive">,
+  provided?: SettingsClient
+): Promise<void> {
+  const { error } = await client(provided)
+    .from("product_lines")
+    .update({
+      reorder_level: updates.reorderLevel,
+      is_active: updates.isActive,
+    })
+    .eq("id", productId)
+  if (error) throw error
+  announceSettingsUpdate()
+}
+
+export async function fetchLowStockProducts(
+  provided?: SettingsClient
+): Promise<LowStockProduct[]> {
+  const supabase = client(provided)
+  const rows = await fetchAllPages((from, to) =>
+    supabase
+      .from("low_stock_products")
+      .select(
+        "product_id, product_name, vendor, in_stock_count, effective_reorder_level, is_low"
+      )
+      .order("product_id", { ascending: true })
+      .range(from, to)
+  )
+  return rows.map((row) => ({
+    productId: row.product_id,
+    productName: row.product_name,
+    vendor: row.vendor,
+    inStockCount: row.in_stock_count,
+    effectiveReorderLevel: row.effective_reorder_level,
+    isLow: row.is_low,
+  }))
+}
+
+export function getLowStockAlerts(products: LowStockProduct[]): LowStockAlert[] {
+  return mapLowStockAlerts(products)
 }

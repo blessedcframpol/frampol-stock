@@ -9,7 +9,7 @@ import { ADMIN, canCreateStockRequest } from "@/lib/permissions"
 import { getSupabaseClient } from "@/lib/supabase/client"
 import { fetchStockRequestById, type StockRequestWithRelations } from "@/lib/supabase/stock-requests-db"
 import { Loader2 } from "lucide-react"
-import { PageBackLink } from "@/components/page-nav"
+import { PageBreadcrumbs } from "@/components/page-breadcrumbs"
 import { toastFromCaughtError } from "@/lib/toast-reportable-error"
 import {
   isAuthFailure,
@@ -94,7 +94,7 @@ export default function EditStockRequestPage() {
     return (
       <DashboardShell>
         <div className="flex flex-col gap-4 max-w-lg">
-          <PageBackLink href="/requests" />
+          <PageBreadcrumbs items={[{ label: "Requests", href: "/requests" }, { label: "Edit" }]} />
           <p role="alert" className="text-sm text-destructive">
             {loadError}
           </p>
@@ -107,7 +107,20 @@ export default function EditStockRequestPage() {
     return (
       <DashboardShell>
         <div className="flex flex-col gap-4 max-w-lg">
-          <PageBackLink href={row ? `/requests/${row.id}` : "/requests"} />
+          <PageBreadcrumbs
+            items={
+              row
+                ? [
+                    { label: "Requests", href: "/requests" },
+                    { label: row.id, href: `/requests/${row.id}` },
+                    { label: "Edit" },
+                  ]
+                : [
+                    { label: "Requests", href: "/requests" },
+                    { label: "Edit" },
+                  ]
+            }
+          />
           <p className="text-sm text-muted-foreground">
             {!row
               ? "Request not found or you don’t have access."

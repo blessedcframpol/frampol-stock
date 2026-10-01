@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest"
 import {
+  canAccessReports,
+  canAccessRequests,
   canAmendTransaction,
+  canCreateStockRequest,
   canEditInventory,
+  canManageUsers,
   canRecordStockMovement,
   type AppRole,
 } from "@/lib/permissions"
 
-const ROLES: Array<AppRole | null> = ["admin", "sales", "accounts", "technicians", null]
+const ROLES: Array<AppRole | null> = ["admin", "sales", "accounts", "technicians", "viewer", null]
 
 describe("canRecordStockMovement", () => {
   it.each([
@@ -14,6 +18,7 @@ describe("canRecordStockMovement", () => {
     ["technicians", true],
     ["sales", false],
     ["accounts", false],
+    ["viewer", false],
     [null, false],
   ] as const)("role %s → %s", (role, expected) => {
     expect(canRecordStockMovement(role)).toBe(expected)
@@ -26,6 +31,7 @@ describe("canEditInventory", () => {
     ["technicians", false],
     ["sales", false],
     ["accounts", false],
+    ["viewer", false],
     [null, false],
   ] as const)("role %s → %s", (role, expected) => {
     expect(canEditInventory(role)).toBe(expected)
@@ -53,8 +59,8 @@ describe("canAmendTransaction", () => {
     expect(canAmendTransaction("technicians", undefined, uid)).toBe(false)
   })
 
-  it("sales and accounts are false regardless of createdBy", () => {
-    for (const role of ["sales", "accounts"] as const) {
+  it("sales, accounts, and viewer are false regardless of createdBy", () => {
+    for (const role of ["sales", "accounts", "viewer"] as const) {
       expect(canAmendTransaction(role, uid, uid)).toBe(false)
       expect(canAmendTransaction(role, other, uid)).toBe(false)
       expect(canAmendTransaction(role, null, uid)).toBe(false)
@@ -65,7 +71,7 @@ describe("canAmendTransaction", () => {
     expect(canAmendTransaction(null, uid, uid)).toBe(false)
   })
 
-  it("covers all four roles plus null in a matrix snapshot", () => {
+  it("covers all roles plus null in a matrix snapshot", () => {
     const matrix = ROLES.map((role) => ({
       role,
       own: canAmendTransaction(role, uid, uid),
@@ -77,7 +83,19 @@ describe("canAmendTransaction", () => {
       { role: "sales", own: false, other: false, nullCreator: false },
       { role: "accounts", own: false, other: false, nullCreator: false },
       { role: "technicians", own: true, other: false, nullCreator: false },
+      { role: "viewer", own: false, other: false, nullCreator: false },
       { role: null, own: false, other: false, nullCreator: false },
     ])
+  })
+})
+
+describe("viewer permissions", () => {
+  it("can read requests and reports but cannot use write capabilities", () => {
+    expect(canAccessRequests("viewer")).toBe(true)
+    expect(canAccessReports("viewer")).toBe(true)
+    expect(canCreateStockRequest("viewer")).toBe(false)
+    expect(canRecordStockMovement("viewer")).toBe(false)
+    expect(canEditInventory("viewer")).toBe(false)
+    expect(canManageUsers("viewer")).toBe(false)
   })
 })
