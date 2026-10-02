@@ -80,14 +80,26 @@ async function main() {
   )
   const productId = product.rows[0].id
   const productName = product.rows[0].product_name
-  const admin = await db.query(
-    `SELECT id FROM public.profiles WHERE role = 'admin' AND active ORDER BY id LIMIT 1`
-  )
-  const adminId = admin.rows[0].id
   const service = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
     auth: { autoRefreshToken: false, persistSession: false },
   })
+  const adminEmail = "verify-070-admin@test.local"
   const email = "verify-070-technicians@test.local"
+  for (const leftover of [adminEmail, email]) {
+    const existing = await db.query(`SELECT id FROM auth.users WHERE email = $1`, [leftover])
+    if (existing.rows[0]) await service.auth.admin.deleteUser(existing.rows[0].id)
+  }
+  const { data: adminCreated, error: adminError } = await service.auth.admin.createUser({
+    email: adminEmail,
+    email_confirm: true,
+  })
+  if (adminError) throw new Error(`createUser admin: ${adminError.message}`)
+  const adminId = adminCreated.user.id
+  const adminUpdated = await db.query(
+    `UPDATE public.profiles SET role = 'admin'::public.app_role, active = true WHERE id = $1`,
+    [adminId]
+  )
+  if (adminUpdated.rowCount !== 1) throw new Error("admin profile was not updated")
   const { data: created, error: createError } = await service.auth.admin.createUser({ email, email_confirm: true })
   if (createError) throw new Error(`createUser: ${createError.message}`)
   const technicianId = created.user.id
@@ -98,12 +110,43 @@ async function main() {
   if (updated.rowCount !== 1) throw new Error("technician profile was not updated")
 
   async function snapshot() {
-    const counts = await db.query(
-      `SELECT count(*)::int AS clients, coalesce(sum(orders), 0)::int AS orders, coalesce(sum(units), 0)::int AS units
-       FROM public.client_sale_dispatch_counts()`
+    const counted = await db.query(
+      `SELECT resolution.resolved_client_id AS client_id,
+              count(DISTINCT resolution.batch_key)::int AS orders,
+              count(*)::int AS units
+       FROM public.client_transaction_resolution AS resolution
+       JOIN public.active_transactions AS transactions ON transactions.id = resolution.transaction_id
+       WHERE transactions.type = 'Sale'
+         AND resolution.resolved_client_id IS NOT NULL
+       GROUP BY resolution.resolved_client_id`
     )
-    return counts.rows[0]
+    return counted.rows
   }
+
+  function indexSaleCounts(rows) {
+    const byId = new Map()
+    for (const row of rows) byId.set(row.client_id, `${Number(row.orders)}:${Number(row.units)}`)
+    return byId
+  }
+
+  async function foreignSaleClients(since) {
+    const touched = await db.query(
+      `SELECT DISTINCT resolution.resolved_client_id AS client_id
+       FROM public.transactions AS txn
+       JOIN public.client_transaction_resolution AS resolution ON resolution.transaction_id = txn.id
+       WHERE txn.created_at >= $1
+         AND resolution.resolved_client_id IS NOT NULL
+         AND txn.id NOT LIKE $2
+         AND coalesce(txn.serial_number, '') NOT LIKE $2
+         AND coalesce(txn.batch_id, '') NOT LIKE $2`,
+      [since, `%${PREFIX}%`]
+    )
+    return new Set(touched.rows.map((row) => row.client_id))
+  }
+
+  const saleClock = await db.query(`SELECT clock_timestamp() AS started_at`)
+  const saleStartedAt = saleClock.rows[0].started_at
+  const beforeShot = await snapshot()
 
   async function returnDate(itemId) {
     const item = await db.query(`SELECT return_date FROM public.inventory_items WHERE id = $1`, [itemId])
@@ -234,9 +277,9 @@ async function main() {
       `ITEM-${PREFIX}-%`,
     ])
     if (technicianId) await service.auth.admin.deleteUser(technicianId)
+    if (adminId) await service.auth.admin.deleteUser(adminId)
   }
 
-  const beforeShot = await snapshot()
   const holding = {
     status: "POC",
     location: "Client Site",
@@ -327,8 +370,8 @@ async function main() {
          (SELECT count(*)::int FROM public.transactions WHERE serial_number LIKE $1 OR batch_id LIKE $2) AS txns,
          (SELECT count(*)::int FROM public.inventory_items WHERE serial_number LIKE $1 OR id LIKE $3) AS items,
          (SELECT count(*)::int FROM public.holding_extensions WHERE serial_number LIKE $1 OR item_id LIKE $3) AS extensions,
-         (SELECT count(*)::int FROM auth.users WHERE email = $4) AS users`,
-      [`${PREFIX}-%`, `BATCH-${PREFIX}-%`, `ITEM-${PREFIX}-%`, email]
+         (SELECT count(*)::int FROM auth.users WHERE email LIKE 'verify-070-%@test.local') AS users`,
+      [`${PREFIX}-%`, `BATCH-${PREFIX}-%`, `ITEM-${PREFIX}-%`]
     )
     const left = residue.rows[0]
     if (left.txns === 0 && left.items === 0 && left.extensions === 0 && left.users === 0) {
@@ -342,12 +385,20 @@ async function main() {
     try {
       await setUser(db, adminId)
       const afterShot = await snapshot()
-      const same =
-        afterShot.clients === beforeShot.clients &&
-        afterShot.orders === beforeShot.orders &&
-        afterShot.units === beforeShot.units
-      if (same) pass(results, "snapshot", `${afterShot.clients} / ${afterShot.orders} / ${afterShot.units}`)
-      else fail(results, "snapshot", `${JSON.stringify(beforeShot)} -> ${JSON.stringify(afterShot)}`)
+      const before = indexSaleCounts(beforeShot)
+      const after = indexSaleCounts(afterShot)
+      const changed = []
+      for (const id of new Set([...before.keys(), ...after.keys()])) {
+        if (before.get(id) !== after.get(id)) changed.push(id)
+      }
+      const foreign = await foreignSaleClients(saleStartedAt)
+      const unexplained = changed.filter((id) => !foreign.has(id))
+      const ignored = changed.filter((id) => foreign.has(id))
+      const orders = afterShot.reduce((sum, row) => sum + Number(row.orders), 0)
+      const units = afterShot.reduce((sum, row) => sum + Number(row.units), 0)
+      if (unexplained.length) fail(results, "snapshot", unexplained.slice(0, 5).join(", "))
+      else if (ignored.length) pass(results, "snapshot", `${afterShot.length} clients; ignored ${ignored.join(", ")}`)
+      else pass(results, "snapshot", `${afterShot.length} / ${orders} / ${units} unchanged`)
     } catch (error) {
       fail(results, "snapshot", error instanceof Error ? error.message : String(error))
     }

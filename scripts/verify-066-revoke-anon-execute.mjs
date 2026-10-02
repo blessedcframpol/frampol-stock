@@ -160,13 +160,19 @@ async function main() {
         LATER,
       ]
     )
-    const adminProfile = await db.query(
-      `SELECT id FROM public.profiles WHERE role = 'admin' AND active ORDER BY id LIMIT 1`
+    const email = `${EMAIL_PREFIX}admin@test.local`
+    const { data: created, error: createError } = await service.auth.admin.createUser({ email, email_confirm: true })
+    if (createError) throw new Error(`createUser: ${createError.message}`)
+    userIds.push(created.user.id)
+    const updated = await db.query(
+      `UPDATE public.profiles SET role = 'admin'::public.app_role, active = true WHERE id = $1`,
+      [created.user.id]
     )
+    if (updated.rowCount !== 1) throw new Error("admin profile was not updated")
     await db.query("BEGIN")
-    await db.query(`SELECT set_config('request.jwt.claim.sub', $1, true)`, [adminProfile.rows[0].id])
+    await db.query(`SELECT set_config('request.jwt.claim.sub', $1, true)`, [created.user.id])
     await db.query(`SELECT set_config('request.jwt.claims', $1, true)`, [
-      JSON.stringify({ sub: adminProfile.rows[0].id }),
+      JSON.stringify({ sub: created.user.id }),
     ])
     const blockedReverse = await expectError(() =>
       db.query(`SELECT public.reverse_quick_scan_batch($1, $2, NULL, '[]'::jsonb)`, [
@@ -234,15 +240,6 @@ async function main() {
       )
     }
 
-    const email = `${EMAIL_PREFIX}admin@test.local`
-    const { data: created, error: createError } = await service.auth.admin.createUser({ email, email_confirm: true })
-    if (createError) throw new Error(`createUser: ${createError.message}`)
-    userIds.push(created.user.id)
-    const updated = await db.query(
-      `UPDATE public.profiles SET role = 'admin'::public.app_role, active = true WHERE id = $1`,
-      [created.user.id]
-    )
-    if (updated.rowCount !== 1) throw new Error("admin profile was not updated")
     const admin = createClient(url, anonKey, { auth: { autoRefreshToken: false, persistSession: false } })
     const { data: link, error: linkError } = await service.auth.admin.generateLink({ type: "magiclink", email })
     if (linkError) throw new Error(`generateLink: ${linkError.message}`)

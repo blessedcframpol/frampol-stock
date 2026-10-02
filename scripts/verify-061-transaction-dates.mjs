@@ -13,6 +13,7 @@
 import fs from "fs"
 import path from "path"
 import { createRequire } from "module"
+import { createClient } from "@supabase/supabase-js"
 import {
   businessDateToIso,
   compareBusinessDatesDesc,
@@ -60,7 +61,12 @@ async function main() {
   const pg = require("pg")
   const db = new pg.Client({ connectionString: dbUrl, ssl: { rejectUnauthorized: false } })
   await db.connect()
+  const service = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  })
   const results = {}
+  const adminEmail = "verify-061-admin@test.local"
+  let adminId = null
 
   function pass(name, reason) {
     results[name] = { result: "PASS", reason }
@@ -82,6 +88,11 @@ async function main() {
       `DELETE FROM public.inventory_items WHERE id LIKE $1 OR serial_number LIKE $1`,
       [`${PREFIX}%`]
     )
+    const users = await db.query(`SELECT id::text AS id FROM auth.users WHERE email = $1`, [adminEmail])
+    for (const row of users.rows) {
+      const { error } = await service.auth.admin.deleteUser(row.id)
+      if (error && !/not found/i.test(error.message)) throw error
+    }
   }
 
   try {
@@ -120,6 +131,18 @@ async function main() {
       fail("3_late_utc_business_date", "skipped; migration not applied")
       fail("4_new_movement_write", "skipped; migration not applied")
     } else {
+      const { data: created, error: createError } = await service.auth.admin.createUser({
+        email: adminEmail,
+        email_confirm: true,
+      })
+      if (createError) throw new Error(`createUser: ${createError.message}`)
+      adminId = created.user.id
+      const updated = await db.query(
+        `UPDATE public.profiles SET role = 'admin'::public.app_role, active = true WHERE id = $1`,
+        [adminId]
+      )
+      if (updated.rowCount !== 1) throw new Error("admin profile was not updated")
+
       const midnight = await db.query(
         `SELECT count(*)::int AS bad
          FROM public.transactions
@@ -433,12 +456,7 @@ async function main() {
       const product = await db.query(
         `SELECT id FROM public.product_lines ORDER BY id LIMIT 1`
       )
-      const admin = await db.query(
-        `SELECT id::text AS id FROM public.profiles
-         WHERE role = 'admin' AND active
-         ORDER BY id
-         LIMIT 1`
-      )
+      const admin = { rows: [{ id: adminId }] }
       const reversalFunction = await db.query(
         `SELECT pg_get_functiondef(p.oid) AS def
          FROM pg_proc p
@@ -612,8 +630,9 @@ async function main() {
            (SELECT count(*)::int FROM public.inventory_items
             WHERE id LIKE $1 OR serial_number LIKE $1) AS inventory_items,
            (SELECT count(*)::int FROM public.batch_reversals
-            WHERE batch_id LIKE 'verify-061-%') AS batch_reversals`,
-        [`${PREFIX}%`]
+            WHERE batch_id LIKE 'verify-061-%') AS batch_reversals,
+           (SELECT count(*)::int FROM auth.users WHERE email = $2) AS users`,
+        [`${PREFIX}%`, adminEmail]
       )
       const timezoneNow = await db.query(`SELECT timezone FROM public.app_settings WHERE id`)
       const residueCounts = residue.rows[0]
@@ -621,6 +640,7 @@ async function main() {
         residueCounts.transactions === 0 &&
         residueCounts.inventory_items === 0 &&
         residueCounts.batch_reversals === 0 &&
+        residueCounts.users === 0 &&
         timezoneNow.rows[0]?.timezone === "Africa/Harare"
       ) {
         pass("7_zero_residue", "no verify-061 rows; app_settings.timezone still Africa/Harare")

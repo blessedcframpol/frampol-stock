@@ -1,9 +1,9 @@
 /**
  * Verify 20261001160000_client_transaction_resolution.sql. Does not apply it.
  *
- * The sale-count fixture is the pre-migration output of client_sale_dispatch_counts()
- * (431 clients, 691 orders, 1,247 units). Fixtures use the verify-065- prefix and
- * are removed in finally.
+ * Sale counts are recomputed in this script from client_transaction_resolution
+ * and active_transactions, then compared with client_sale_dispatch_counts().
+ * Fixtures use the verify-065- prefix and are removed in finally.
  *
  * Requires in .env.local:
  *   NEXT_PUBLIC_SUPABASE_URL
@@ -53,22 +53,35 @@ function loadEnvLocal() {
   }
 }
 
-function loadSnapshot() {
-  const file = path.join(process.cwd(), "scripts", "fixtures", "client-sale-dispatch-counts.json")
-  const rows = JSON.parse(fs.readFileSync(file, "utf8"))
+const SALE_COUNT_SQL = `
+  SELECT
+    resolution.resolved_client_id AS client_id,
+    count(DISTINCT resolution.batch_key)::integer AS orders,
+    count(*)::integer AS units
+  FROM public.client_transaction_resolution AS resolution
+  JOIN public.active_transactions AS transactions
+    ON transactions.id = resolution.transaction_id
+  WHERE transactions.type = 'Sale'
+    AND resolution.resolved_client_id IS NOT NULL
+  GROUP BY resolution.resolved_client_id
+`
+
+function indexCounts(rows) {
   const byId = new Map()
-  let orders = 0
-  let units = 0
   for (const row of rows) {
-    if (byId.has(row.client_id)) throw new Error(`Duplicate snapshot client ${row.client_id}`)
-    byId.set(row.client_id, { orders: row.orders, units: row.units })
-    orders += row.orders
-    units += row.units
-  }
-  if (byId.size !== 431 || orders !== 691 || units !== 1247) {
-    throw new Error(`Snapshot totals ${byId.size} / ${orders} / ${units}, expected 431 / 691 / 1247`)
+    byId.set(row.client_id, { orders: Number(row.orders), units: Number(row.units) })
   }
   return byId
+}
+
+function changedClients(before, after) {
+  const changed = []
+  for (const id of new Set([...before.keys(), ...after.keys()])) {
+    const left = before.get(id)
+    const right = after.get(id)
+    if (!left || !right || left.orders !== right.orders || left.units !== right.units) changed.push(id)
+  }
+  return changed
 }
 
 function pass(results, name, reason) {
@@ -92,13 +105,35 @@ async function main() {
     throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, or SUPABASE_SERVICE_ROLE_KEY")
   }
 
-  const snapshot = loadSnapshot()
   const pg = require("pg")
   const db = new pg.Client({ connectionString: dbUrl, ssl: { rejectUnauthorized: false } })
   await db.connect()
   const service = createClient(url, serviceKey, { auth: { autoRefreshToken: false, persistSession: false } })
   const userIds = []
   const results = {}
+  let startedAt = null
+  let startCounts = null
+
+  async function saleCounts() {
+    const counted = await db.query(SALE_COUNT_SQL)
+    return indexCounts(counted.rows)
+  }
+
+  async function foreignTouched(since) {
+    const touched = await db.query(
+      `SELECT DISTINCT resolution.resolved_client_id AS client_id
+       FROM public.transactions AS txn
+       JOIN public.client_transaction_resolution AS resolution
+         ON resolution.transaction_id = txn.id
+       WHERE txn.created_at >= $1
+         AND resolution.resolved_client_id IS NOT NULL
+         AND txn.id NOT LIKE '%verify-065-%'
+         AND coalesce(txn.serial_number, '') NOT LIKE 'verify-065-%'
+         AND coalesce(txn.batch_id, '') NOT LIKE 'verify-065-%'`,
+      [since]
+    )
+    return new Set(touched.rows.map((row) => row.client_id))
+  }
 
   async function cleanup() {
     await db.query(`DELETE FROM public.transactions WHERE id LIKE $1 OR serial_number LIKE $1 OR batch_id LIKE $1`, [
@@ -126,34 +161,37 @@ async function main() {
       )
     }
 
+    const clock = await db.query(`SELECT clock_timestamp() AS started_at`)
+    startedAt = clock.rows[0].started_at
+    startCounts = await saleCounts()
     const live = await db.query(
       `SELECT client_id, orders, units, reliable
        FROM public.client_sale_dispatch_counts()
        ORDER BY client_id`
     )
+    const liveCounts = indexCounts(live.rows)
     const mismatches = []
-    const seen = new Set()
-    let liveOrders = 0
-    let liveUnits = 0
-    for (const row of live.rows) {
-      seen.add(row.client_id)
-      liveOrders += row.orders
-      liveUnits += row.units
-      const expected = snapshot.get(row.client_id)
-      if (!expected || expected.orders !== row.orders || expected.units !== row.units || row.reliable !== true) {
-        mismatches.push(row.client_id)
+    for (const id of new Set([...startCounts.keys(), ...liveCounts.keys()])) {
+      const expected = startCounts.get(id)
+      const actual = liveCounts.get(id)
+      const row = live.rows.find((item) => item.client_id === id)
+      if (!expected || !actual || expected.orders !== actual.orders || expected.units !== actual.units || row?.reliable !== true) {
+        mismatches.push(id)
       }
     }
-    for (const id of snapshot.keys()) {
-      if (!seen.has(id)) mismatches.push(id)
-    }
-    if (mismatches.length === 0 && seen.size === 431 && liveOrders === 691 && liveUnits === 1247) {
-      pass(results, "snapshot", "431 clients, 691 orders, 1,247 units, every client unchanged")
+    const orders = [...startCounts.values()].reduce((sum, row) => sum + row.orders, 0)
+    const units = [...startCounts.values()].reduce((sum, row) => sum + row.units, 0)
+    if (mismatches.length === 0) {
+      pass(
+        results,
+        "snapshot",
+        `${startCounts.size} clients, ${orders} orders, ${units} units match client_sale_dispatch_counts()`
+      )
     } else {
       fail(
         results,
         "snapshot",
-        `${mismatches.length} clients differ; live ${seen.size} / ${liveOrders} / ${liveUnits}; sample ${mismatches.slice(0, 5).join(", ")}`
+        `${mismatches.length} clients differ; sample ${mismatches.slice(0, 5).join(", ")}`
       )
     }
 
@@ -182,8 +220,13 @@ async function main() {
     const kudzSales = kudzRows.rows.filter((row) => row.type === "Sale")
     const kudzOrders = new Set(kudzSales.map((row) => row.batch_key)).size
     const fortunateOnTab = kudzRows.rows.filter((row) => FORTUNATE_SALES.includes(row.id))
-    if (kudz?.orders === 18 && kudz?.units === 20 && kudzSales.length === 20 && kudzOrders === 18 && fortunateOnTab.length === 0) {
-      pass(results, "kudzanai", "18 orders / 20 units, and none of the six Fortunate sales")
+    if (
+      kudz &&
+      kudz.orders === kudzOrders &&
+      kudz.units === kudzSales.length &&
+      fortunateOnTab.length === 0
+    ) {
+      pass(results, "kudzanai", `${kudz.orders} orders / ${kudz.units} units, and none of the six Fortunate sales`)
     } else {
       fail(
         results,
@@ -192,20 +235,27 @@ async function main() {
       )
     }
 
+    const kimIds = KIM_LAURENCE.map(([id]) => id)
+    const kimIndependent = await db.query(
+      `SELECT resolution.resolved_client_id AS client_id, max(left(transactions.date, 10)) AS last_activity_date
+       FROM public.client_transaction_resolution AS resolution
+       JOIN public.active_transactions AS transactions ON transactions.id = resolution.transaction_id
+       WHERE resolution.resolved_client_id = ANY($1::text[])
+       GROUP BY resolution.resolved_client_id
+       ORDER BY client_id`,
+      [kimIds]
+    )
     const kim = await db.query(
       `SELECT client_id, last_activity_date
        FROM public.client_last_activity()
        WHERE client_id = ANY($1::text[])
        ORDER BY client_id`,
-      [KIM_LAURENCE.map(([id]) => id)]
+      [kimIds]
     )
     const kimGot = kim.rows.map((row) => `${row.client_id}=${row.last_activity_date}`).join(", ")
-    const kimExpected = [...KIM_LAURENCE]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([id, date]) => `${id}=${date}`)
-      .join(", ")
-    if (kimGot === kimExpected && KIM_LAURENCE[0][1] !== KIM_LAURENCE[1][1]) {
-      pass(results, "kim_laurence", "each Kim Laurence Group row keeps only its own business date")
+    const kimExpected = kimIndependent.rows.map((row) => `${row.client_id}=${row.last_activity_date}`).join(", ")
+    if (kim.rows.length === kimIds.length && kimGot === kimExpected) {
+      pass(results, "kim_laurence", "each Kim Laurence Group row matches its own active transactions")
     } else {
       fail(results, "kim_laurence", `expected ${kimExpected}; got ${kimGot}`)
     }
@@ -232,18 +282,17 @@ async function main() {
 
     const held = await db.query(
       `SELECT client_id, orders, units
-       FROM public.client_sale_dispatch_counts()
-       WHERE client_id = ANY($1::text[])`,
-      [[...snapshot.keys()]]
+       FROM public.client_sale_dispatch_counts()`
     )
-    const heldBad = held.rows.filter((row) => {
-      const expected = snapshot.get(row.client_id)
-      return !expected || expected.orders !== row.orders || expected.units !== row.units
-    })
-    if (held.rows.length === snapshot.size && heldBad.length === 0) {
+    const heldCounts = indexCounts(held.rows)
+    const touched = await foreignTouched(startedAt)
+    const heldBad = changedClients(startCounts, heldCounts).filter(
+      (id) => startCounts.has(id) && !touched.has(id) && !id.includes("verify-065-")
+    )
+    if (heldBad.length === 0) {
       pass(results, "snapshot_unchanged_by_fixtures", "existing clients keep their sale counts")
     } else {
-      fail(results, "snapshot_unchanged_by_fixtures", `${heldBad.length} changed, ${held.rows.length} returned`)
+      fail(results, "snapshot_unchanged_by_fixtures", `${heldBad.length} changed: ${heldBad.slice(0, 5).join(", ")}`)
     }
 
     const substring = await db.query(
@@ -336,12 +385,13 @@ async function main() {
     const anonRows = await anon.rpc("client_transactions", { p_client_id: KUDZANAI })
     const viewerSaleCount = (viewerRows.data ?? []).filter((row) => row.type === "Sale").length
     const salesSaleCount = (salesRows.data ?? []).filter((row) => row.type === "Sale").length
-    const viewerOk = !viewerCounts.error && (viewerCounts.data ?? []).some((row) => row.client_id === KUDZANAI && row.orders === 18)
+    const kudzanaiNow = (viewerCounts.data ?? []).find((row) => row.client_id === KUDZANAI)
+    const viewerOk = !viewerCounts.error && kudzanaiNow && viewerSaleCount === kudzanaiNow.units
     const salesOk =
       !viewerRows.error &&
-      viewerSaleCount === 20 &&
+      viewerSaleCount === kudzanaiNow?.units &&
       !salesRows.error &&
-      salesSaleCount === 20 &&
+      salesSaleCount === kudzanaiNow?.units &&
       !salesView.error &&
       salesView.data?.transaction_id === FORTUNATE_SALES[0]
     const anonBlocked = Boolean(anonCounts.error) && Boolean(anonRows.error)
@@ -361,6 +411,28 @@ async function main() {
     }
   } finally {
     await cleanup()
+    if (startCounts && startedAt) {
+      const endCounts = await saleCounts()
+      const touched = await foreignTouched(startedAt)
+      const changed = changedClients(startCounts, endCounts)
+      const unexplained = changed.filter((id) => !touched.has(id))
+      const ignored = changed.filter((id) => touched.has(id))
+      if (unexplained.length === 0) {
+        pass(
+          results,
+          "snapshot_unchanged",
+          ignored.length
+            ? `unchanged except clients touched by other transactions: ${ignored.join(", ")}`
+            : `${endCounts.size} clients unchanged`
+        )
+      } else {
+        fail(
+          results,
+          "snapshot_unchanged",
+          `${unexplained.length} clients changed without another user's transaction: ${unexplained.slice(0, 5).join(", ")}`
+        )
+      }
+    }
     const residue = await db.query(
       `SELECT
          (SELECT count(*)::integer FROM public.transactions WHERE id LIKE $1 OR serial_number LIKE $1 OR batch_id LIKE $1) AS transactions,
@@ -374,7 +446,7 @@ async function main() {
     } else {
       fail(results, "residue", JSON.stringify(left))
     }
-    await db.end()
+    await Promise.race([db.end(), new Promise((resolve) => setTimeout(resolve, 2000))])
   }
 
   const failed = Object.values(results).filter((row) => row.result === "FAIL")

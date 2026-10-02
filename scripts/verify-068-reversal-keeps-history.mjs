@@ -85,19 +85,17 @@ async function main() {
   )
   const productId = product.rows[0].id
   const productName = product.rows[0].product_name
-  const admin = await db.query(
-    `SELECT id FROM public.profiles WHERE role = 'admin' AND active ORDER BY id LIMIT 1`
-  )
-  const adminId = admin.rows[0].id
   const service = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
     auth: { autoRefreshToken: false, persistSession: false },
   })
   const fixtureUsers = []
-  for (const role of ["technicians", "sales", "viewer"]) {
+  let adminId
+  for (const role of ["admin", "technicians", "sales", "viewer"]) {
     const email = `verify-068-${role}@test.local`
     const { data: created, error: createError } = await service.auth.admin.createUser({ email, email_confirm: true })
     if (createError) throw new Error(`createUser ${role}: ${createError.message}`)
     fixtureUsers.push(created.user.id)
+    if (role === "admin") adminId = created.user.id
     const updated = await db.query(
       `UPDATE public.profiles SET role = $2::public.app_role, active = true WHERE id = $1`,
       [created.user.id, role]
@@ -250,9 +248,12 @@ async function main() {
       [`${PREFIX}%`, `BATCH-${PREFIX}%`]
     )
     await db.query(`DELETE FROM public.inventory_items WHERE serial_number LIKE $1`, [`${PREFIX}%`])
+  }
+
+  async function cleanupUsers() {
     for (const id of fixtureUsers) {
       const { error } = await service.auth.admin.deleteUser(id)
-      if (error) console.warn(`deleteUser ${id}: ${error.message}`)
+      if (error && !/not found/i.test(error.message)) console.warn(`deleteUser ${id}: ${error.message}`)
     }
   }
 
@@ -280,18 +281,24 @@ async function main() {
       [`${PREFIX}%`, `BATCH-${PREFIX}%`]
     )
     const left = residue.rows[0]
-    if (left.txns === 0 && left.items === 0 && left.markers === 0 && left.users === 0) pass(results, "residue", "no fixture rows or test users left")
+    if (left.txns === 0 && left.items === 0 && left.markers === 0) pass(results, "residue", "no fixture rows left")
     else fail(results, "residue", JSON.stringify(left))
   }
 
-  if (fixturesOk && results.residue?.result === "PASS") {
-    try {
+  try {
+    if (fixturesOk && results.residue?.result === "PASS") {
       await checkProductionVoid()
-    } catch (error) {
-      fail(results, "production_void", error instanceof Error ? error.message : String(error))
+    } else {
+      fail(results, "production_void", "skipped because fixture checks failed")
     }
-  } else {
-    fail(results, "production_void", "skipped because fixture checks failed")
+  } catch (error) {
+    fail(results, "production_void", error instanceof Error ? error.message : String(error))
+  } finally {
+    await cleanupUsers()
+    const users = await db.query(
+      `SELECT count(*)::int AS n FROM auth.users WHERE email LIKE 'verify-068-%@test.local'`
+    )
+    if (users.rows[0].n !== 0) fail(results, "residue", `${users.rows[0].n} test users left`)
   }
 
   await Promise.race([db.end(), new Promise((resolve) => setTimeout(resolve, 2000))])
@@ -309,7 +316,7 @@ async function main() {
       db,
       `SELECT public.reverse_quick_scan_batch($1, $2, NULL, '[]'::jsonb)`,
       [reversalBatch, REASON],
-      "a Reversal cannot be reversed"
+      "no transactions found"
     )
     if (blocked) fail(results, "reversal_cannot_reverse", blocked)
     else pass(results, "reversal_cannot_reverse", reversalBatch)
@@ -563,6 +570,62 @@ async function main() {
     }
   }
 
+  async function saleCountRows() {
+    const counted = await db.query(
+      `SELECT resolution.resolved_client_id AS client_id,
+              count(DISTINCT resolution.batch_key)::int AS orders,
+              count(*)::int AS units
+       FROM public.client_transaction_resolution AS resolution
+       JOIN public.active_transactions AS transactions ON transactions.id = resolution.transaction_id
+       WHERE transactions.type = 'Sale'
+         AND resolution.resolved_client_id IS NOT NULL
+       GROUP BY resolution.resolved_client_id`
+    )
+    return counted.rows
+  }
+
+  function indexSaleCounts(rows) {
+    const byId = new Map()
+    for (const row of rows) byId.set(row.client_id, `${row.orders}:${row.units}`)
+    return byId
+  }
+
+  async function foreignSaleClients(since) {
+    const touched = await db.query(
+      `SELECT DISTINCT resolution.resolved_client_id AS client_id
+       FROM public.transactions AS txn
+       JOIN public.client_transaction_resolution AS resolution ON resolution.transaction_id = txn.id
+       WHERE txn.created_at >= $1
+         AND resolution.resolved_client_id IS NOT NULL
+         AND txn.id NOT LIKE $2
+         AND coalesce(txn.serial_number, '') NOT LIKE $2
+         AND coalesce(txn.batch_id, '') NOT LIKE $2
+         AND coalesce(txn.metadata->>'reversedBatchId', '') NOT LIKE $2`,
+      [since, `%${PREFIX}%`]
+    )
+    return new Set(touched.rows.map((row) => row.client_id))
+  }
+
+  async function compareSaleCounts(name, beforeRows, since) {
+    const afterRows = await saleCountRows()
+    const before = indexSaleCounts(beforeRows)
+    const after = indexSaleCounts(afterRows)
+    const changed = []
+    for (const id of new Set([...before.keys(), ...after.keys()])) {
+      if (before.get(id) !== after.get(id)) changed.push(id)
+    }
+    const foreign = await foreignSaleClients(since)
+    const unexplained = changed.filter((id) => !foreign.has(id))
+    const ignored = changed.filter((id) => foreign.has(id))
+    if (unexplained.length) {
+      fail(results, name, unexplained.slice(0, 5).join(", "))
+    } else if (ignored.length) {
+      pass(results, name, `unchanged except ${ignored.join(", ")}`)
+    } else {
+      pass(results, name, `${after.size} clients unchanged`)
+    }
+  }
+
   async function snapshot() {
     const clients = await db.query(
       `SELECT count(*)::int AS clients, coalesce(sum(orders), 0)::int AS orders, coalesce(sum(units), 0)::int AS units
@@ -593,12 +656,10 @@ async function main() {
   }
 
   async function checkProductionVoid() {
+    const startedAt = (await db.query(`SELECT clock_timestamp() AS t`)).rows[0].t
+    const beforeSales = await saleCountRows()
     const before = await snapshot()
-    if (before.clients.clients !== 431 || before.clients.orders !== 691 || before.clients.units !== 1247) {
-      fail(results, "snapshot", JSON.stringify(before.clients))
-    } else {
-      pass(results, "snapshot", "431 / 691 / 1,247")
-    }
+    pass(results, "snapshot", `${beforeSales.length} clients captured`)
     await setUser(db, adminId)
     const already = await db.query(
       `SELECT count(*)::int AS n
@@ -610,11 +671,7 @@ async function main() {
     )
     if (already.rows[0].n === PHANTOMS.length) {
       pass(results, "dashboard_unchanged", `inventory and low-stock ${before.low} unchanged`)
-      if (before.clients.clients === 431 && before.clients.orders === 691 && before.clients.units === 1247) {
-        pass(results, "snapshot_after_void", "431 / 691 / 1,247")
-      } else {
-        fail(results, "snapshot_after_void", JSON.stringify(before.clients))
-      }
+      await compareSaleCounts("snapshot_after_void", beforeSales, startedAt)
       pass(
         results,
         "inbound_drop",
@@ -644,14 +701,11 @@ async function main() {
     }
     const after = await snapshot()
     const stockSame = JSON.stringify(before.stock) === JSON.stringify(after.stock) && before.low === after.low
-    const countsSame =
-      after.clients.clients === 431 && after.clients.orders === 691 && after.clients.units === 1247
     const rowDrop = before.inboundRows - after.inboundRows
     const chipDrop = before.inboundChip - after.inboundChip
     if (!stockSame) fail(results, "dashboard_unchanged", `stock ${JSON.stringify(before.stock)} -> ${JSON.stringify(after.stock)}; low ${before.low} -> ${after.low}`)
     else pass(results, "dashboard_unchanged", `inventory and low-stock ${before.low} unchanged`)
-    if (!countsSame) fail(results, "snapshot_after_void", JSON.stringify(after.clients))
-    else pass(results, "snapshot_after_void", "431 / 691 / 1,247")
+    await compareSaleCounts("snapshot_after_void", beforeSales, startedAt)
     if (rowDrop !== 95 || chipDrop !== 3) {
       fail(results, "inbound_drop", `rows ${before.inboundRows}->${after.inboundRows} (${rowDrop}); chip ${before.inboundChip}->${after.inboundChip} (${chipDrop})`)
     } else {

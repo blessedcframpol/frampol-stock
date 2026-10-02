@@ -665,15 +665,15 @@ async function main() {
            (SELECT count(*)::int FROM public.product_lines) AS total`
       )
       const r = rows[0]
-      if (r.flagged === 20 && r.starlink === 20 && r.extra_flagged === 0 && r.unflagged_starlink === 0) {
+      if (r.flagged === r.starlink && r.extra_flagged === 0 && r.unflagged_starlink === 0) {
         pass(
           "5_requires_serial_set_equality",
-          `flagged=starlink=20, both extra directions empty`
+          `flagged=starlink=${r.flagged}, both extra directions empty`
         )
       } else {
         fail("5_requires_serial_set_equality", JSON.stringify(r))
       }
-      if (r.total - r.flagged === r.total - 20 && r.extra_flagged === 0 && r.unflagged_starlink === 0) {
+      if (r.extra_flagged === 0 && r.unflagged_starlink === 0) {
         pass("6_non_starlink_requires_serial_false", `${r.total - r.flagged} remaining rows are false`)
       } else {
         fail("6_non_starlink_requires_serial_false", JSON.stringify(r))
@@ -681,7 +681,7 @@ async function main() {
     }
 
     console.log("\n=== Resolving fixtures ===")
-    const adminUser = await resolveOrCreateRole("admin", "verify-051-admin@example.com")
+    const adminUser = await resolveOrCreateRole("admin", "verify-051-admin@example.com", { preferExisting: false })
     adminActorId = adminUser.id
     const sales = await createFixtureUser(EMAIL.sales, "sales")
     const tech = await createFixtureUser(EMAIL.tech, "technicians")

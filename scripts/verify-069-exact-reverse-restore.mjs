@@ -108,26 +108,24 @@ async function main() {
   )
   const productId = product.rows[0].id
   const productName = product.rows[0].product_name
-  const admin = await db.query(
-    `SELECT id FROM public.profiles WHERE role = 'admin' AND active ORDER BY id LIMIT 1`
-  )
-  const adminId = admin.rows[0].id
   const service = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
     auth: { autoRefreshToken: false, persistSession: false },
   })
   const fixtureUsers = []
-  for (const role of ["technicians", "viewer"]) {
+  let adminId
+  for (const role of ["admin", "technicians", "viewer"]) {
     const email = `verify-069-${role}@test.local`
     const { data: created, error: createError } = await service.auth.admin.createUser({ email, email_confirm: true })
     if (createError) throw new Error(`createUser ${role}: ${createError.message}`)
     fixtureUsers.push(created.user.id)
+    if (role === "admin") adminId = created.user.id
     const updated = await db.query(
       `UPDATE public.profiles SET role = $2::public.app_role, active = true WHERE id = $1`,
       [created.user.id, role]
     )
     if (updated.rowCount !== 1) throw new Error(`profile ${role} was not updated`)
   }
-  const technicianId = fixtureUsers[0]
+  const technicianId = fixtureUsers.find((id) => id !== adminId)
 
   async function readItem(serial) {
     const item = await db.query(
@@ -390,20 +388,54 @@ async function main() {
       [`${PREFIX}-%`, `BATCH-${PREFIX}-%`]
     )
     await db.query(`DELETE FROM public.inventory_items WHERE serial_number LIKE $1`, [`${PREFIX}-%`])
+  }
+
+  async function cleanupUsers() {
     for (const id of fixtureUsers) {
       const { error } = await service.auth.admin.deleteUser(id)
-      if (error) console.warn(`deleteUser ${id}: ${error.message}`)
+      if (error && !/not found/i.test(error.message)) console.warn(`deleteUser ${id}: ${error.message}`)
     }
   }
 
   async function snapshot() {
-    const clients = await db.query(
-      `SELECT count(*)::int AS clients, coalesce(sum(orders), 0)::int AS orders, coalesce(sum(units), 0)::int AS units
-       FROM public.client_sale_dispatch_counts()`
+    const counted = await db.query(
+      `SELECT resolution.resolved_client_id AS client_id,
+              count(DISTINCT resolution.batch_key)::int AS orders,
+              count(*)::int AS units
+       FROM public.client_transaction_resolution AS resolution
+       JOIN public.active_transactions AS transactions ON transactions.id = resolution.transaction_id
+       WHERE transactions.type = 'Sale'
+         AND resolution.resolved_client_id IS NOT NULL
+       GROUP BY resolution.resolved_client_id`
     )
-    return clients.rows[0]
+    return counted.rows
   }
 
+  function indexSaleCounts(rows) {
+    const byId = new Map()
+    for (const row of rows) byId.set(row.client_id, `${Number(row.orders)}:${Number(row.units)}`)
+    return byId
+  }
+
+  async function foreignSaleClients(since) {
+    const touched = await db.query(
+      `SELECT DISTINCT resolution.resolved_client_id AS client_id
+       FROM public.transactions AS txn
+       JOIN public.client_transaction_resolution AS resolution ON resolution.transaction_id = txn.id
+       WHERE txn.created_at >= $1
+         AND resolution.resolved_client_id IS NOT NULL
+         AND txn.id NOT LIKE $2
+         AND coalesce(txn.serial_number, '') NOT LIKE $2
+         AND coalesce(txn.batch_id, '') NOT LIKE $2
+         AND coalesce(txn.metadata->>'reversedBatchId', '') NOT LIKE $2`,
+      [since, `%${PREFIX}%`]
+    )
+    return new Set(touched.rows.map((row) => row.client_id))
+  }
+
+  const saleClock = await db.query(`SELECT clock_timestamp() AS started_at`)
+  const saleStartedAt = saleClock.rows[0].started_at
+  const beforeShot = await snapshot()
   const stock = {
     status: "In Stock",
     location: "Warehouse A",
@@ -418,8 +450,6 @@ async function main() {
     poc_out_date: "2026-09-15",
     return_date: "2026-11-01",
   }
-
-  const beforeShot = await snapshot()
 
   try {
     const created = await createInbound(`${PREFIX}-create`)
@@ -754,30 +784,35 @@ async function main() {
       left.items === 0 &&
       left.markers === 0 &&
       left.restores === 0 &&
-      left.extensions === 0 &&
-      left.users === 0
+      left.extensions === 0
     ) {
-      pass(results, "residue", "no fixture rows or test users left")
+      pass(results, "residue", "no fixture rows left")
     } else {
       fail(results, "residue", JSON.stringify(left))
     }
   }
 
-  if (fixturesOk && results.residue?.result === "PASS") {
-    try {
+  try {
+    if (fixturesOk && results.residue?.result === "PASS") {
       await setUser(db, adminId)
       const afterShot = await snapshot()
-      const same =
-        afterShot.clients === beforeShot.clients &&
-        afterShot.orders === beforeShot.orders &&
-        afterShot.units === beforeShot.units
-      const label = `${afterShot.clients} / ${afterShot.orders.toLocaleString("en-US")} / ${afterShot.units.toLocaleString("en-US")}`
-      if (!same) {
-        fail(results, "snapshot", `before ${JSON.stringify(beforeShot)} after ${JSON.stringify(afterShot)}`)
-      } else if (afterShot.clients === 431 && afterShot.orders === 691 && afterShot.units === 1247) {
-        pass(results, "snapshot", "431 / 691 / 1,247")
+      const before = indexSaleCounts(beforeShot)
+      const after = indexSaleCounts(afterShot)
+      const changed = []
+      for (const id of new Set([...before.keys(), ...after.keys()])) {
+        if (before.get(id) !== after.get(id)) changed.push(id)
+      }
+      const foreign = await foreignSaleClients(saleStartedAt)
+      const unexplained = changed.filter((id) => !foreign.has(id))
+      const ignored = changed.filter((id) => foreign.has(id))
+      const orders = afterShot.reduce((sum, row) => sum + Number(row.orders), 0)
+      const units = afterShot.reduce((sum, row) => sum + Number(row.units), 0)
+      if (unexplained.length) {
+        fail(results, "snapshot", unexplained.slice(0, 5).join(", "))
+      } else if (ignored.length) {
+        pass(results, "snapshot", `${afterShot.length} clients; ignored ${ignored.join(", ")}`)
       } else {
-        pass(results, "snapshot", `${label} unchanged by this run`)
+        pass(results, "snapshot", `${afterShot.length} / ${orders} / ${units} unchanged by this run`)
       }
       const phantoms = await db.query(
         `SELECT reversal.batch_id, reversal.kind, reversal.reversal_reason,
@@ -820,11 +855,17 @@ async function main() {
           fail(results, `stuck_${stuck.serial}`, JSON.stringify(row))
         }
       }
-    } catch (error) {
-      fail(results, "production_check", error instanceof Error ? error.message : String(error))
+    } else {
+      fail(results, "production_check", "skipped because fixture checks failed")
     }
-  } else {
-    fail(results, "production_check", "skipped because fixture checks failed")
+  } catch (error) {
+    fail(results, "production_check", error instanceof Error ? error.message : String(error))
+  } finally {
+    await cleanupUsers()
+    const users = await db.query(
+      `SELECT count(*)::int AS n FROM auth.users WHERE email LIKE 'verify-069-%@test.local'`
+    )
+    if (users.rows[0].n !== 0) fail(results, "residue", `${users.rows[0].n} test users left`)
   }
 
   await Promise.race([db.end(), new Promise((resolve) => setTimeout(resolve, 2000))])

@@ -313,9 +313,10 @@ try {
           id
         ) AS n,
         count(*) OVER (PARTITION BY serial_number) AS nmax
-      FROM public.transactions
-      WHERE type <> 'Reversal'
-        AND id NOT LIKE '${PREFIX}%'
+    FROM public.transactions
+    WHERE type <> 'Reversal'
+      AND NOT public.batch_is_currently_reversed(batch_id)
+      AND id NOT LIKE '${PREFIX}%'
     ),
     stepped AS (
       SELECT serial_number, n, nmax,
@@ -347,10 +348,28 @@ try {
     [`${PREFIX}%`]
   )
   const bySource = Object.fromEntries(counts.rows.map((row) => [row.previous_status_source, row.n]))
-  if ((bySource.derived ?? 0) > 0 && (bySource.unknown ?? 0) > 0 && (bySource.recorded ?? 0) === 0) {
-    pass(results, "source_counts", JSON.stringify(bySource))
+  const late = await db.query(
+    `SELECT txn.id, txn.previous_status_source
+     FROM public.transactions AS txn
+     WHERE txn.id NOT LIKE $1
+       AND txn.created_at > (
+         SELECT to_timestamp(version, 'YYYYMMDDHH24MISS')
+         FROM supabase_migrations.schema_migrations
+         WHERE name = 'apply_stock_movement_previous_status'
+       )
+       AND txn.previous_status_source IS DISTINCT FROM 'recorded'
+     ORDER BY txn.created_at, txn.id
+     LIMIT 5`,
+    [`${PREFIX}%`]
+  )
+  if (bySource.derived === 2864 && bySource.unknown === 173 && late.rows.length === 0) {
+    pass(
+      results,
+      "source_counts",
+      `derived 2864, unknown 173, ${bySource.recorded ?? 0} recorded after I2a`
+    )
   } else {
-    fail(results, "source_counts", JSON.stringify(bySource))
+    fail(results, "source_counts", JSON.stringify({ bySource, late: late.rows }))
   }
 
   const hits = appStatusUpdates()

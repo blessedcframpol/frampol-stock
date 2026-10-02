@@ -22,10 +22,14 @@ const require = createRequire(import.meta.url)
 
 const FIXTURE_PASSWORD = "Verify047!StockWrite-Temp"
 const EMAIL = {
+  admin: "verify-047-admin@example.com",
+  tech: "verify-047-tech@example.com",
   sales: "verify-047-sales@example.com",
+  viewer: "verify-047-viewer@example.com",
   accounts: "verify-047-accounts@example.com",
   techB: "verify-047-tech-b@example.com",
   norole: "verify-047-norole@example.com",
+  inactiveSales: "verify-047-inactive-sales@example.com",
 }
 
 function loadEnvLocal() {
@@ -88,11 +92,11 @@ async function require047Schema(admin) {
     JOIN pg_namespace n ON n.oid = p.pronamespace
     WHERE n.nspname = 'public'
       AND p.proname = 'reverse_quick_scan_batch'
-      AND pg_get_function_identity_arguments(p.oid) = 'p_batch_id text, p_reason text, p_return_location text, p_confirmed jsonb'
+      AND pg_get_function_identity_arguments(p.oid) = 'p_batch_id text, p_reason text, p_return_location text, p_confirmed jsonb, p_entered jsonb'
   `)
   if (!rpc[0]) {
     throw new Error(
-      "Expected reverse_quick_scan_batch(p_batch_id text, p_reason text, p_return_location text, p_confirmed jsonb)."
+      "Expected reverse_quick_scan_batch(p_batch_id text, p_reason text, p_return_location text, p_confirmed jsonb, p_entered jsonb)."
     )
   }
 }
@@ -210,7 +214,7 @@ async function main() {
     }
   }
 
-  async function createFixtureUser(email, role) {
+  async function createFixtureUser(email, role, { active = true } = {}) {
     const { data, error } = await supabaseAdmin.auth.admin.createUser({
       email,
       password: FIXTURE_PASSWORD,
@@ -220,11 +224,12 @@ async function main() {
     const id = data.user.id
     fixtureUserIds.push(id)
     if (role === null) {
-      await admin.query(`UPDATE public.profiles SET role = NULL, active = true WHERE id = $1`, [id])
+      await admin.query(`UPDATE public.profiles SET role = NULL, active = $2 WHERE id = $1`, [id, active])
     } else {
-      await admin.query(`UPDATE public.profiles SET role = $2::public.app_role, active = true WHERE id = $1`, [
+      await admin.query(`UPDATE public.profiles SET role = $2::public.app_role, active = $3 WHERE id = $1`, [
         id,
         role,
+        active,
       ])
     }
     const { rows } = await admin.query(
@@ -233,9 +238,9 @@ async function main() {
     )
     assert(rows[0], `Profile missing after createUser for ${email}`)
     if (role === null) {
-      assert(rows[0].role == null && rows[0].active === true, `norole fixture not NULL/active: ${JSON.stringify(rows[0])}`)
+      assert(rows[0].role == null && rows[0].active === active, `norole fixture mismatch: ${JSON.stringify(rows[0])}`)
     } else {
-      assert(rows[0].role === role && rows[0].active === true, `Fixture ${email} not ${role}/active: ${JSON.stringify(rows[0])}`)
+      assert(rows[0].role === role && rows[0].active === active, `Fixture ${email} not ${role}/active=${active}: ${JSON.stringify(rows[0])}`)
     }
     return rows[0]
   }
@@ -370,31 +375,16 @@ async function main() {
 
     // -------------------------------------------------------------- fixtures
     console.log("\n=== Resolving fixtures ===")
-    const { rows: liveProfiles } = await admin.query(`
-      SELECT id::text AS id, email, role::text AS role, active
-      FROM public.profiles
-      ORDER BY role NULLS LAST, email
-    `)
-
-    const adminUser = liveProfiles.find((p) => p.role === "admin" && p.active)
-    const techA = liveProfiles.find((p) => p.role === "technicians" && p.active)
-    const inactiveSales = liveProfiles.find((p) => p.role === "sales" && p.active === false)
-
-    assert(adminUser, "Need an existing active admin profile (reuse, do not create)")
-    assert(techA, "Need an existing active technicians profile (reuse, do not create)")
-    assert(inactiveSales, "Need the existing inactive sales profile for check 17")
-
-    console.log(`Reusing admin: ${adminUser.email}`)
-    console.log(`Reusing technicians: ${techA.email}`)
-    console.log(`Reusing inactive sales: ${inactiveSales.email}`)
-
+    const adminUser = await createFixtureUser(EMAIL.admin, "admin")
+    const techA = await createFixtureUser(EMAIL.tech, "technicians")
     const sales = await createFixtureUser(EMAIL.sales, "sales")
+    const viewer = await createFixtureUser(EMAIL.viewer, "viewer")
     const accounts = await createFixtureUser(EMAIL.accounts, "accounts")
     const techB = await createFixtureUser(EMAIL.techB, "technicians")
     const norole = await createFixtureUser(EMAIL.norole, null)
+    const inactiveSales = await createFixtureUser(EMAIL.inactiveSales, "sales", { active: false })
 
-    // Hard assert — never proceed with a missing fixture
-    const required = { adminUser, techA, techB, sales, accounts, norole, inactiveSales }
+    const required = { adminUser, techA, viewer, techB, sales, accounts, norole, inactiveSales }
     for (const [k, v] of Object.entries(required)) {
       if (!v?.id) {
         console.error(`Required fixture missing: ${k}`)
@@ -766,7 +756,7 @@ async function main() {
         ORDER BY 1
       `)
       const sigs = rows.map((r) => r.signature)
-      const expected = "reverse_quick_scan_batch(text,text,text,jsonb)"
+      const expected = "reverse_quick_scan_batch(text,text,text,jsonb,jsonb)"
       const normalized = sigs.map((s) => s.replace(/\s+/g, ""))
       if (sigs.length === 1 && normalized[0] === expected) {
         pass("20_rpc_single_overload", sigs[0])

@@ -454,9 +454,8 @@ async function main() {
     await deleteFixtureUsersByEmail()
 
     console.log("\n=== Resolving fixtures ===")
-    // Assert-or-create: reuse an active admin if present; otherwise create verify-049-admin.
-    // Role actors are always dedicated verify-049-* users (owner-check needs two sales).
-    const adminUser = await resolveOrCreateRole("admin", "verify-049-admin@example.com")
+    // Role actors, including admin, are dedicated verify-049-* users.
+    const adminUser = await resolveOrCreateRole("admin", "verify-049-admin@example.com", { preferExisting: false })
     adminActorId = adminUser.id
     const sales = await createFixtureUser(EMAIL.sales, "sales")
     const salesB = await createFixtureUser(EMAIL.salesB, "sales")
