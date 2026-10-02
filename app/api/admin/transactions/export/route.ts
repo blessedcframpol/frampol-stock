@@ -23,29 +23,28 @@ export async function GET() {
     if (!auth.ok) return auth.response
     const { supabase } = auth
 
-    const countTransactions = async () => {
+    const countActive = async () => {
       const { count, error } = await supabase
-        .from("transactions")
+        .from("active_transactions")
         .select("id", { count: "exact", head: true })
       if (error) throw new Error(error.message)
-      if (count == null) throw new Error("Transaction count was missing")
+      if (count == null) throw new Error("Active transaction count was missing")
       return count
     }
-
-    const countBefore = await countTransactions()
+    const countBefore = await countActive()
     const txnRows = await fetchAllPages((from, to) =>
       supabase
-        .from("transactions")
+        .from("active_transactions")
         .select("*")
         .order("date", { ascending: false })
         .order("id", { ascending: false })
         .range(from, to)
     )
-    const countAfter = await countTransactions()
+    const countAfter = await countActive()
     const transactions = txnRows.map(rowToTransaction)
     if (transactions.length !== countBefore || transactions.length !== countAfter) {
-      return apiErrorResponse(409, "Export row count did not match the transaction table", {
-        detail: `CSV rows ${transactions.length}, table before ${countBefore}, table after ${countAfter}`,
+      return apiErrorResponse(409, "Export row count did not match active transactions", {
+        detail: `CSV rows ${transactions.length}, active before ${countBefore}, active after ${countAfter}`,
         logLabel: "admin transactions export count",
       })
     }
@@ -99,7 +98,7 @@ export async function GET() {
 
     const csv = `\uFEFF${toCsv(rows)}`
     const filename = buildCsvFilename(
-      ["all transactions", String(countAfter)],
+      ["all transactions", String(transactions.length)],
       new Date().toISOString()
     )
     return new NextResponse(csv, {
@@ -108,7 +107,7 @@ export async function GET() {
         "Content-Type": "text/csv; charset=utf-8",
         "Content-Disposition": `attachment; filename="${filename}"`,
         "Cache-Control": "no-store",
-        "X-Transaction-Count": String(countAfter),
+        "X-Transaction-Count": String(transactions.length),
       },
     })
   } catch (error) {

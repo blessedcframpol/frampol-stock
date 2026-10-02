@@ -5,6 +5,7 @@ import {
   dispatchResultLabel,
   dispatchRowsForBatch,
   filteredTotal,
+  historyBatchCountLabel,
   movementChipIds,
   pageCount,
   reversalAffordances,
@@ -13,15 +14,15 @@ import {
 
 const HISTORY_COUNTS = {
   Sale: 697,
-  Inbound: 88,
+  Inbound: 85,
   Rentals: 26,
   "POC Out": 13,
-  Reversal: 12,
   "Rental Return": 11,
   Dispose: 4,
   "POC Return": 2,
   "Sale Return": 1,
   Decommissioned: 1,
+  Reversed: 15,
 }
 
 describe("filteredTotal", () => {
@@ -30,6 +31,11 @@ describe("filteredTotal", () => {
     expect(filteredTotal(HISTORY_COUNTS, "Sale")).toBe(697)
     expect(filteredTotal(HISTORY_COUNTS, "Dispose")).toBe(4)
     expect(filteredTotal(HISTORY_COUNTS, "Transfer")).toBe(0)
+    expect(filteredTotal(HISTORY_COUNTS, "Reversed")).toBe(15)
+    expect(historyBatchCountLabel(filteredTotal(HISTORY_COUNTS, null), HISTORY_COUNTS.Reversed, null)).toBe(
+      "855 batches · 15 reversed"
+    )
+    expect(historyBatchCountLabel(15, 15, "Reversed")).toBe("15 batches")
   })
 
   it("keeps the selected chip equal to the paginated total", () => {
@@ -137,12 +143,12 @@ describe("reversalAffordances", () => {
     expect(affordance.linksToBatchId).toBe("BATCH-1")
   })
 
-  it("does not offer Reverse for a movement the stock reversal cannot undo", () => {
+  it("offers Reverse for every movement except a Reversal", () => {
     expect(
       reversalAffordances({
         role: "admin",
         isReversed: false,
-        movementType: "Inbound",
+        movementType: "POC Return",
         reverseBatchId: "BATCH-1",
       }).showReverse
     ).toBe(true)
@@ -150,8 +156,8 @@ describe("reversalAffordances", () => {
       reversalAffordances({
         role: "admin",
         isReversed: false,
-        movementType: "POC Return",
-        reverseBatchId: "BATCH-1",
+        movementType: "Reversal",
+        reverseBatchId: "BATCH-REV-1",
       }).showReverse
     ).toBe(false)
   })

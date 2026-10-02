@@ -41,7 +41,7 @@ export function TransactionsTable() {
     let cancelled = false
     void (async () => {
       try {
-        const page = await fetchTransactionBatchPage({ limit: RECENT_BATCH_LIMIT, offset: 0 })
+        const page = await fetchTransactionBatchPage({ limit: RECENT_BATCH_LIMIT, offset: 0, active: true })
         if (cancelled) return
         setLoadError(null)
         setBatches(page.batches)

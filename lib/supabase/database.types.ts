@@ -322,6 +322,9 @@ export interface Database {
           metadata: Json | null
           created_by: string | null
           created_at: string | null
+          previous_status: string | null
+          previous_status_source: string
+          reverses_transaction_id: string | null
         }
         Insert: {
           id: string
@@ -343,6 +346,9 @@ export interface Database {
           assigned_to?: string | null
           metadata?: Json | null
           created_by?: string | null
+          previous_status?: string | null
+          previous_status_source?: string
+          reverses_transaction_id?: string | null
         }
         Update: {
           id?: string
@@ -364,6 +370,9 @@ export interface Database {
           metadata?: Json | null
           created_by?: string | null
           created_at?: string | null
+          previous_status?: string | null
+          previous_status_source?: string
+          reverses_transaction_id?: string | null
         }
         Relationships: []
       }
@@ -568,18 +577,21 @@ export interface Database {
           reversed_at: string
           reversal_reason: string | null
           reversed_by: string | null
+          kind: string
         }
         Insert: {
           batch_id: string
           reversed_at: string
           reversal_reason?: string | null
           reversed_by?: string | null
+          kind?: string
         }
         Update: {
           batch_id?: string
           reversed_at?: string
           reversal_reason?: string | null
           reversed_by?: string | null
+          kind?: string
         }
         Relationships: []
       }
@@ -674,6 +686,33 @@ export interface Database {
       }
     }
     Views: {
+      active_transactions: {
+        Row: {
+          id: string
+          type: string
+          serial_number: string
+          item_name: string
+          client: string
+          date: string
+          client_id: string | null
+          invoice_number: string | null
+          notes: string | null
+          from_location: string | null
+          to_location: string | null
+          assigned_to: string | null
+          disposal_reason: string | null
+          authorised_by: string | null
+          batch_id: string | null
+          delivery_note_url: string | null
+          metadata: Json | null
+          created_by: string | null
+          created_at: string | null
+          previous_status: string | null
+          previous_status_source: string
+          reverses_transaction_id: string | null
+        }
+        Relationships: []
+      }
       low_stock_products: {
         Row: {
           product_id: string
@@ -701,6 +740,7 @@ export interface Database {
           p_from?: string | null
           p_to?: string | null
           p_search?: string | null
+          p_active_only?: boolean
         }
         Returns: Json
       }
@@ -793,10 +833,14 @@ export interface Database {
       reverse_quick_scan_batch: {
         Args: {
           p_batch_id: string
-          p_entries: Json
-          p_reversal_transactions: Json
           p_reason: string
+          p_return_location?: string
+          p_confirmed?: Json
         }
+        Returns: Json
+      }
+      void_batch: {
+        Args: { p_batch_id: string; p_reason: string }
         Returns: Json
       }
       ensure_product_line: {

@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo } from "react"
+import { useEffect, useMemo, useState } from "react"
 import {
   Bar,
   BarChart,
@@ -18,6 +18,10 @@ import {
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart"
 import { useInventoryStore } from "@/lib/inventory-store"
+import { getSupabaseClient } from "@/lib/supabase/client"
+import { fetchAllPages } from "@/lib/supabase/postgrest-page"
+import { rowToTransaction } from "@/lib/supabase/inventory-db"
+import type { Transaction } from "@/lib/data"
 import { todayBusinessDate } from "@/lib/business-date.mjs"
 import { allUnitsByVendor, inStockByVendor, monthlySaleUnits } from "@/lib/dashboard-metrics"
 import { useOrgTimezone } from "@/hooks/use-org-timezone"
@@ -133,11 +137,33 @@ export function VendorDistributionChart() {
 }
 
 export function MonthlySalesChart() {
-  const { transactions } = useInventoryStore()
   const timeZone = useOrgTimezone()
+  const [sales, setSales] = useState<Transaction[]>([])
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const rows = await fetchAllPages((from, to) =>
+          getSupabaseClient()
+            .from("active_transactions")
+            .select("*")
+            .eq("type", "Sale")
+            .order("date", { ascending: true })
+            .order("id", { ascending: true })
+            .range(from, to)
+        )
+        if (!cancelled) setSales(rows.map(rowToTransaction))
+      } catch {
+        if (!cancelled) setSales([])
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
   const monthlyData = useMemo(
-    () => monthlySaleUnits(transactions, todayBusinessDate(timeZone)),
-    [transactions, timeZone]
+    () => monthlySaleUnits(sales, todayBusinessDate(timeZone)),
+    [sales, timeZone]
   )
 
   return (

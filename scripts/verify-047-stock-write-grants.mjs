@@ -88,11 +88,11 @@ async function require047Schema(admin) {
     JOIN pg_namespace n ON n.oid = p.pronamespace
     WHERE n.nspname = 'public'
       AND p.proname = 'reverse_quick_scan_batch'
-      AND pg_get_function_identity_arguments(p.oid) = 'text, jsonb, jsonb, text'
+      AND pg_get_function_identity_arguments(p.oid) = 'p_batch_id text, p_reason text, p_return_location text, p_confirmed jsonb'
   `)
   if (!rpc[0]) {
     throw new Error(
-      "Expected 047 schema is missing (reverse_quick_scan_batch(text, jsonb, jsonb, text)). Apply supabase/migrations/047_tighten_stock_write_grants.sql first."
+      "Expected reverse_quick_scan_batch(p_batch_id text, p_reason text, p_return_location text, p_confirmed jsonb)."
     )
   }
 }
@@ -297,8 +297,9 @@ async function main() {
 
     await admin.query(
       `INSERT INTO public.transactions (
-         id, type, serial_number, item_name, client, date, batch_id, created_by
-       ) VALUES ($1, 'Sale', $2, $3, 'Verify Client', $4, $5, NULL)`,
+         id, type, serial_number, item_name, client, date, batch_id, created_by,
+         previous_status, previous_status_source
+       ) VALUES ($1, 'Sale', $2, $3, 'Verify Client', $4, $5, NULL, 'In Stock', 'recorded')`,
       [txnId, serial, productName, new Date().toISOString(), batchId]
     )
     cleanupIds.transactions.push(txnId)
@@ -765,7 +766,7 @@ async function main() {
         ORDER BY 1
       `)
       const sigs = rows.map((r) => r.signature)
-      const expected = "reverse_quick_scan_batch(text,jsonb,jsonb,text)"
+      const expected = "reverse_quick_scan_batch(text,text,text,jsonb)"
       const normalized = sigs.map((s) => s.replace(/\s+/g, ""))
       if (sigs.length === 1 && normalized[0] === expected) {
         pass("20_rpc_single_overload", sigs[0])
@@ -777,10 +778,10 @@ async function main() {
     const shortReason = "too short"
     const goodReason = "  Verify 047 disposable batch reversal reason  "
 
-    async function callReverse(client, batchId, entries, reversalTxns, reason) {
+    async function callReverse(client, batchId, reason) {
       const r = await client.query(
-        `SELECT public.reverse_quick_scan_batch($1::text, $2::jsonb, $3::jsonb, $4::text) AS payload`,
-        [batchId, JSON.stringify(entries), JSON.stringify(reversalTxns), reason]
+        `SELECT public.reverse_quick_scan_batch($1::text, $2::text, $3::text, '[]'::jsonb) AS payload`,
+        [batchId, reason, "Warehouse A"]
       )
       return r.rows[0].payload
     }
@@ -790,7 +791,7 @@ async function main() {
       const disposable = await buildDisposableSaleBatch("c21")
       try {
         await asUser(techA.id, async (c) => {
-          await callReverse(c, disposable.batchId, disposable.entries, disposable.reversalTransactions, goodReason)
+          await callReverse(c, disposable.batchId, goodReason)
         })
         fail("21_technicians_rpc_forbidden", "call succeeded")
       } catch (e) {
@@ -805,7 +806,7 @@ async function main() {
       const disposable = await buildDisposableSaleBatch("c22")
       try {
         await asUser(sales.id, async (c) => {
-          await callReverse(c, disposable.batchId, disposable.entries, disposable.reversalTransactions, goodReason)
+          await callReverse(c, disposable.batchId, goodReason)
         })
         fail("22_sales_rpc_forbidden", "call succeeded")
       } catch (e) {
@@ -819,7 +820,7 @@ async function main() {
       const disposable = await buildDisposableSaleBatch("c23")
       try {
         await asUser(adminUser.id, async (c) => {
-          await callReverse(c, disposable.batchId, disposable.entries, disposable.reversalTransactions, shortReason)
+          await callReverse(c, disposable.batchId, shortReason)
         })
         fail("23_admin_rpc_short_reason", "call succeeded with short reason")
       } catch (e) {
@@ -834,7 +835,7 @@ async function main() {
       const disposable = await buildDisposableSaleBatch("c24")
       try {
         const payload = await asUser(adminUser.id, async (c) =>
-          callReverse(c, disposable.batchId, disposable.entries, disposable.reversalTransactions, goodReason)
+          callReverse(c, disposable.batchId, goodReason)
         )
         if (!payload?.ok) {
           fail(
@@ -881,7 +882,7 @@ async function main() {
       const disposable = await buildDisposableSaleBatch("c25")
       try {
         const payload = await asUserRollback(adminUser.id, async (c) =>
-          callReverse(c, disposable.batchId, disposable.entries, disposable.reversalTransactions, goodReason)
+          callReverse(c, disposable.batchId, goodReason)
         )
         if (!payload?.ok) {
           fail(
@@ -931,12 +932,20 @@ async function main() {
         await admin.query(`DELETE FROM public.outbound_batches WHERE id = $1`, [id]).catch(() => {})
       }
       for (const id of cleanupIds.transactions) {
+        await admin.query(`DELETE FROM public.transactions WHERE reverses_transaction_id = $1`, [id]).catch(() => {})
+      }
+      for (const batchId of cleanupIds.batches) {
+        await admin.query(
+          `DELETE FROM public.transactions WHERE metadata->>'reversedBatchId' = $1`,
+          [batchId]
+        ).catch(() => {})
+        await admin.query(`DELETE FROM public.batch_reversals WHERE batch_id = $1`, [batchId]).catch(() => {})
+      }
+      for (const id of cleanupIds.transactions) {
         await admin.query(`DELETE FROM public.transactions WHERE id = $1`, [id]).catch(() => {})
       }
-      // also wipe any remaining verify batch txns / reversals
       for (const batchId of cleanupIds.batches) {
         await admin.query(`DELETE FROM public.transactions WHERE batch_id = $1`, [batchId]).catch(() => {})
-        await admin.query(`DELETE FROM public.batch_reversals WHERE batch_id = $1`, [batchId]).catch(() => {})
       }
       for (const id of cleanupIds.inventory) {
         await admin.query(`DELETE FROM public.inventory_items WHERE id = $1`, [id]).catch(() => {})

@@ -19,6 +19,10 @@ export type TransactionBatchSummary = {
   isReversed: boolean
   reversalReason?: string
   reversedAt?: string
+  reversedByName?: string
+  reversalKind?: "reversal" | "void"
+  /** Unknown previous statuses the admin must confirm before reversing. */
+  confirmRows?: { transactionId: string; serial: string; previousStatus: string }[]
   /** When movementType is Reversal: the batch that was undone. */
   reversesBatchId?: string
   /** When movementType is Reversal: original movement type (Inbound, Sale, etc.). */
@@ -171,7 +175,10 @@ function asTransactionType(value: string | undefined): TransactionType | undefin
  */
 export function groupTransactionsIntoBatches(
   transactions: Transaction[],
-  reversalByBatchId: Map<string, { reversedAt: string; reversalReason?: string }>
+  reversalByBatchId: Map<
+    string,
+    { reversedAt: string; reversalReason?: string; reversedByName?: string; kind?: string }
+  >
 ): TransactionBatchSummary[] {
   const map = new Map<string, Transaction[]>()
   for (const txn of transactions) {
@@ -212,6 +219,15 @@ export function groupTransactionsIntoBatches(
       reversalReason:
         first.type === "Reversal" ? notesSummaryFromTransactions(sorted) ?? rev?.reversalReason : rev?.reversalReason,
       reversedAt: rev?.reversedAt,
+      reversedByName: rev?.reversedByName,
+      reversalKind: rev?.kind === "void" ? "void" : rev ? "reversal" : undefined,
+      confirmRows: sorted
+        .filter((txn) => txn.previousStatusSource === "unknown" && txn.previousStatus)
+        .map((txn) => ({
+          transactionId: txn.id,
+          serial: txn.serialNumber,
+          previousStatus: txn.previousStatus as string,
+        })),
       reversesBatchId: reversalMeta.reversedBatchId,
       originalMovementType,
       invoiceNumber: invoiceNumberFromTransactions(sorted),
@@ -246,6 +262,8 @@ export type TransactionBatchQuery = {
   from?: string | null
   to?: string | null
   search?: string | null
+  /** When true, the page contains only batches in active_transactions. */
+  active?: boolean
 }
 
 export async function fetchTransactionBatchPage(
@@ -258,6 +276,7 @@ export async function fetchTransactionBatchPage(
   if (query.from) params.set("from", query.from)
   if (query.to) params.set("to", query.to)
   if (query.search) params.set("search", query.search)
+  if (query.active) params.set("active", "1")
   const res = await fetch(`/api/transaction-batches?${params.toString()}`)
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {

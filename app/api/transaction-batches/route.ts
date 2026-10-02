@@ -85,6 +85,7 @@ export async function GET(request: Request) {
       p_from: from,
       p_to: to,
       p_search: search,
+      p_active_only: url.searchParams.get("active") === "1",
     })
     if (error) {
       return apiErrorResponse(500, "Failed to load transaction batches", {
@@ -119,13 +120,16 @@ export async function GET(request: Request) {
           .filter((id) => id.length > 0)
       ),
     ]
-    const reversalByBatchId = new Map<string, { reversedAt: string; reversalReason?: string }>()
+    const reversalByBatchId = new Map<
+      string,
+      { reversedAt: string; reversalReason?: string; reversedBy?: string; reversedByName?: string; kind?: string }
+    >()
     for (let index = 0; index < batchIds.length; index += ID_CHUNK) {
       const chunk = batchIds.slice(index, index + ID_CHUNK)
       const rows = await fetchAllPages((from, to) =>
         supabase
           .from("batch_reversals")
-          .select("batch_id, reversed_at, reversal_reason")
+          .select("batch_id, reversed_at, reversal_reason, reversed_by, kind")
           .in("batch_id", chunk)
           .order("batch_id", { ascending: true })
           .range(from, to)
@@ -135,6 +139,8 @@ export async function GET(request: Request) {
         reversalByBatchId.set(row.batch_id, {
           reversedAt: row.reversed_at,
           reversalReason: row.reversal_reason ?? undefined,
+          reversedBy: row.reversed_by ?? undefined,
+          kind: row.kind ?? undefined,
         })
       }
     }
@@ -176,10 +182,14 @@ export async function GET(request: Request) {
         if (label) clientLabels.set(row.id, label)
       }
     }
-    const labels = await loadProfileLabels(
-      supabase,
-      transactions.map((txn) => txn.createdBy),
-    )
+    const labels = await loadProfileLabels(supabase, [
+      ...transactions.map((txn) => txn.createdBy),
+      ...[...reversalByBatchId.values()].map((row) => row.reversedBy),
+    ])
+    for (const row of reversalByBatchId.values()) {
+      if (!row.reversedBy) continue
+      row.reversedByName = labels.get(row.reversedBy)
+    }
     const recordedByKey = new Map<string, string[]>()
     for (const txn of transactions) {
       const name = txn.createdBy ? labels.get(txn.createdBy) : undefined

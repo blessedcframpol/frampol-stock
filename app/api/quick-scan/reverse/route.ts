@@ -28,6 +28,15 @@ export async function POST(request: NextRequest) {
     const batchId = typeof body.batchId === "string" ? body.batchId.trim() : ""
     const reason = typeof body.reason === "string" ? body.reason.trim() : ""
     const returnLocationRaw = typeof body.returnLocation === "string" ? body.returnLocation.trim() : ""
+    const confirmed = Array.isArray(body.confirmed)
+      ? body.confirmed.flatMap((row: unknown) => {
+          if (!row || typeof row !== "object") return []
+          const transactionId = "transactionId" in row && typeof row.transactionId === "string" ? row.transactionId : ""
+          const status = "status" in row && typeof row.status === "string" ? row.status : ""
+          if (!transactionId || !status) return []
+          return [{ transactionId, status }]
+        })
+      : []
 
     if (!batchId) {
       return apiClientError(400, "batchId is required", { logLabel: LOG_LABEL })
@@ -65,6 +74,7 @@ export async function POST(request: NextRequest) {
         returnLocation: returnLocationRaw,
         reversalReason: reason,
         createdBy: user.id,
+        confirmed,
       })
       if (!stockResult.ok) {
         return apiErrorResponse(stockResult.status, stockResult.error, {

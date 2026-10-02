@@ -7,6 +7,17 @@ export const DISPATCHED_MOVEMENTS = ["Sale", "POC Out", "Rentals", "Dispose"] as
 
 export type MovementCounts = Record<string, number>
 
+/** List footer. All includes reversed batches, and names how many of them are reversed. */
+export function historyBatchCountLabel(
+  total: number,
+  reversed: number,
+  movement: string | null | undefined
+): string {
+  const noun = total === 1 ? "batch" : "batches"
+  if (movement || reversed <= 0) return `${total} ${noun}`
+  return `${total} ${noun} · ${reversed} reversed`
+}
+
 /** Total for the active movement. Null movement is every chip, including unnamed rows. */
 export function filteredTotal(counts: MovementCounts, movement: string | null | undefined): number {
   if (!movement) {

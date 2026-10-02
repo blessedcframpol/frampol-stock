@@ -48,6 +48,7 @@ import { fetchTransactionBatchPage, type TransactionBatchSummary } from "@/lib/t
 import {
   LEDGER_PAGE_SIZE,
   filteredTotal,
+  historyBatchCountLabel,
   movementChipIds,
   pageCount,
   reversalAffordances,
@@ -60,6 +61,7 @@ import { toastFromApiErrorBody, toastFromCaughtError } from "@/lib/toast-reporta
 import { reportAppEvent } from "@/lib/report-app-event"
 import { useAuth } from "@/lib/auth-context"
 import { canExportAllTransactions, canReverseQuickScanBatches, canViewFinancials } from "@/lib/permissions"
+import { REVERSAL_PREDECESSORS } from "@/lib/movement-transitions.mjs"
 
 const HISTORY_MOVEMENT_ORDER = [
   "Inbound",
@@ -76,6 +78,7 @@ const HISTORY_MOVEMENT_ORDER = [
   "Inspection Fail",
   "Remediation Loaner Issue",
   "Reversal",
+  "Reversed",
 ]
 import { SignedStorageLink } from "@/components/signed-storage-link"
 
@@ -109,6 +112,7 @@ export function TransactionHistoryContent() {
   const [page, setPage] = useState(1)
   const [reverseTarget, setReverseTarget] = useState<TransactionBatchSummary | null>(null)
   const [reverseReason, setReverseReason] = useState("")
+  const [confirmStatus, setConfirmStatus] = useState<Record<string, string>>({})
   const [returnLocation, setReturnLocation] = useState<InternalLocation>(INTERNAL_LOCATIONS[0])
   const [locationOpen, setLocationOpen] = useState(false)
   const [locationSearch, setLocationSearch] = useState("")
@@ -203,6 +207,10 @@ export function TransactionHistoryContent() {
           batchId: reverseTarget.reverseBatchId,
           reason,
           returnLocation,
+          confirmed: (reverseTarget.confirmRows ?? []).map((row) => ({
+            transactionId: row.transactionId,
+            status: confirmStatus[row.transactionId] || row.previousStatus,
+          })),
         }),
       })
       const data = await res.json().catch(() => ({}))
@@ -234,6 +242,9 @@ export function TransactionHistoryContent() {
   function openReverse(entry: TransactionBatchSummary) {
     setReverseTarget(entry)
     setReverseReason("")
+    setConfirmStatus(
+      Object.fromEntries((entry.confirmRows ?? []).map((row) => [row.transactionId, row.previousStatus]))
+    )
     setReturnLocation(INTERNAL_LOCATIONS[0])
     setLocationSearch("")
     setLocationOpen(false)
@@ -310,7 +321,7 @@ export function TransactionHistoryContent() {
             aria-label="Search transaction history"
           />
         }
-        count={loading ? "Loading…" : `${total} ${total === 1 ? "batch" : "batches"}`}
+        count={loading ? "Loading…" : historyBatchCountLabel(total, counts.Reversed ?? 0, movement)}
         secondary={
           <>
             <label className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -572,12 +583,25 @@ export function TransactionHistoryContent() {
         } : undefined}
         notice={viewingBatch && viewingBatch.isReversed && viewingBatch.movementType !== "Reversal" ? (
             <div className="mx-4 mb-3 space-y-1 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
-              <p className="font-medium text-foreground">Reversed</p>
+              <p className="font-medium text-foreground">{viewingBatch.reversalKind === "void" ? "Voided" : "Reversed"}</p>
               {viewingBatch.reversedAt && (
                 <p className="text-xs text-muted-foreground">
                   {formatRecordedAt(viewingBatch.reversedAt, null, timeZone)}
+                  {viewingBatch.reversedByName ? ` by ${viewingBatch.reversedByName}` : ""}
                 </p>
               )}
+              {viewingBatch.reversedByBatchId ? (
+                <button
+                  type="button"
+                  className="text-sm text-brand hover:underline"
+                  onClick={() => {
+                    setPageSearch(viewingBatch.reversedByBatchId ?? "")
+                    setViewingBatch(null)
+                  }}
+                >
+                  View reversal
+                </button>
+              ) : null}
               {viewingBatch.reversalReason && (
                 <p className="text-muted-foreground whitespace-pre-wrap">{viewingBatch.reversalReason}</p>
               )}
@@ -605,11 +629,35 @@ export function TransactionHistoryContent() {
             <DialogTitle>Reverse batch</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            For Inbound, new serials are removed from inventory and existing units return to their prior status
-            (Maintenance or RMA Hold). For Sale, POC Out, Rentals, and Dispose, items return to{" "}
-            <span className="text-foreground font-medium">In stock</span> at the location you choose. Transfer
-            reversals put each item at the transfer&apos;s origin when it matches; otherwise pick a fallback below.
+            Each item returns to the status recorded before this batch. A receipt that created the item is moved to
+            trash. Sale, POC, rental, and disposal returns go to the location you choose. A transfer returns to its
+            origin.
           </p>
+          {(reverseTarget?.confirmRows ?? []).map((row) => {
+            const movementType = reverseTarget?.movementType ?? ""
+            const options =
+              movementType in REVERSAL_PREDECESSORS
+                ? REVERSAL_PREDECESSORS[movementType as keyof typeof REVERSAL_PREDECESSORS]
+                : [row.previousStatus]
+            return (
+              <div key={row.transactionId} className="space-y-1">
+                <Label>Restore status for {row.serial}</Label>
+                <select
+                  className="h-10 w-full rounded-md border border-input bg-card px-3 text-sm text-foreground"
+                  value={confirmStatus[row.transactionId] || row.previousStatus}
+                  onChange={(event) =>
+                    setConfirmStatus((prev) => ({ ...prev, [row.transactionId]: event.target.value }))
+                  }
+                >
+                  {options.map((status) => (
+                    <option key={status} value={status}>
+                      {status}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )
+          })}
           <div className="space-y-2">
             <Label>Return to location</Label>
             <Popover open={locationOpen} onOpenChange={setLocationOpen}>

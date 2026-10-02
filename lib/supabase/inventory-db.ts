@@ -77,7 +77,13 @@ export function inventoryItemToRow(item: InventoryItem): Database["public"]["Tab
   }
 }
 
-export function rowToTransaction(row: TransactionRow): Transaction {
+export function rowToTransaction(
+  row: Omit<TransactionRow, "previous_status" | "previous_status_source" | "reverses_transaction_id"> & {
+    previous_status?: string | null
+    previous_status_source?: string | null
+    reverses_transaction_id?: string | null
+  }
+): Transaction {
   const r = row as TransactionRow & {
     disposal_reason?: string | null
     authorised_by?: string | null
@@ -107,6 +113,14 @@ export function rowToTransaction(row: TransactionRow): Transaction {
     deliveryNoteUrl: r.delivery_note_url ?? undefined,
     metadata: r.metadata != null ? (r.metadata as Transaction["metadata"]) : undefined,
     createdBy: r.created_by ?? undefined,
+    previousStatus: row.previous_status,
+    previousStatusSource:
+      row.previous_status_source === "recorded" ||
+      row.previous_status_source === "derived" ||
+      row.previous_status_source === "unknown"
+        ? row.previous_status_source
+        : undefined,
+    reversesTransactionId: row.reverses_transaction_id ?? undefined,
   }
 }
 

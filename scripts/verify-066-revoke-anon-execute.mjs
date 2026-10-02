@@ -160,21 +160,30 @@ async function main() {
         LATER,
       ]
     )
+    const adminProfile = await db.query(
+      `SELECT id FROM public.profiles WHERE role = 'admin' AND active ORDER BY id LIMIT 1`
+    )
     await db.query("BEGIN")
-    await db.query(`SELECT set_config('app.quick_scan_reversal', 'on', true)`)
-    const blockedDelete = await expectError(() =>
-      db.query(`DELETE FROM public.transactions WHERE id = $1`, [`${PREFIX}txn-early`])
+    await db.query(`SELECT set_config('request.jwt.claim.sub', $1, true)`, [adminProfile.rows[0].id])
+    await db.query(`SELECT set_config('request.jwt.claims', $1, true)`, [
+      JSON.stringify({ sub: adminProfile.rows[0].id }),
+    ])
+    const blockedReverse = await expectError(() =>
+      db.query(`SELECT public.reverse_quick_scan_batch($1, $2, NULL, '[]'::jsonb)`, [
+        `${PREFIX}batch-early`,
+        "verify-066 later batch still blocks",
+      ])
     )
     await db.query("ROLLBACK")
     const stillThere = await db.query(`SELECT id FROM public.transactions WHERE id = $1`, [`${PREFIX}txn-early`])
     if (
-      blockedDelete &&
-      /later or same-day movement/.test(blockedDelete.message) &&
+      blockedReverse &&
+      /blocked by later batch/.test(blockedReverse.message) &&
       stillThere.rows.length === 1
     ) {
-      pass(results, "reversal_order_guard", "deleting an earlier movement is still blocked while a later one exists")
+      pass(results, "reversal_order_guard", "reversing an earlier batch is blocked while a later one exists")
     } else {
-      fail(results, "reversal_order_guard", blockedDelete?.message ?? "delete was allowed")
+      fail(results, "reversal_order_guard", blockedReverse?.message ?? "reverse was allowed")
     }
 
     const beforeSettings = await db.query(
@@ -309,39 +318,23 @@ async function main() {
     const reversal = await admin.rpc("reverse_quick_scan_batch", {
       p_batch_id: batchId,
       p_reason: "verify-066 grant check",
-      p_entries: [
-        {
-          serial,
-          entry_kind: "delete",
-          inventory_id: itemId,
-          transaction_id: txnId,
-          reverted_row: { status: "In Stock", location: "Warehouse A" },
-          expected_status: "In Stock",
-          expected_location: "Warehouse A",
-        },
-      ],
-      p_reversal_transactions: [
-        {
-          id: `${PREFIX}txn-reversal`,
-          type: "Reversal",
-          serial_number: "(batch)",
-          item_name: "Reversal",
-          client: "Internal",
-          date: DATE,
-          batch_id: `${PREFIX}batch-reversal`,
-          metadata: { reversedBatchId: batchId },
-          created_by: created.user.id,
-        },
-      ],
+      p_return_location: "Warehouse A",
+      p_confirmed: [],
     })
-    const gone = await db.query(`SELECT id FROM public.transactions WHERE id = $1`, [txnId])
+    const kept = await db.query(`SELECT id FROM public.transactions WHERE id = $1`, [txnId])
+    const linked = await db.query(`SELECT id FROM public.transactions WHERE reverses_transaction_id = $1`, [txnId])
     const soft = await db.query(`SELECT deleted_at IS NOT NULL AS removed FROM public.inventory_items WHERE id = $1`, [
       itemId,
     ])
     const audit = await db.query(`SELECT batch_id FROM public.batch_reversals WHERE batch_id = $1`, [batchId])
-    const ok = reversal.data?.ok === true && gone.rows.length === 0 && soft.rows[0]?.removed === true && audit.rows.length === 1
+    const ok =
+      reversal.data?.ok === true &&
+      kept.rows.length === 1 &&
+      linked.rows.length === 1 &&
+      soft.rows[0]?.removed === true &&
+      audit.rows.length === 1
     if (!reversal.error && ok) {
-      pass(results, "signed_in_reversal", "an admin reversal still removes the batch and writes the audit row")
+      pass(results, "signed_in_reversal", "an admin reversal keeps the original row, links a Reversal, and soft-deletes the created item")
     } else {
       fail(results, "signed_in_reversal", reversal.error?.message ?? JSON.stringify(reversal.data))
     }
@@ -362,7 +355,7 @@ async function main() {
     } else {
       fail(results, "residue", JSON.stringify(left))
     }
-    await db.end()
+    await Promise.race([db.end(), new Promise((resolve) => setTimeout(resolve, 2000))])
   }
 
   const failed = Object.values(results).filter((row) => row.result === "FAIL")

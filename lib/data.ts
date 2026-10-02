@@ -135,6 +135,10 @@ export interface Transaction {
   metadata?: JsonValue
   /** User who recorded the transaction (Supabase auth user id) */
   createdBy?: string
+  /** Status before this movement. Null means the movement created the row. */
+  previousStatus?: string | null
+  previousStatusSource?: "recorded" | "derived" | "unknown"
+  reversesTransactionId?: string
 }
 
 export interface Client {

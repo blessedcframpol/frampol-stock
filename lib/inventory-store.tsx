@@ -14,7 +14,6 @@ import {
 import { ensureProductLine } from "./supabase/product-lines"
 import {
   computeMovementResult,
-  getRevertUpdatesForTransaction,
   type InboundCreateDefaults,
   type MovementRejection,
 } from "./supabase/movement-utils"
@@ -23,11 +22,34 @@ import { reportAppEvent } from "./report-app-event"
 import { humanizeStockDbError } from "./parse-api-error"
 import { toast } from "sonner"
 import type { Database } from "./supabase/database.types"
-import { DEFAULT_ORG_TIMEZONE } from "./business-date.mjs"
+import { businessDateToIso, DEFAULT_ORG_TIMEZONE } from "./business-date.mjs"
 import { fetchAppSettings } from "./settings"
 
 function generateId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+}
+
+/** Direct edits must not change status. Status moves only through apply_stock_movement. */
+function inventoryItemPatch(item: InventoryItem): Database["public"]["Tables"]["inventory_items"]["Update"] {
+  const row = inventoryItemToRow(item)
+  return {
+    id: row.id,
+    product_id: row.product_id,
+    serial_number: row.serial_number,
+    date_added: row.date_added,
+    location: row.location,
+    client: row.client,
+    notes: row.notes,
+    assigned_to: row.assigned_to,
+    purchase_date: row.purchase_date,
+    warranty_end_date: row.warranty_end_date,
+    poc_out_date: row.poc_out_date,
+    return_date: row.return_date,
+    assignment_history: row.assignment_history,
+    reserved_for_request_line_id: row.reserved_for_request_line_id,
+    cloud_key: row.cloud_key,
+    deleted_at: row.deleted_at,
+  }
 }
 
 /** Days before trashed inventory rows are eligible for permanent purge. */
@@ -196,8 +218,6 @@ interface InventoryStoreValue {
     targetGroupName?: string
     targetVendor?: string
   }) => Promise<{ ok: boolean; updated: number; error?: string }>
-  undoTransaction: (txnId: string) => Promise<{ ok: boolean; error?: string }>
-  reassignTransaction: (txnId: string, newItemName: string) => Promise<{ ok: boolean; error?: string }>
   getAlerts: () => AlertsResult
 }
 
@@ -320,7 +340,28 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
         // app_settings.timezone is the source when the read succeeds. The fallback matches the column default.
       }
 
-      const result = computeMovementResult(inventory, {
+      // A serial missing from the loaded ledger is not new until the database says so.
+      // Treating it as a create is what wrote phantom Inbounds when the insert was skipped.
+      let movementLedger = inventory
+      if (supabase) {
+        const known = new Set(inventory.map((item) => item.serialNumber))
+        const missing = [...new Set(serialNumbers.map((serial) => serial.trim()).filter((serial) => serial && !known.has(serial)))]
+        if (missing.length > 0) {
+          const data = await fetchAllPages((from, to) =>
+            supabase
+              .from("inventory_items")
+              .select(INVENTORY_ITEM_SELECT)
+              .in("serial_number", missing)
+              .is("deleted_at", null)
+              .order("id", { ascending: true })
+              .range(from, to)
+          )
+          const found = data.map((row) => rowToInventoryItem(row))
+          if (found.length > 0) movementLedger = [...inventory, ...found]
+        }
+      }
+
+      const result = computeMovementResult(movementLedger, {
         type,
         serialNumbers,
         clientDisplay,
@@ -483,7 +524,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
             resolvedItems.push({ ...item, productId: pid })
           }
 
-          const prevIds = new Set(inventory.map((i) => i.id))
+          const prevIds = new Set(movementLedger.map((i) => i.id))
           const inventoryUpserts: Database["public"]["Tables"]["inventory_items"]["Insert"][] = []
           const inventoryInserts: Database["public"]["Tables"]["inventory_items"]["Insert"][] = []
           for (const item of resolvedItems) {
@@ -630,7 +671,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
       }
       setInventory((prev) => prev.map((i) => (i.id === id ? next : i)))
       if (supabase) {
-        const { error } = await supabase.from("inventory_items").update(inventoryItemToRow(next)).eq("id", id)
+        const { error } = await supabase.from("inventory_items").update(inventoryItemPatch(next)).eq("id", id)
         if (error) console.error("Supabase updateItem error:", error)
       }
     },
@@ -730,27 +771,43 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
       const vendor = item.vendor?.trim() ? item.vendor : "General"
       let productId = item.productId
       if (supabase && !productId) {
-        try {
-          productId = await ensureProductLine(supabase, item.name, vendor)
-        } catch (e) {
-          console.error("Supabase addItem ensureProductLine:", e)
-          throw e
-        }
+        productId = await ensureProductLine(supabase, item.name, vendor)
       }
       const newItem: InventoryItem = {
         ...item,
+        status: "In Stock",
         vendor,
         id: generateId("INV"),
         productId,
       }
-      setInventory((prev) => [...prev, newItem])
-      if (supabase) {
-        const { error } = await supabase.from("inventory_items").insert(inventoryItemToRow(newItem))
-        if (error) console.error("Supabase addItem error:", error)
+      if (!supabase) {
+        setInventory((prev) => [...prev, newItem])
+        return newItem
       }
+      const businessDate = businessDateToIso((newItem.dateAdded || new Date().toISOString()).slice(0, 10))
+      const txnId = generateId("TXN")
+      const { error } = await supabase.rpc("apply_stock_movement", {
+        p_inventory_upserts: [],
+        p_inventory_inserts: [inventoryItemToRow(newItem)],
+        p_transactions: [
+          transactionToRow({
+            id: txnId,
+            type: "Inbound",
+            serialNumber: newItem.serialNumber,
+            itemName: newItem.name,
+            client: "Internal",
+            date: businessDate,
+            batchId: generateId("BATCH"),
+            metadata: { inboundCreated: true },
+            createdBy: user?.id,
+          }),
+        ],
+      })
+      if (error) throw error
+      await refetchLedger()
       return newItem
     },
-    [supabase]
+    [supabase, user, refetchLedger]
   )
 
   const reassignInventoryItems = useCallback(
@@ -788,7 +845,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
 
       if (supabase) {
         for (const item of updatedItems) {
-          const { error } = await supabase.from("inventory_items").update(inventoryItemToRow(item)).eq("id", item.id)
+          const { error } = await supabase.from("inventory_items").update(inventoryItemPatch(item)).eq("id", item.id)
           if (error) {
             return { ok: false, updated: 0, error: error.message || "Failed to update inventory item(s)" }
           }
@@ -828,99 +885,6 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
 
   const getAlerts = useCallback(() => getAlertsFromInventory(inventory), [inventory])
 
-  const undoTransaction = useCallback(
-    async (txnId: string): Promise<{ ok: boolean; error?: string }> => {
-      const txn = transactions.find((t) => t.id === txnId)
-      if (!txn) return { ok: false, error: "Transaction not found" }
-      if (txn.type === "Dispose") return { ok: false, error: "Disposal cannot be undone." }
-      if (
-        txn.type === "Decommissioned" ||
-        txn.type === "Inspection Pass" ||
-        txn.type === "Inspection Fail" ||
-        txn.type === "Remediation Loaner Issue"
-      ) {
-        return { ok: false, error: "This transaction type cannot be undone from the UI." }
-      }
-      const item = inventory.find((i) => i.serialNumber === txn.serialNumber)
-      const updates = getRevertUpdatesForTransaction(txn)
-      if (item && Object.keys(updates).length > 0) {
-        const next = { ...item, ...updates }
-        setInventory((prev) =>
-          prev.map((i) => (i.id === item.id ? next : i))
-        )
-        if (supabase) {
-          const { error } = await supabase
-            .from("inventory_items")
-            .update(inventoryItemToRow(next))
-            .eq("id", item.id)
-          if (error) {
-            console.error("Undo: inventory update error", error)
-            return { ok: false, error: error.message || "Failed to revert inventory" }
-          }
-        }
-      }
-      setTransactions((prev) => prev.filter((t) => t.id !== txnId))
-      if (supabase) {
-        const { error } = await supabase.from("transactions").delete().eq("id", txnId)
-        if (error) {
-          console.error("Undo: transaction delete error", error)
-          return { ok: false, error: error.message || "Failed to remove transaction" }
-        }
-      }
-      return { ok: true }
-    },
-    [inventory, transactions, supabase]
-  )
-
-  const reassignTransaction = useCallback(
-    async (txnId: string, newItemName: string): Promise<{ ok: boolean; error?: string }> => {
-      const txn = transactions.find((t) => t.id === txnId)
-      if (!txn) return { ok: false, error: "Transaction not found" }
-      const name = newItemName.trim()
-      if (!name) return { ok: false, error: "Product name is required" }
-      const item = inventory.find((i) => i.serialNumber === txn.serialNumber)
-      const txnNext = { ...txn, itemName: name }
-      setTransactions((prev) =>
-        prev.map((t) => (t.id === txnId ? txnNext : t))
-      )
-      if (supabase) {
-        const { error: txnErr } = await supabase
-          .from("transactions")
-          .update({ item_name: name })
-          .eq("id", txnId)
-        if (txnErr) {
-          console.error("Reassign: transaction update error", txnErr)
-          return { ok: false, error: txnErr.message || "Failed to update transaction" }
-        }
-      }
-      if (item) {
-        let updated: InventoryItem = { ...item, name }
-        if (supabase) {
-          try {
-            const pid = await ensureProductLine(supabase, name, item.vendor ?? "General")
-            updated = { ...updated, productId: pid }
-          } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e)
-            return { ok: false, error: msg || "Failed to resolve product line" }
-          }
-        }
-        setInventory((prev) => prev.map((i) => (i.id === item.id ? updated : i)))
-        if (supabase) {
-          const { error } = await supabase
-            .from("inventory_items")
-            .update(inventoryItemToRow(updated))
-            .eq("id", item.id)
-          if (error) {
-            console.error("Reassign: inventory update error", error)
-            return { ok: false, error: error.message || "Failed to update item" }
-          }
-        }
-      }
-      return { ok: true }
-    },
-    [inventory, transactions, supabase]
-  )
-
   const value = useMemo<InventoryStoreValue>(
     () => ({
       inventory,
@@ -936,8 +900,6 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
       addItem,
       reassignInventoryItems,
       reassignInventoryGroup,
-      undoTransaction,
-      reassignTransaction,
       getAlerts,
       refetchLedger,
     }),
@@ -955,8 +917,6 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
       addItem,
       reassignInventoryItems,
       reassignInventoryGroup,
-      undoTransaction,
-      reassignTransaction,
       getAlerts,
       refetchLedger,
     ]

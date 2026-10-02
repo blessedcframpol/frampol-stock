@@ -414,9 +414,10 @@ async function main() {
         path.join(process.cwd(), "lib", "quick-scan-reversal-inventory.ts"),
         "utf8"
       )
-      const clientUsesRecordedFallback =
-        reversalSource.includes("isSubsequentMovement") &&
-        reversalSource.includes("candidate.created_at === null")
+      const clientUsesServerRestore =
+        reversalSource.includes("p_reason") &&
+        reversalSource.includes("p_confirmed") &&
+        !reversalSource.includes("p_entries")
 
       const trigger = await db.query(
         `SELECT pg_get_triggerdef(oid) AS def
@@ -452,12 +453,11 @@ async function main() {
          WHERE n.nspname = 'public' AND p.proname = 'guard_quick_scan_reversal_order'`
       )
       const guardSource = guardDef.rows[0]?.def ?? ""
-      const insertAt = reversalDef.indexOf("INSERT INTO public.transactions")
-      const deleteAt = reversalDef.indexOf("DELETE FROM public.transactions")
-      const ledgerInsertedBeforeDelete = insertAt >= 0 && deleteAt > insertAt
-      const ledgerExcludedByTypeAndMetadata =
-        guardSource.includes("later.type IS DISTINCT FROM 'Reversal'") &&
-        guardSource.includes("later.metadata->>'reversedBatchId' IS NULL")
+      const keepsHistory =
+        reversalDef.includes("reverses_transaction_id") &&
+        !reversalDef.includes("DELETE FROM public.transactions")
+      const orderGuardInFunction = reversalDef.includes("blocked by later batch")
+      const deleteGuardGone = trigger.rowCount === 0 && guardSource === ""
 
       async function runRealReversal({
         name,
@@ -469,7 +469,6 @@ async function main() {
         const inventoryId = `${PREFIX}inventory-${name}`
         const originalId = `${PREFIX}original-${name}`
         const laterId = laterCreatedAt === undefined ? null : `${PREFIX}later-${name}`
-        const reversalId = `${PREFIX}reversal-${name}`
         await db.query("BEGIN")
         try {
           await db.query(
@@ -505,55 +504,19 @@ async function main() {
           ])
           await db.query("SET LOCAL ROLE authenticated")
           const reversed = await db.query(
-            `SELECT public.reverse_quick_scan_batch($1, $2::jsonb, $3::jsonb, $4) AS result`,
-            [
-              batchId,
-              JSON.stringify([
-                {
-                  serial,
-                  entry_kind: "full",
-                  inventory_id: inventoryId,
-                  transaction_id: originalId,
-                  reverted_row: {
-                    id: inventoryId,
-                    product_id: product.rows[0].id,
-                    serial_number: serial,
-                    status: "Maintenance",
-                    date_added: "2026-09-16",
-                    location: "Service Center",
-                  },
-                  expected_status: "In Stock",
-                  expected_location: null,
-                },
-              ]),
-              JSON.stringify([
-                {
-                  id: reversalId,
-                  type: "Reversal",
-                  serial_number: serial,
-                  item_name: "verify-061 reversal",
-                  client: "Internal",
-                  date: "2026-09-16T00:00:00.000Z",
-                  batch_id: `verify-061-${name}-ledger`,
-                  metadata: {
-                    reversedBatchId: batchId,
-                    originalMovementType: "Inbound",
-                  },
-                  created_by: admin.rows[0].id,
-                },
-              ]),
-              "verify 061 legitimate reversal path",
-            ]
+            `SELECT public.reverse_quick_scan_batch($1, $2, $3, '[]'::jsonb) AS result`,
+            [batchId, "verify 061 legitimate reversal path", "Warehouse A"]
           )
           const body = reversed.rows[0]?.result ?? {}
           await db.query("RESET ROLE")
           const after = await db.query(
             `SELECT
                (SELECT status FROM public.inventory_items WHERE id = $1) AS status,
+               (SELECT deleted_at IS NOT NULL FROM public.inventory_items WHERE id = $1) AS removed,
                (SELECT count(*)::int FROM public.transactions WHERE id = $2) AS original_left,
-               (SELECT count(*)::int FROM public.transactions WHERE id = $3) AS ledger_present,
-               (SELECT count(*)::int FROM public.batch_reversals WHERE batch_id = $4) AS audit_rows`,
-            [inventoryId, originalId, reversalId, batchId]
+               (SELECT count(*)::int FROM public.transactions WHERE reverses_transaction_id = $2) AS linked,
+               (SELECT count(*)::int FROM public.batch_reversals WHERE batch_id = $3) AS audit_rows`,
+            [inventoryId, originalId, batchId]
           )
           return { body, after: after.rows[0] }
         } catch (error) {
@@ -563,15 +526,14 @@ async function main() {
         }
       }
 
-      if (trigger.rowCount === 1 && product.rows[0]?.id && admin.rows[0]?.id) {
+      if (product.rows[0]?.id && admin.rows[0]?.id) {
         const blocked = await runRealReversal({
           name: "blocked",
           originalCreatedAt: "2026-09-16T10:00:00.000Z",
-          laterCreatedAt: null,
+          laterCreatedAt: "2026-09-16T18:00:00.000Z",
         })
         sameDayNullReason = blocked.error ?? JSON.stringify(blocked.body ?? null)
-        sameDayNullBlocked =
-          /later or same-day movement with unknown recorded time/i.test(sameDayNullReason)
+        sameDayNullBlocked = /blocked by later batch/i.test(sameDayNullReason)
         legitimateReversal = await runRealReversal({
           name: "clean",
           originalCreatedAt: "2026-09-16T10:00:00.000Z",
@@ -587,9 +549,9 @@ async function main() {
           result &&
             !result.error &&
             result.body?.ok === true &&
-            result.after?.status === "Maintenance" &&
-            result.after?.original_left === 0 &&
-            result.after?.ledger_present === 1 &&
+            result.after?.removed === true &&
+            result.after?.original_left === 1 &&
+            result.after?.linked === 1 &&
             result.after?.audit_rows === 1
         )
       }
@@ -604,10 +566,10 @@ async function main() {
         ids[2] === earlyId &&
         helperOrder[0] === "2026-01-04" &&
         ordersByDate &&
-        clientUsesRecordedFallback &&
-        trigger.rowCount === 1 &&
-        ledgerInsertedBeforeDelete &&
-        ledgerExcludedByTypeAndMetadata &&
+        clientUsesServerRestore &&
+        keepsHistory &&
+        orderGuardInFunction &&
+        deleteGuardGone &&
         sameDayNullBlocked &&
         reversalCompleted(legitimateReversal) &&
         reversalCompleted(nullOriginalReversal) &&
@@ -616,7 +578,7 @@ async function main() {
       ) {
         pass(
           "6_reversal_pairing_and_order",
-          `fixture order ${ids.join(" > ")}; live reversal ${live.id} still points at ${live.reversed_batch}; ledger is inserted before delete and excluded by type/reversedBatchId; clean reversal and NULL-created_at original both completed; same-day NULL later movement blocked`
+          `fixture order ${ids.join(" > ")}; live reversal ${live.id} still points at ${live.reversed_batch}; reversal keeps the original and links a Reversal row; a later batch blocks; clean reversal and NULL-created_at original both completed`
         )
       } else {
         fail(
@@ -625,10 +587,10 @@ async function main() {
             ids,
             helperOrder,
             ordersByDate,
-            clientUsesRecordedFallback,
-            trigger: trigger.rows[0] ?? null,
-            ledgerInsertedBeforeDelete,
-            ledgerExcludedByTypeAndMetadata,
+            clientUsesServerRestore,
+            keepsHistory,
+            orderGuardInFunction,
+            deleteGuardGone,
             sameDayNullBlocked,
             sameDayNullReason,
             legitimateReversal,
