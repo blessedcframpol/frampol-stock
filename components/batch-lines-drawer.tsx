@@ -74,6 +74,7 @@ export function BatchLinesDrawer({
   lines,
   showInvoice = false,
   dimmed = false,
+  extra,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -87,6 +88,7 @@ export function BatchLinesDrawer({
   lines: BatchDrawerLine[]
   showInvoice?: boolean
   dimmed?: boolean
+  extra?: React.ReactNode
 }) {
   const headingRef = useRef<HTMLHeadingElement>(null)
   const [search, setSearch] = useState("")
@@ -174,6 +176,7 @@ export function BatchLinesDrawer({
           </div>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-2 py-1">
+          {extra}
           {filtered.length === 0 ? (
             <p className="py-4 text-center text-sm text-muted-foreground">
               {showSearch && search.trim() ? "No serial numbers match your search." : "No items."}

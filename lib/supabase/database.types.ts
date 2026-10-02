@@ -652,6 +652,51 @@ export interface Database {
         }
         Relationships: []
       }
+      holding_extensions: {
+        Row: {
+          id: string
+          item_id: string
+          serial_number: string
+          holding_type: string
+          previous_date: string | null
+          new_date: string
+          reason: string
+          extended_by: string
+          created_at: string
+          cancelled_at: string | null
+          cancelled_by: string | null
+          cancel_reason: string | null
+        }
+        Insert: {
+          id?: string
+          item_id: string
+          serial_number: string
+          holding_type: string
+          previous_date?: string | null
+          new_date: string
+          reason: string
+          extended_by: string
+          created_at?: string
+          cancelled_at?: string | null
+          cancelled_by?: string | null
+          cancel_reason?: string | null
+        }
+        Update: {
+          id?: string
+          item_id?: string
+          serial_number?: string
+          holding_type?: string
+          previous_date?: string | null
+          new_date?: string
+          reason?: string
+          extended_by?: string
+          created_at?: string
+          cancelled_at?: string | null
+          cancelled_by?: string | null
+          cancel_reason?: string | null
+        }
+        Relationships: []
+      }
       stock_takes: {
         Row: {
           id: string
@@ -885,6 +930,10 @@ export interface Database {
       }
       extend_holding: {
         Args: { p_item_id: string; p_new_date: string; p_reason: string }
+        Returns: undefined
+      }
+      cancel_holding_extension: {
+        Args: { p_extension_id: string; p_reason: string }
         Returns: undefined
       }
       apply_stock_movement: {

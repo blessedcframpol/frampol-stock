@@ -26,6 +26,11 @@ export function canReverseQuickScanBatches(role: AppRole | null | undefined): bo
   return role === ADMIN
 }
 
+/** Cancel the latest holding extension. Admin only. */
+export function canCancelHoldingExtension(role: AppRole | null | undefined): boolean {
+  return role === ADMIN
+}
+
 /** Record stock movements (Quick Scan, Inventory Movement). Mirrors RLS in 047. */
 export function canRecordStockMovement(role: AppRole | null | undefined): boolean {
   return role === ADMIN || role === TECHNICIANS
