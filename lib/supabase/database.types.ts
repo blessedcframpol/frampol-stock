@@ -324,6 +324,17 @@ export interface Database {
           created_at: string | null
           previous_status: string | null
           previous_status_source: string
+          previous_location: string | null
+          previous_client: string | null
+          previous_assigned_to: string | null
+          previous_poc_out_date: string | null
+          previous_return_date: string | null
+          after_status: string | null
+          after_location: string | null
+          after_client: string | null
+          after_assigned_to: string | null
+          after_poc_out_date: string | null
+          after_return_date: string | null
           reverses_transaction_id: string | null
         }
         Insert: {
@@ -348,6 +359,17 @@ export interface Database {
           created_by?: string | null
           previous_status?: string | null
           previous_status_source?: string
+          previous_location?: string | null
+          previous_client?: string | null
+          previous_assigned_to?: string | null
+          previous_poc_out_date?: string | null
+          previous_return_date?: string | null
+          after_status?: string | null
+          after_location?: string | null
+          after_client?: string | null
+          after_assigned_to?: string | null
+          after_poc_out_date?: string | null
+          after_return_date?: string | null
           reverses_transaction_id?: string | null
         }
         Update: {
@@ -372,6 +394,17 @@ export interface Database {
           created_at?: string | null
           previous_status?: string | null
           previous_status_source?: string
+          previous_location?: string | null
+          previous_client?: string | null
+          previous_assigned_to?: string | null
+          previous_poc_out_date?: string | null
+          previous_return_date?: string | null
+          after_status?: string | null
+          after_location?: string | null
+          after_client?: string | null
+          after_assigned_to?: string | null
+          after_poc_out_date?: string | null
+          after_return_date?: string | null
           reverses_transaction_id?: string | null
         }
         Relationships: []
@@ -595,6 +628,30 @@ export interface Database {
         }
         Relationships: []
       }
+      batch_restores: {
+        Row: {
+          id: number
+          batch_id: string
+          restored_at: string
+          restore_reason: string
+          restored_by: string | null
+        }
+        Insert: {
+          id?: number
+          batch_id: string
+          restored_at?: string
+          restore_reason: string
+          restored_by?: string | null
+        }
+        Update: {
+          id?: number
+          batch_id?: string
+          restored_at?: string
+          restore_reason?: string
+          restored_by?: string | null
+        }
+        Relationships: []
+      }
       stock_takes: {
         Row: {
           id: string
@@ -709,6 +766,17 @@ export interface Database {
           created_at: string | null
           previous_status: string | null
           previous_status_source: string
+          previous_location: string | null
+          previous_client: string | null
+          previous_assigned_to: string | null
+          previous_poc_out_date: string | null
+          previous_return_date: string | null
+          after_status: string | null
+          after_location: string | null
+          after_client: string | null
+          after_assigned_to: string | null
+          after_poc_out_date: string | null
+          after_return_date: string | null
           reverses_transaction_id: string | null
         }
         Relationships: []
@@ -836,8 +904,25 @@ export interface Database {
           p_reason: string
           p_return_location?: string
           p_confirmed?: Json
+          p_entered?: Json
         }
         Returns: Json
+      }
+      reverse_restore_plan: {
+        Args: { p_batch_id: string }
+        Returns: Json
+      }
+      restore_batch_plan: {
+        Args: { p_batch_id: string }
+        Returns: Json
+      }
+      restore_batch: {
+        Args: { p_batch_id: string; p_reason: string }
+        Returns: Json
+      }
+      batch_is_currently_reversed: {
+        Args: { p_batch_id: string }
+        Returns: boolean
       }
       void_batch: {
         Args: { p_batch_id: string; p_reason: string }

@@ -68,6 +68,9 @@ export function BatchLinesDrawer({
   description,
   detail,
   notice,
+  actions,
+  dateLabel = "Date",
+  showMeta = true,
   lines,
   showInvoice = false,
   dimmed = false,
@@ -78,6 +81,9 @@ export function BatchLinesDrawer({
   description?: React.ReactNode
   detail?: BatchDrawerDetail
   notice?: React.ReactNode
+  actions?: React.ReactNode
+  dateLabel?: string
+  showMeta?: boolean
   lines: BatchDrawerLine[]
   showInvoice?: boolean
   dimmed?: boolean
@@ -119,14 +125,14 @@ export function BatchLinesDrawer({
             <dl className="grid grid-cols-2 gap-x-6 gap-y-3 px-4 pb-4">
               <Fact label="Movement">{detail.movement || "—"}</Fact>
               <Fact label="Client">{detail.client || "—"}</Fact>
-              <Fact label="Date">{detail.date || "—"}</Fact>
+              <Fact label={dateLabel}>{detail.date || "—"}</Fact>
               {showInvoice ? (
                 <Fact label="Invoice">
                   <span className="font-mono">{detail.invoice || "—"}</span>
                 </Fact>
               ) : null}
-              <Fact label="Delivery note">{detail.deliveryNote || "—"}</Fact>
-              <Fact label="Recorded by">{detail.recordedBy || "—"}</Fact>
+              {showMeta ? <Fact label="Delivery note">{detail.deliveryNote || "—"}</Fact> : null}
+              {showMeta ? <Fact label="Recorded by">{detail.recordedBy || "—"}</Fact> : null}
               {detail.extra?.map((fact) => (
                 <Fact key={fact.label} label={fact.label} span={fact.span}>
                   {fact.value}
@@ -135,6 +141,7 @@ export function BatchLinesDrawer({
             </dl>
           ) : null}
           {notice}
+          {actions ? <div className="flex flex-wrap gap-2 px-4 pb-3">{actions}</div> : null}
           <div className="flex items-center gap-2 border-t border-border px-4 py-2">
             {showSearch ? (
               <Input

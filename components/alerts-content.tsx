@@ -15,11 +15,10 @@ import { useAlertFeed } from "@/hooks/use-alert-feed"
 import { formatBusinessDate } from "@/lib/business-date.mjs"
 import {
   alertChipFromSearch,
-  canRecordReturn,
+  dispatchedKitHref,
   formatReturnAge,
   groupReturnRows,
   isInternalHolder,
-  recordReturnHref,
   sectionCount,
   showsSection,
   visibleReturnRows,
@@ -27,7 +26,6 @@ import {
   type AlertCounts,
   type ReturnAlertRow,
 } from "@/lib/alerts"
-import { ConvertToSaleDialog, ExtendHoldingDialog } from "@/components/holding-actions"
 import { AlertTriangle, ChevronRight } from "lucide-react"
 
 const CHIPS: { id: AlertChip; label: string; count: (counts: AlertCounts) => number }[] = [
@@ -39,21 +37,9 @@ const CHIPS: { id: AlertChip; label: string; count: (counts: AlertCounts) => num
   { id: "rental", label: "Rental", count: (counts) => counts.rental },
 ]
 
-function ReturnTable({
-  rows,
-  today,
-  showActions,
-  onConvert,
-  onExtend,
-}: {
-  rows: ReturnAlertRow[]
-  today: string
-  showActions: boolean
-  onConvert: (serial: string) => void
-  onExtend: (row: ReturnAlertRow) => void
-}) {
+function ReturnTable({ rows, today }: { rows: ReturnAlertRow[]; today: string }) {
+  const router = useRouter()
   const groups = groupReturnRows(rows)
-  const columns = showActions ? 7 : 6
   return (
     <div className="overflow-x-auto">
       <Table>
@@ -65,7 +51,6 @@ function ReturnTable({
             <TableHead>Holder</TableHead>
             <TableHead>Return date</TableHead>
             <TableHead>Age</TableHead>
-            {showActions ? <TableHead className="text-right">Actions</TableHead> : null}
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -75,30 +60,32 @@ function ReturnTable({
               <Fragment key={group.key}>
                 {grouped ? (
                   <TableRow className="bg-muted/40 hover:bg-muted/40">
-                    <TableCell colSpan={columns} className="whitespace-normal">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <span className="text-sm font-medium text-foreground">
-                          {group.holder}
-                          <span className="font-normal text-muted-foreground">
-                            {" "}
-                            · {formatBusinessDate(group.returnDate)} · {group.rows.length} units
-                          </span>
+                    <TableCell colSpan={6} className="whitespace-normal">
+                      <span className="text-sm font-medium text-foreground">
+                        {group.holder}
+                        <span className="font-normal text-muted-foreground">
+                          {" "}
+                          · {formatBusinessDate(group.returnDate)} · {group.rows.length} units
                         </span>
-                        {showActions ? (
-                          <Button variant="ghost" size="sm" className="h-8 text-xs" asChild>
-                            <Link href={recordReturnHref(group.kind, group.rows.map((row) => row.serialNumber))}>
-                              Record return ({group.rows.length})
-                              <ChevronRight className="w-3.5 h-3.5 ml-0.5" />
-                            </Link>
-                          </Button>
-                        ) : null}
-                      </div>
+                      </span>
                     </TableCell>
                   </TableRow>
                 ) : null}
                 {group.rows.map((row) => (
-                  <TableRow key={row.id}>
-                    <TableCell className="font-mono text-sm text-foreground">{row.serialNumber}</TableCell>
+                  <TableRow
+                    key={row.id}
+                    className="cursor-pointer"
+                    onClick={() => router.push(dispatchedKitHref(row.id))}
+                  >
+                    <TableCell className="font-mono text-sm text-foreground">
+                      <Link
+                        href={dispatchedKitHref(row.id)}
+                        className="hover:underline"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        {row.serialNumber}
+                      </Link>
+                    </TableCell>
                     <TableCell className="text-sm text-foreground">{row.product}</TableCell>
                     <TableCell>
                       <StatusPill value={row.kind === "POC" ? "POC" : "Rented"}>
@@ -113,38 +100,6 @@ function ReturnTable({
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">{formatBusinessDate(row.returnDate)}</TableCell>
                     <TableCell className="text-sm">{formatReturnAge(row.returnDate, today)}</TableCell>
-                    {showActions ? (
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-1">
-                          {grouped ? null : (
-                            <Button variant="ghost" size="sm" className="h-8 text-xs" asChild>
-                              <Link href={recordReturnHref(row.kind, [row.serialNumber])}>
-                                Record return
-                                <ChevronRight className="w-3.5 h-3.5 ml-0.5" />
-                              </Link>
-                            </Button>
-                          )}
-                          {row.kind === "POC" ? (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 text-xs"
-                              onClick={() => onConvert(row.serialNumber)}
-                            >
-                              Convert to sale
-                            </Button>
-                          ) : null}
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 text-xs"
-                            onClick={() => onExtend(row)}
-                          >
-                            Extend
-                          </Button>
-                        </div>
-                      </TableCell>
-                    ) : null}
                   </TableRow>
                 ))}
               </Fragment>
@@ -169,16 +124,13 @@ export function AlertsContent() {
     setChip(alertChipFromSearch(chipParam))
   }
   const [hideInternal, setHideInternal] = useState(false)
-  const [convertSerial, setConvertSerial] = useState<string | null>(null)
-  const [extendRow, setExtendRow] = useState<ReturnAlertRow | null>(null)
-  const showActions = canRecordReturn(role)
   const counts = feed?.counts
 
   return (
     <div className="flex flex-col gap-6 min-w-0">
       <PageHeader
         title="Alerts"
-        description="Overdue returns, returns due in the next 14 days, and low stock. Record a return in Inventory movement."
+        description="Overdue returns, returns due in the next 14 days, and low stock. Open a kit to act on it from Dispatched."
       />
 
       {error ? <p className="text-sm text-danger">{error}</p> : null}
@@ -227,13 +179,7 @@ export function AlertsContent() {
                 <EmptyState message="No overdue returns." />
               ) : (
                 <Card className="border-border p-0">
-                  <ReturnTable
-                    rows={visibleReturnRows(feed.overdue, chip, hideInternal)}
-                    today={feed.today}
-                    showActions={showActions}
-                    onConvert={setConvertSerial}
-                    onExtend={setExtendRow}
-                  />
+                  <ReturnTable rows={visibleReturnRows(feed.overdue, chip, hideInternal)} today={feed.today} />
                 </Card>
               )}
             </section>
@@ -249,13 +195,7 @@ export function AlertsContent() {
                 <EmptyState message="No returns due in the next 14 days." />
               ) : (
                 <Card className="border-border p-0">
-                  <ReturnTable
-                    rows={visibleReturnRows(feed.dueSoon, chip, hideInternal)}
-                    today={feed.today}
-                    showActions={showActions}
-                    onConvert={setConvertSerial}
-                    onExtend={setExtendRow}
-                  />
+                  <ReturnTable rows={visibleReturnRows(feed.dueSoon, chip, hideInternal)} today={feed.today} />
                 </Card>
               )}
             </section>
@@ -314,21 +254,6 @@ export function AlertsContent() {
           ) : null}
         </div>
       ) : null}
-      <ConvertToSaleDialog
-        open={convertSerial != null}
-        serial={convertSerial ?? ""}
-        onOpenChange={(open) => {
-          if (!open) setConvertSerial(null)
-        }}
-      />
-      <ExtendHoldingDialog
-        open={extendRow != null}
-        itemId={extendRow?.id ?? ""}
-        serial={extendRow?.serialNumber ?? ""}
-        onOpenChange={(open) => {
-          if (!open) setExtendRow(null)
-        }}
-      />
     </div>
   )
 }

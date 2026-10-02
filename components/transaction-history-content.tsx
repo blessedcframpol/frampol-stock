@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import {
   Table,
   TableBody,
@@ -31,19 +31,10 @@ import {
 } from "@/components/ui/dialog"
 import Link from "next/link"
 import { PageHeader } from "@/components/page-nav"
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { History, Undo2, Loader2, ChevronsUpDown, Download, MoreHorizontal } from "lucide-react"
-import { INTERNAL_LOCATIONS, type InternalLocation } from "@/lib/data"
+import { History, Undo2, Loader2, Download, MoreHorizontal } from "lucide-react"
+import { INTERNAL_LOCATIONS, isInternalLocation } from "@/lib/data"
 import { fetchTransactionBatchPage, type TransactionBatchSummary } from "@/lib/transaction-batches"
 import {
   LEDGER_PAGE_SIZE,
@@ -81,6 +72,7 @@ const HISTORY_MOVEMENT_ORDER = [
   "Reversed",
 ]
 import { SignedStorageLink } from "@/components/signed-storage-link"
+import { reversalResultLine, type RestorePlanRow, type ReversePlanRow } from "@/lib/quick-scan-reversal-inventory"
 
 const MIN_REASON_LENGTH = 15
 
@@ -113,9 +105,12 @@ export function TransactionHistoryContent() {
   const [reverseTarget, setReverseTarget] = useState<TransactionBatchSummary | null>(null)
   const [reverseReason, setReverseReason] = useState("")
   const [confirmStatus, setConfirmStatus] = useState<Record<string, string>>({})
-  const [returnLocation, setReturnLocation] = useState<InternalLocation>(INTERNAL_LOCATIONS[0])
-  const [locationOpen, setLocationOpen] = useState(false)
-  const [locationSearch, setLocationSearch] = useState("")
+  const [reversePlan, setReversePlan] = useState<ReversePlanRow[] | null>(null)
+  const [enteredFields, setEnteredFields] = useState<Record<string, { location: string; returnDate: string }>>({})
+  const [restoreTarget, setRestoreTarget] = useState<TransactionBatchSummary | null>(null)
+  const [restoreReason, setRestoreReason] = useState("")
+  const [restorePlan, setRestorePlan] = useState<{ kind: string; rows: RestorePlanRow[] } | null>(null)
+  const planRequest = useRef(0)
 
   useEffect(() => {
     const timer = setTimeout(() => setAppliedSearch(pageSearch.trim()), 300)
@@ -206,11 +201,19 @@ export function TransactionHistoryContent() {
         body: JSON.stringify({
           batchId: reverseTarget.reverseBatchId,
           reason,
-          returnLocation,
-          confirmed: (reverseTarget.confirmRows ?? []).map((row) => ({
-            transactionId: row.transactionId,
-            status: confirmStatus[row.transactionId] || row.previousStatus,
-          })),
+          confirmed: (reversePlan ?? [])
+            .filter((row) => row.needs.includes("status"))
+            .map((row) => ({
+              transactionId: row.transactionId,
+              status: confirmStatus[row.transactionId] || row.status || "",
+            })),
+          entered: (reversePlan ?? [])
+            .filter((row) => row.needs.includes("location") || row.needs.includes("return_date"))
+            .map((row) => ({
+              transactionId: row.transactionId,
+              location: enteredFields[row.transactionId]?.location ?? "",
+              returnDate: enteredFields[row.transactionId]?.returnDate ?? "",
+            })),
         }),
       })
       const data = await res.json().catch(() => ({}))
@@ -228,9 +231,7 @@ export function TransactionHistoryContent() {
       )
       setReverseTarget(null)
       setReverseReason("")
-      setReturnLocation(INTERNAL_LOCATIONS[0])
-      setLocationSearch("")
-      setLocationOpen(false)
+      setReversePlan(null)
       setReloadToken((token) => token + 1)
     } catch (e) {
       toastFromCaughtError(e, "Failed to reverse batch")
@@ -239,16 +240,122 @@ export function TransactionHistoryContent() {
     }
   }
 
-  function openReverse(entry: TransactionBatchSummary) {
+  function closeReverse() {
+    planRequest.current += 1
+    setReverseTarget(null)
+    setReverseReason("")
+    setReversePlan(null)
+    setEnteredFields({})
+    setConfirmStatus({})
+  }
+
+  async function openReverse(entry: TransactionBatchSummary) {
+    if (!entry.reverseBatchId) return
+    const request = ++planRequest.current
     setReverseTarget(entry)
     setReverseReason("")
-    setConfirmStatus(
-      Object.fromEntries((entry.confirmRows ?? []).map((row) => [row.transactionId, row.previousStatus]))
-    )
-    setReturnLocation(INTERNAL_LOCATIONS[0])
-    setLocationSearch("")
-    setLocationOpen(false)
+    setReversePlan(null)
+    setEnteredFields({})
+    setConfirmStatus({})
+    try {
+      const res = await fetch(`/api/quick-scan/reverse?batchId=${encodeURIComponent(entry.reverseBatchId)}`)
+      const data = await res.json().catch(() => ({}))
+      if (request !== planRequest.current) return
+      if (!res.ok) {
+        toastFromApiErrorBody(data, "Could not preview this reversal", res.status)
+        closeReverse()
+        return
+      }
+      const rows = Array.isArray(data.rows) ? (data.rows as ReversePlanRow[]) : []
+      setReversePlan(rows)
+      setConfirmStatus(Object.fromEntries(rows.map((row) => [row.transactionId, row.status ?? ""])))
+      setEnteredFields(
+        Object.fromEntries(
+          rows.map((row) => [
+            row.transactionId,
+            {
+              location: row.location && isInternalLocation(row.location) ? row.location : "",
+              returnDate: row.returnDate ?? "",
+            },
+          ])
+        )
+      )
+    } catch (error) {
+      if (request !== planRequest.current) return
+      toastFromCaughtError(error, "Could not preview this reversal")
+      closeReverse()
+    }
   }
+
+  function closeRestore() {
+    planRequest.current += 1
+    setRestoreTarget(null)
+    setRestoreReason("")
+    setRestorePlan(null)
+  }
+
+  async function openRestore(entry: TransactionBatchSummary) {
+    if (!entry.reverseBatchId) return
+    const request = ++planRequest.current
+    setRestoreTarget(entry)
+    setRestoreReason("")
+    setRestorePlan(null)
+    try {
+      const res = await fetch(`/api/quick-scan/restore?batchId=${encodeURIComponent(entry.reverseBatchId)}`)
+      const data = await res.json().catch(() => ({}))
+      if (request !== planRequest.current) return
+      if (!res.ok) {
+        toastFromApiErrorBody(data, "Could not preview this restore", res.status)
+        closeRestore()
+        return
+      }
+      setRestorePlan({
+        kind: typeof data.kind === "string" ? data.kind : "",
+        rows: Array.isArray(data.rows) ? data.rows : [],
+      })
+    } catch (error) {
+      if (request !== planRequest.current) return
+      toastFromCaughtError(error, "Could not preview this restore")
+      closeRestore()
+    }
+  }
+
+  async function submitRestore() {
+    if (!restoreTarget?.reverseBatchId) return
+    const reason = restoreReason.trim()
+    if (reason.length < MIN_REASON_LENGTH) {
+      toast.error(`Please enter a reason (at least ${MIN_REASON_LENGTH} characters).`)
+      return
+    }
+    setReversingBatchKey(restoreTarget.reverseBatchId)
+    try {
+      const res = await fetch("/api/quick-scan/restore", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ batchId: restoreTarget.reverseBatchId, reason }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        toastFromApiErrorBody(data, "Failed to restore batch", res.status)
+        return
+      }
+      toast.success(`Restored ${restoreTarget.productLabel}`)
+      closeRestore()
+      setReloadToken((token) => token + 1)
+    } catch (error) {
+      toastFromCaughtError(error, "Failed to restore batch")
+    } finally {
+      setReversingBatchKey(null)
+    }
+  }
+
+  const reverseMissing = (reversePlan ?? []).some((row) => {
+    const entered = enteredFields[row.transactionId]
+    if (row.needs.includes("location") && !entered?.location) return true
+    if (row.needs.includes("return_date") && !entered?.returnDate) return true
+    if (row.needs.includes("status") && !(confirmStatus[row.transactionId] || row.status)) return true
+    return false
+  })
 
   async function handleExportAllTransactions() {
     if (!canExport || exporting) return
@@ -482,7 +589,7 @@ export function TransactionHistoryContent() {
                       </TableCell>
                       {canReverse ? (
                         <TableCell onClick={(event) => event.stopPropagation()}>
-                          {affordance.showReverse ? (
+                          {affordance.showReverse || affordance.showRestore ? (
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>
                                 <Button variant="ghost" size="icon" className="size-8" aria-label="Batch actions">
@@ -490,14 +597,25 @@ export function TransactionHistoryContent() {
                                 </Button>
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end">
-                                <DropdownMenuItem
-                                  className="text-destructive focus:text-destructive"
-                                  disabled={reversingBatchKey !== null}
-                                  onSelect={() => openReverse(entry)}
-                                >
-                                  <Undo2 className="size-4" />
-                                  Reverse
-                                </DropdownMenuItem>
+                                {affordance.showReverse ? (
+                                  <DropdownMenuItem
+                                    className="text-destructive focus:text-destructive"
+                                    disabled={reversingBatchKey !== null}
+                                    onSelect={() => void openReverse(entry)}
+                                  >
+                                    <Undo2 className="size-4" />
+                                    Reverse
+                                  </DropdownMenuItem>
+                                ) : null}
+                                {affordance.showRestore ? (
+                                  <DropdownMenuItem
+                                    disabled={reversingBatchKey !== null}
+                                    onSelect={() => void openRestore(entry)}
+                                  >
+                                    <Undo2 className="size-4" />
+                                    Restore
+                                  </DropdownMenuItem>
+                                ) : null}
                               </DropdownMenuContent>
                             </DropdownMenu>
                           ) : null}
@@ -612,100 +730,98 @@ export function TransactionHistoryContent() {
         dimmed={viewingBatch?.isReversed}
       />
 
-      <Dialog
-        open={!!reverseTarget}
-        onOpenChange={(open) => {
-          if (!open) {
-            setReverseTarget(null)
-            setReverseReason("")
-            setReturnLocation(INTERNAL_LOCATIONS[0])
-            setLocationSearch("")
-            setLocationOpen(false)
-          }
-        }}
-      >
+      <Dialog open={!!reverseTarget} onOpenChange={(open) => { if (!open) closeReverse() }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Reverse batch</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            Each item returns to the status recorded before this batch. A receipt that created the item is moved to
-            trash. Sale, POC, rental, and disposal returns go to the location you choose. A transfer returns to its
-            origin.
+            A receipt that created the item is moved to trash. Fields that cannot be reconstructed are entered here
+            and stored on the reversal as entered at reversal.
           </p>
-          {(reverseTarget?.confirmRows ?? []).map((row) => {
-            const movementType = reverseTarget?.movementType ?? ""
-            const options =
-              movementType in REVERSAL_PREDECESSORS
-                ? REVERSAL_PREDECESSORS[movementType as keyof typeof REVERSAL_PREDECESSORS]
-                : [row.previousStatus]
-            return (
-              <div key={row.transactionId} className="space-y-1">
-                <Label>Restore status for {row.serial}</Label>
-                <select
-                  className="h-10 w-full rounded-md border border-input bg-card px-3 text-sm text-foreground"
-                  value={confirmStatus[row.transactionId] || row.previousStatus}
-                  onChange={(event) =>
-                    setConfirmStatus((prev) => ({ ...prev, [row.transactionId]: event.target.value }))
-                  }
-                >
-                  {options.map((status) => (
-                    <option key={status} value={status}>
-                      {status}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )
-          })}
-          <div className="space-y-2">
-            <Label>Return to location</Label>
-            <Popover open={locationOpen} onOpenChange={setLocationOpen}>
-              <PopoverTrigger asChild>
-                <Button
-                  type="button"
-                  variant="outline"
-                  role="combobox"
-                  aria-expanded={locationOpen}
-                  className="w-full justify-between h-10 font-normal"
-                >
-                  <span className="truncate">{returnLocation}</span>
-                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
-                <Command shouldFilter={false}>
-                  <CommandInput
-                    placeholder="Search locations..."
-                    value={locationSearch}
-                    onValueChange={setLocationSearch}
-                  />
-                  <CommandList>
-                    <CommandEmpty>No location found.</CommandEmpty>
-                    <CommandGroup>
-                      {INTERNAL_LOCATIONS.filter((loc) =>
-                        locationSearch.trim()
-                          ? loc.toLowerCase().includes(locationSearch.trim().toLowerCase())
-                          : true
-                      ).map((loc) => (
-                        <CommandItem
-                          key={loc}
-                          value={loc}
-                          onSelect={() => {
-                            setReturnLocation(loc)
-                            setLocationSearch("")
-                            setLocationOpen(false)
-                          }}
-                        >
-                          {loc}
-                        </CommandItem>
-                      ))}
-                    </CommandGroup>
-                  </CommandList>
-                </Command>
-              </PopoverContent>
-            </Popover>
-          </div>
+          {reversePlan === null ? (
+            <p className="text-sm text-muted-foreground">Loading the kit this reversal will write…</p>
+          ) : (
+            reversePlan.map((row) => {
+              const movementType = reverseTarget?.movementType ?? ""
+              const options =
+                movementType in REVERSAL_PREDECESSORS
+                  ? REVERSAL_PREDECESSORS[movementType as keyof typeof REVERSAL_PREDECESSORS]
+                  : row.status
+                    ? [row.status]
+                    : []
+              const entered = enteredFields[row.transactionId] ?? { location: "", returnDate: "" }
+              return (
+                <div key={row.transactionId} className="space-y-2">
+                  <p className="text-sm">
+                    {reversalResultLine(row, {
+                      status: confirmStatus[row.transactionId],
+                      location: entered.location,
+                      returnDate: entered.returnDate,
+                    })}
+                  </p>
+                  <p className="font-mono text-xs text-muted-foreground">{row.serial}</p>
+                  {row.needs.includes("status") ? (
+                    <div className="space-y-1">
+                      <Label>Status for {row.serial}</Label>
+                      <select
+                        className="h-10 w-full rounded-md border border-input bg-card px-3 text-sm text-foreground"
+                        value={confirmStatus[row.transactionId] || row.status || ""}
+                        onChange={(event) =>
+                          setConfirmStatus((prev) => ({ ...prev, [row.transactionId]: event.target.value }))
+                        }
+                      >
+                        {options.map((status) => (
+                          <option key={status} value={status}>
+                            {status}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : null}
+                  {row.needs.includes("location") ? (
+                    <div className="space-y-1">
+                      <Label>Warehouse for {row.serial}</Label>
+                      <select
+                        className="h-10 w-full rounded-md border border-input bg-card px-3 text-sm text-foreground"
+                        value={entered.location}
+                        onChange={(event) =>
+                          setEnteredFields((prev) => ({
+                            ...prev,
+                            [row.transactionId]: { ...entered, location: event.target.value },
+                          }))
+                        }
+                      >
+                        <option value="">Choose a warehouse</option>
+                        {INTERNAL_LOCATIONS.map((location) => (
+                          <option key={location} value={location}>
+                            {location}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : null}
+                  {row.needs.includes("return_date") ? (
+                    <div className="space-y-1">
+                      <Label>Return date for {row.serial}</Label>
+                      <input
+                        type="date"
+                        required
+                        className="h-10 w-full rounded-md border border-input bg-card px-3 text-sm text-foreground"
+                        value={entered.returnDate}
+                        onChange={(event) =>
+                          setEnteredFields((prev) => ({
+                            ...prev,
+                            [row.transactionId]: { ...entered, returnDate: event.target.value },
+                          }))
+                        }
+                      />
+                    </div>
+                  ) : null}
+                </div>
+              )
+            })
+          )}
           <div className="space-y-2">
             <Label htmlFor="reverse-reason">Reason (required, min {MIN_REASON_LENGTH} characters)</Label>
             <Textarea
@@ -717,20 +833,14 @@ export function TransactionHistoryContent() {
             />
           </div>
           <DialogFooter className="gap-2 sm:gap-0">
-            <Button
-              variant="outline"
-              onClick={() => {
-                setReverseTarget(null)
-                setReverseReason("")
-                setReturnLocation(INTERNAL_LOCATIONS[0])
-                setLocationSearch("")
-                setLocationOpen(false)
-              }}
-              disabled={reversingBatchKey !== null}
-            >
+            <Button variant="outline" onClick={closeReverse} disabled={reversingBatchKey !== null}>
               Cancel
             </Button>
-            <Button variant="destructive" onClick={() => void submitReverse()} disabled={reversingBatchKey !== null}>
+            <Button
+              variant="destructive"
+              onClick={() => void submitReverse()}
+              disabled={reversingBatchKey !== null || reversePlan === null || reverseMissing}
+            >
               {reversingBatchKey !== null ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin mr-2" />
@@ -738,6 +848,58 @@ export function TransactionHistoryContent() {
                 </>
               ) : (
                 "Confirm reverse"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!restoreTarget} onOpenChange={(open) => { if (!open) closeRestore() }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Restore batch</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            The reversal stays in the history. Restoring writes the movement&apos;s result back onto the kit. A voided
+            receipt counts again and does not change stock.
+          </p>
+          {restorePlan === null ? (
+            <p className="text-sm text-muted-foreground">Loading the kit this restore will write…</p>
+          ) : restorePlan.kind === "void" ? (
+            <p className="text-sm">Kit will return to: no stock change</p>
+          ) : (
+            restorePlan.rows.map((row) => (
+              <p key={row.transactionId} className="text-sm">
+                {reversalResultLine(
+                  { softDelete: false, status: row.status, client: row.client, location: row.location, returnDate: row.returnDate },
+                  {}
+                )}
+                <span className="mt-1 block font-mono text-xs text-muted-foreground">{row.serial}</span>
+              </p>
+            ))
+          )}
+          <div className="space-y-2">
+            <Label htmlFor="restore-reason">Reason (required, min {MIN_REASON_LENGTH} characters)</Label>
+            <Textarea
+              id="restore-reason"
+              value={restoreReason}
+              onChange={(event) => setRestoreReason(event.target.value)}
+              placeholder="e.g. Reversal was recorded against the wrong batch."
+              className="min-h-[100px] resize-y"
+            />
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={closeRestore} disabled={reversingBatchKey !== null}>
+              Cancel
+            </Button>
+            <Button onClick={() => void submitRestore()} disabled={reversingBatchKey !== null || restorePlan === null}>
+              {reversingBatchKey !== null ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                  Restoring…
+                </>
+              ) : (
+                "Confirm restore"
               )}
             </Button>
           </DialogFooter>

@@ -51,6 +51,7 @@ export type ReversalAffordanceInput = {
 
 export type ReversalAffordances = {
   showReverse: boolean
+  showRestore: boolean
   showReversedPill: boolean
   showExport: boolean
   /** Batch id to open when this row points at the other side of a reversal. */
@@ -70,6 +71,11 @@ export function reversalAffordances(input: ReversalAffordanceInput): ReversalAff
       !input.isReversed &&
       Boolean(input.reverseBatchId?.trim()) &&
       isQuickScanStockReversibleMovement(input.movementType),
+    showRestore:
+      canReverse &&
+      input.isReversed &&
+      Boolean(input.reverseBatchId?.trim()) &&
+      input.movementType !== "Reversal",
     showReversedPill: input.isReversed && input.movementType !== "Reversal",
     showExport: canExportAllTransactions(input.role),
     linksToBatchId,

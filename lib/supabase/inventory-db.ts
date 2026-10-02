@@ -78,7 +78,23 @@ export function inventoryItemToRow(item: InventoryItem): Database["public"]["Tab
 }
 
 export function rowToTransaction(
-  row: Omit<TransactionRow, "previous_status" | "previous_status_source" | "reverses_transaction_id"> & {
+  row: Omit<
+    TransactionRow,
+    | "previous_status"
+    | "previous_status_source"
+    | "previous_location"
+    | "previous_client"
+    | "previous_assigned_to"
+    | "previous_poc_out_date"
+    | "previous_return_date"
+    | "after_status"
+    | "after_location"
+    | "after_client"
+    | "after_assigned_to"
+    | "after_poc_out_date"
+    | "after_return_date"
+    | "reverses_transaction_id"
+  > & {
     previous_status?: string | null
     previous_status_source?: string | null
     reverses_transaction_id?: string | null

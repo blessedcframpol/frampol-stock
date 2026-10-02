@@ -122,8 +122,10 @@ describe("reversalAffordances", () => {
         reversedByBatchId: "BATCH-REV-1",
       })
       expect(open.showReverse).toBe(role === "admin")
+      expect(open.showRestore).toBe(false)
       expect(open.showExport).toBe(role === "admin")
       expect(reversed.showReverse).toBe(false)
+      expect(reversed.showRestore).toBe(role === "admin")
       expect(reversed.showReversedPill).toBe(true)
       expect(reversed.linksToBatchId).toBe("BATCH-REV-1")
     }
@@ -138,6 +140,7 @@ describe("reversalAffordances", () => {
       reversesBatchId: "BATCH-1",
     })
     expect(affordance.showReverse).toBe(false)
+    expect(affordance.showRestore).toBe(false)
     expect(affordance.showReversedPill).toBe(false)
     expect(affordance.showExport).toBe(false)
     expect(affordance.linksToBatchId).toBe("BATCH-1")

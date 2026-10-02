@@ -4,12 +4,39 @@ import { isInternalLocation } from "@/lib/data"
 import {
   fetchActiveBatchTransactions,
   getQuickScanBatchReversalCompleteness,
+  parseReversePlan,
   revertInventoryAndTransactionsForQuickScan,
 } from "@/lib/quick-scan-reversal-inventory"
 import { requireAdmin } from "@/lib/require-admin"
 
 const MIN_REASON_LENGTH = 15
 const LOG_LABEL = "batch_reversal"
+
+export async function GET(request: NextRequest) {
+  try {
+    const auth = await requireAdmin({
+      logLabel: LOG_LABEL,
+      forbiddenMessage: "Only admins can reverse scan batches",
+    })
+    if (!auth.ok) return auth.response
+    const batchId = new URL(request.url).searchParams.get("batchId")?.trim() ?? ""
+    if (!batchId) return apiClientError(400, "batchId is required", { logLabel: LOG_LABEL })
+    const { data, error } = await auth.supabase.rpc("reverse_restore_plan", { p_batch_id: batchId })
+    if (error) {
+      return apiErrorResponse(500, "Could not preview this reversal", {
+        cause: error,
+        logLabel: `${LOG_LABEL} plan`,
+        metadata: reversalMeta(batchId),
+      })
+    }
+    return NextResponse.json({ rows: parseReversePlan(data) })
+  } catch (error) {
+    return apiErrorResponse(500, "Could not preview this reversal", {
+      cause: error,
+      logLabel: `${LOG_LABEL} plan`,
+    })
+  }
+}
 
 function reversalMeta(batchId: string, extra?: Record<string, unknown>) {
   return { batchId, ...(extra ?? {}) }
@@ -28,6 +55,16 @@ export async function POST(request: NextRequest) {
     const batchId = typeof body.batchId === "string" ? body.batchId.trim() : ""
     const reason = typeof body.reason === "string" ? body.reason.trim() : ""
     const returnLocationRaw = typeof body.returnLocation === "string" ? body.returnLocation.trim() : ""
+    const entered = Array.isArray(body.entered)
+      ? body.entered.flatMap((row: unknown) => {
+          if (!row || typeof row !== "object") return []
+          const transactionId = "transactionId" in row && typeof row.transactionId === "string" ? row.transactionId : ""
+          if (!transactionId) return []
+          const location = "location" in row && typeof row.location === "string" ? row.location.trim() : ""
+          const returnDate = "returnDate" in row && typeof row.returnDate === "string" ? row.returnDate.trim() : ""
+          return [{ transactionId, location, returnDate }]
+        })
+      : []
     const confirmed = Array.isArray(body.confirmed)
       ? body.confirmed.flatMap((row: unknown) => {
           if (!row || typeof row !== "object") return []
@@ -47,7 +84,7 @@ export async function POST(request: NextRequest) {
         metadata: reversalMeta(batchId, { reasonLength: reason.length }),
       })
     }
-    if (!returnLocationRaw || !isInternalLocation(returnLocationRaw)) {
+    if (returnLocationRaw && !isInternalLocation(returnLocationRaw)) {
       return apiClientError(
         400,
         `returnLocation must be one of: Warehouse A, Warehouse B, Service Center`,
@@ -71,10 +108,11 @@ export async function POST(request: NextRequest) {
       const stockResult = await revertInventoryAndTransactionsForQuickScan(supabase, {
         batchId,
         batchTxns,
-        returnLocation: returnLocationRaw,
+        returnLocation: returnLocationRaw && isInternalLocation(returnLocationRaw) ? returnLocationRaw : null,
         reversalReason: reason,
         createdBy: user.id,
         confirmed,
+        entered,
       })
       if (!stockResult.ok) {
         return apiErrorResponse(stockResult.status, stockResult.error, {

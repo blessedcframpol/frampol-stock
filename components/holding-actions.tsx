@@ -22,11 +22,18 @@ import { useOrgTimezone } from "@/hooks/use-org-timezone"
 export function ConvertToSaleDialog({
   open,
   serial,
+  clientName,
+  requireInvoice = false,
   onOpenChange,
+  onCompleted,
 }: {
   open: boolean
   serial: string
+  /** Shown read-only. A POC conversion keeps the client already stored on the kit. */
+  clientName?: string
+  requireInvoice?: boolean
   onOpenChange: (open: boolean) => void
+  onCompleted?: () => void
 }) {
   const { applyMovement } = useInventoryStore()
   const timeZone = useOrgTimezone()
@@ -35,6 +42,10 @@ export function ConvertToSaleDialog({
   const [saving, setSaving] = useState(false)
 
   async function submit() {
+    if (requireInvoice && !invoice.trim()) {
+      toast.error("Invoice number is required for Sale and Rentals")
+      return
+    }
     setSaving(true)
     try {
       const result = await applyMovement({
@@ -50,6 +61,7 @@ export function ConvertToSaleDialog({
       }
       toast.success(`${serial} converted to a sale`)
       announceAlertsUpdated()
+      onCompleted?.()
       onOpenChange(false)
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "Could not convert this POC")
@@ -69,6 +81,12 @@ export function ConvertToSaleDialog({
             Records a Sale for <span className="font-mono text-foreground">{serial}</span>. The client stays the same.
             Timezone {timeZone}.
           </p>
+          {clientName != null ? (
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="convert-client">Client</Label>
+              <Input id="convert-client" value={clientName || "—"} readOnly />
+            </div>
+          ) : null}
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="convert-sale-date">Sale date</Label>
             <Input
@@ -83,7 +101,7 @@ export function ConvertToSaleDialog({
             <Input
               id="convert-invoice"
               value={invoice}
-              placeholder="Optional"
+              placeholder={requireInvoice ? "Required" : "Optional"}
               onChange={(event) => setInvoice(event.target.value)}
             />
           </div>
@@ -92,7 +110,11 @@ export function ConvertToSaleDialog({
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button type="button" onClick={() => void submit()} disabled={saving || !saleDate}>
+          <Button
+            type="button"
+            onClick={() => void submit()}
+            disabled={saving || !saleDate || (requireInvoice && !invoice.trim())}
+          >
             Convert to sale
           </Button>
         </DialogFooter>
@@ -106,11 +128,13 @@ export function ExtendHoldingDialog({
   itemId,
   serial,
   onOpenChange,
+  onCompleted,
 }: {
   open: boolean
   itemId: string
   serial: string
   onOpenChange: (open: boolean) => void
+  onCompleted?: (returnDate: string) => void
 }) {
   const { refetchLedger } = useInventoryStore()
   const [returnDate, setReturnDate] = useState("")
@@ -128,6 +152,7 @@ export function ExtendHoldingDialog({
       await refetchLedger()
       announceAlertsUpdated()
       toast.success(`Return date for ${serial} extended`)
+      onCompleted?.(returnDate)
       onOpenChange(false)
       setReason("")
     } catch (caught) {
@@ -170,7 +195,7 @@ export function ExtendHoldingDialog({
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button type="button" onClick={() => void submit()} disabled={saving}>
+          <Button type="button" onClick={() => void submit()} disabled={saving || !returnDate || !reason.trim()}>
             Extend
           </Button>
         </DialogFooter>

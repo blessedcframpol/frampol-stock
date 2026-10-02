@@ -124,18 +124,35 @@ export async function GET(request: Request) {
       string,
       { reversedAt: string; reversalReason?: string; reversedBy?: string; reversedByName?: string; kind?: string }
     >()
+    const restoredAtByBatchId = new Map<string, string>()
     for (let index = 0; index < batchIds.length; index += ID_CHUNK) {
       const chunk = batchIds.slice(index, index + ID_CHUNK)
-      const rows = await fetchAllPages((from, to) =>
-        supabase
-          .from("batch_reversals")
-          .select("batch_id, reversed_at, reversal_reason, reversed_by, kind")
-          .in("batch_id", chunk)
-          .order("batch_id", { ascending: true })
-          .range(from, to)
-      )
+      const [rows, restores] = await Promise.all([
+        fetchAllPages((from, to) =>
+          supabase
+            .from("batch_reversals")
+            .select("batch_id, reversed_at, reversal_reason, reversed_by, kind")
+            .in("batch_id", chunk)
+            .order("batch_id", { ascending: true })
+            .range(from, to)
+        ),
+        fetchAllPages((from, to) =>
+          supabase
+            .from("batch_restores")
+            .select("batch_id, restored_at")
+            .in("batch_id", chunk)
+            .order("restored_at", { ascending: false })
+            .range(from, to)
+        ),
+      ])
+      for (const row of restores) {
+        if (!row.batch_id || !row.restored_at || restoredAtByBatchId.has(row.batch_id)) continue
+        restoredAtByBatchId.set(row.batch_id, row.restored_at)
+      }
       for (const row of rows) {
         if (!row.batch_id || reversalByBatchId.has(row.batch_id) || !row.reversed_at) continue
+        const restoredAt = restoredAtByBatchId.get(row.batch_id)
+        if (restoredAt && restoredAt >= row.reversed_at) continue
         reversalByBatchId.set(row.batch_id, {
           reversedAt: row.reversed_at,
           reversalReason: row.reversal_reason ?? undefined,

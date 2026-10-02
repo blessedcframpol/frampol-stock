@@ -4,7 +4,9 @@ import {
   alertChipCounts,
   alertChipFromSearch,
   canRecordReturn,
+  dispatchedKitHref,
   formatReturnAge,
+  holdingDrawerActions,
   groupReturnRows,
   prefillMovementType,
   recordReturnHref,
@@ -116,5 +118,22 @@ describe("record return", () => {
       expect(canRecordReturn(role)).toBe(allowed.has(role))
     }
     expect(canRecordReturn(null)).toBe(false)
+  })
+
+  it("opens the kit drawer on Dispatched", () => {
+    expect(dispatchedKitHref("item 1")).toBe("/inventory/dispatched?item=item%201")
+  })
+
+  it("keeps drawer actions on the same roles, and only for kits that are still out", () => {
+    const allowed = new Set(["admin", "technicians"])
+    for (const role of ROLES) {
+      const actions = holdingDrawerActions("POC", role)
+      expect(actions).toEqual(allowed.has(role) ? ["convert", "return", "extend"] : [])
+      expect(holdingDrawerActions("Rented", role)).toEqual(allowed.has(role) ? ["return", "extend"] : [])
+    }
+    expect(holdingDrawerActions("POC", null)).toEqual([])
+    for (const status of ["Sold", "Disposed", "Maintenance", "In Stock"]) {
+      expect(holdingDrawerActions(status, "admin")).toEqual([])
+    }
   })
 })

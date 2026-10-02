@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import Link from "next/link"
+import { useRouter, useSearchParams } from "next/navigation"
 import {
   Table,
   TableBody,
@@ -21,6 +22,7 @@ import { PageHeader } from "@/components/page-nav"
 import { ArrowUpRight, Loader2 } from "lucide-react"
 import { toastFromApiErrorBody, toastFromCaughtError } from "@/lib/toast-reportable-error"
 import { BatchLinesDrawer } from "@/components/batch-lines-drawer"
+import { DispatchedKitDrawer } from "@/components/dispatched-kit-drawer"
 import { SignedStorageLink } from "@/components/signed-storage-link"
 import {
   DISPATCHED_MOVEMENTS,
@@ -42,6 +44,9 @@ type DispatchedPage = {
 }
 
 export function DispatchedContent() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const itemId = searchParams.get("item")
   const timeZone = useOrgTimezone()
   const { role } = useAuth()
   const showFinancials = canViewFinancials(role)
@@ -53,6 +58,14 @@ export function DispatchedContent() {
   const [page, setPage] = useState(1)
   const [data, setData] = useState<DispatchedPage>({ rows: [], total: 0, counts: {}, resultKind: "batch" })
   const [viewing, setViewing] = useState<DispatchedRow | null>(null)
+  const [reload, setReload] = useState(0)
+
+  function closeKit() {
+    const params = new URLSearchParams(searchParams.toString())
+    params.delete("item")
+    const query = params.toString()
+    router.replace(query ? `/inventory/dispatched?${query}` : "/inventory/dispatched", { scroll: false })
+  }
 
   useEffect(() => {
     const timer = setTimeout(() => setAppliedSearch(search.trim()), 300)
@@ -66,7 +79,7 @@ export function DispatchedContent() {
     setPage(1)
   }
 
-  const requestKey = `${page}|${filterKey}`
+  const requestKey = `${page}|${filterKey}|${reload}`
   const [settledKey, setSettledKey] = useState<string | null>(null)
   const loading = settledKey !== requestKey
 
@@ -204,7 +217,14 @@ export function DispatchedContent() {
               </TableHeader>
               <TableBody>
                 {data.rows.map((row) => (
-                  <TableRow key={row.id} className="cursor-pointer" onClick={() => setViewing(row)}>
+                    <TableRow
+                      key={row.id}
+                      className="cursor-pointer"
+                      onClick={() => {
+                        if (itemId) closeKit()
+                        setViewing(row)
+                      }}
+                    >
                     <TableCell>
                       {row.movement ? <StatusPill value={row.movement} /> : <span className="text-muted-foreground">—</span>}
                     </TableCell>
@@ -256,6 +276,10 @@ export function DispatchedContent() {
               </TableBody>
             </Table>
       )}
+
+      {itemId ? (
+        <DispatchedKitDrawer key={itemId} itemId={itemId} onClose={closeKit} onChanged={() => setReload((value) => value + 1)} />
+      ) : null}
 
       <BatchLinesDrawer
         open={viewing != null}
