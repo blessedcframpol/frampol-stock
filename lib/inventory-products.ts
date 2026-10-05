@@ -183,6 +183,24 @@ export function lowStockChipCount(rows: readonly InventoryProductRow[]): number 
   return rows.filter((row) => row.isActive && row.isLow).length
 }
 
+/** In Stock kits split by group. Available for sale is the sale pool. */
+export function inStockPoolCounts(
+  items: readonly { status?: string | null; stockPool?: string | null; deletedAt?: string | null }[]
+): { inStock: number; sale: number; rental: number; demo: number } {
+  let inStock = 0
+  let sale = 0
+  let rental = 0
+  let demo = 0
+  for (const item of items) {
+    if (item.deletedAt || item.status !== "In Stock") continue
+    inStock += 1
+    if (item.stockPool === "rental") rental += 1
+    else if (item.stockPool === "demo") demo += 1
+    else sale += 1
+  }
+  return { inStock, sale, rental, demo }
+}
+
 export function activeInStockTotal(rows: readonly InventoryProductRow[]): number {
   return rows.reduce((sum, row) => (row.isActive ? sum + row.inStockCount : sum), 0)
 }

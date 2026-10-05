@@ -72,6 +72,8 @@ export interface AssignmentEntry {
   notes?: string
 }
 
+export type StockPool = "sale" | "rental" | "demo"
+
 export interface InventoryItem {
   id: string
   /** FK to public.product_lines when using Supabase; optional for local seed-only mode. */
@@ -81,6 +83,8 @@ export interface InventoryItem {
   /** Vendor or product line for grouping (e.g. Starlink, Fortinet); empty → General in app. */
   vendor?: string
   status: ItemStatus
+  /** Kit group. Absent on older in-memory rows; treat those as sale. */
+  stockPool?: StockPool
   dateAdded: string
   location: string
   client?: string
@@ -139,6 +143,8 @@ export interface Transaction {
   previousStatus?: string | null
   previousStatusSource?: "recorded" | "derived" | "unknown"
   reversesTransactionId?: string
+  /** POC Return only. The server requires sale or demo and does not default it. */
+  returnPool?: "sale" | "demo"
 }
 
 export interface Client {

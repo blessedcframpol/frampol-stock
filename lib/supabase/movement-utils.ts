@@ -114,7 +114,21 @@ export function validateMovementForItem(
   if (productReason) return productReason
 
   const st = item.status as ItemStatus
+  const pool = item.stockPool ?? "sale"
   const next = movementResult(st, type)
+
+  if (type === "Sale" && st === "In Stock" && pool !== "sale") {
+    return `Sale requires a sellable kit. Move ${item.serialNumber} from ${pool} to sale first`
+  }
+  if (type === "Rentals" && item.vendor !== "Starlink") {
+    return `Rentals is only for Starlink kits (${item.serialNumber})`
+  }
+  if (type === "Rentals" && pool !== "sale" && pool !== "rental") {
+    return `Rentals is not allowed from the ${pool} group`
+  }
+  if (type === "POC Out" && pool !== "sale" && pool !== "demo") {
+    return `POC Out is not allowed from the ${pool} group`
+  }
 
   if (type === "Transfer" && next) {
     if (ctx.fromLocation?.trim() && item.location !== ctx.fromLocation.trim()) {
@@ -214,6 +228,8 @@ export function computeMovementResult(
     expectedVendor?: string
     /** Extra JSON stored on transaction rows (decommission reason, remediation case id, etc.) */
     movementMetadata?: JsonValue
+    /** POC Return only. Required: sale or demo. There is no default. */
+    returnPool?: "sale" | "demo"
   }
 ): {
   success: string[]
@@ -247,6 +263,7 @@ export function computeMovementResult(
     movementMetadata,
     clientDirectory,
     orgTimeZone,
+    returnPool,
   } = params
   const businessToday = businessDateToIso(todayBusinessDate(orgTimeZone?.trim() || DEFAULT_ORG_TIMEZONE))
   let date = businessToday
@@ -265,6 +282,21 @@ export function computeMovementResult(
         }
       }
       date = parsed.iso
+    }
+  }
+  if (type === "POC Return" && returnPool !== "sale" && returnPool !== "demo") {
+    return {
+      success: [],
+      notFound: [],
+      rejected: serialNumbers
+        .map((serial) => serial.trim())
+        .filter(Boolean)
+        .map((serial) => ({
+          serial,
+          reason: "POC Return must choose Back in sellable stock or Demo unit, not for sale",
+        })),
+      updatedItems: [],
+      newTransactions: [],
     }
   }
   const defaultReturnDate = (() => {
@@ -295,6 +327,7 @@ export function computeMovementResult(
           name: d.name,
           vendor: v,
           status: "In Stock",
+          stockPool: "sale",
           dateAdded: date.slice(0, 10),
           location: d.location,
         }
@@ -458,6 +491,7 @@ export function computeMovementResult(
         break
       case "POC Return":
         it.status = "In Stock"
+        if (returnPool === "sale" || returnPool === "demo") it.stockPool = returnPool
         it.location = toLocation ?? "Warehouse A"
         it.client = undefined
         it.assignedTo = undefined
@@ -465,7 +499,8 @@ export function computeMovementResult(
         it.returnDate = undefined
         break
       case "Rental Return":
-        it.status = "In Stock"
+        it.status = "Pending Inspection"
+        it.stockPool = "rental"
         it.location = toLocation ?? "Warehouse A"
         it.client = undefined
         it.assignedTo = undefined
@@ -481,6 +516,7 @@ export function computeMovementResult(
         it.returnDate = undefined
         break
       case "Rentals":
+        it.stockPool = "rental"
         it.status = "Rented"
         it.location = "Client Site"
         it.client = clientDisplay
@@ -542,6 +578,7 @@ export function computeMovementResult(
       client: txnClientDisplay,
       date,
       clientId: txnClientId,
+      returnPool: type === "POC Return" ? returnPool : undefined,
       invoiceNumber,
       notes,
       assignedTo:

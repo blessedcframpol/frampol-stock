@@ -5,6 +5,7 @@ import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import { Download, MoreHorizontal } from "lucide-react"
 import { toast } from "sonner"
+import { ChangeGroupDialog } from "@/components/change-group-dialog"
 import { ConvertToSaleDialog, ExtendHoldingDialog } from "@/components/holding-actions"
 import { InventoryItemActionsMenu } from "@/components/inventory-item-actions"
 import { MoveItemsDialog } from "@/components/move-items-dialog"
@@ -14,6 +15,7 @@ import { RecordStockMovementDialog } from "@/components/record-stock-movement-di
 import { EmptyState } from "@/components/fs/empty-state"
 import { ListToolbar, ListToolbarSearch } from "@/components/fs/list-toolbar"
 import { StatusPill } from "@/components/fs/status-pill"
+import { StockPoolChip } from "@/components/stock-pool-chip"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
@@ -37,7 +39,7 @@ import {
   showSerialCheckboxes,
 } from "@/lib/inventory-products"
 import { recordReturnHref } from "@/lib/alerts"
-import { canRecordStockMovement } from "@/lib/permissions"
+import { canChangeStockPool, canRecordStockMovement } from "@/lib/permissions"
 import { buildStockTakeUrl } from "@/lib/stock-take"
 import { buildCsvFilename, formatDateDDMMYYYY } from "@/lib/utils"
 import { BusinessDateLabel } from "@/components/business-date-label"
@@ -49,7 +51,7 @@ export function InventorySerialsContent({ productId }: { productId: string }) {
   const searchParams = useSearchParams()
   const serialFromUrl = searchParams.get("serial")?.trim() ?? ""
   const { role } = useAuth()
-  const { inventory, transactions } = useInventoryStore()
+  const { inventory, transactions, refetchLedger } = useInventoryStore()
   const [search, setSearch] = useState(serialFromUrl)
   const [seenSerial, setSeenSerial] = useState(serialFromUrl)
   if (serialFromUrl && serialFromUrl !== seenSerial) {
@@ -65,8 +67,10 @@ export function InventorySerialsContent({ productId }: { productId: string }) {
   const [moveItems, setMoveItems] = useState<InventoryItem[]>([])
   const [convertOpen, setConvertOpen] = useState(false)
   const [extendOpen, setExtendOpen] = useState(false)
+  const [groupOpen, setGroupOpen] = useState(false)
 
   const canMove = canRecordStockMovement(role)
+  const canChangeGroup = canChangeStockPool(role)
   const canExport = canExportInventory(role)
   const canStockTake = canLaunchStockTake(role)
   const canMoveGroup = canMoveProductGroup(role)
@@ -263,6 +267,11 @@ export function InventorySerialsContent({ productId }: { productId: string }) {
               Record movement ({selected.length})
             </Button>
           ) : null}
+          {canChangeGroup && selected.every((item) => item.status === "In Stock" || item.status === "Rented") ? (
+            <Button type="button" size="sm" variant="outline" onClick={() => setGroupOpen(true)}>
+              Change group ({selected.length})
+            </Button>
+          ) : null}
           {canMoveGroup ? (
             <Button type="button" size="sm" variant="outline" onClick={() => openMove(selected)}>
               Move to vendor/group ({selected.length})
@@ -336,7 +345,12 @@ export function InventorySerialsContent({ productId }: { productId: string }) {
                     />
                   </TableCell>
                 ) : null}
-                <TableCell className="font-mono text-sm">{item.serialNumber}</TableCell>
+                <TableCell className="font-mono text-sm">
+                  <span className="inline-flex items-center gap-2">
+                    {item.serialNumber}
+                    <StockPoolChip pool={item.stockPool} />
+                  </span>
+                </TableCell>
                 <TableCell>
                   <StatusPill value={item.status} />
                 </TableCell>
@@ -384,6 +398,15 @@ export function InventorySerialsContent({ productId }: { productId: string }) {
           if (!open) setMovementItems([])
         }}
         items={movementItems}
+      />
+      <ChangeGroupDialog
+        open={groupOpen}
+        onOpenChange={setGroupOpen}
+        kits={selected}
+        onSaved={async () => {
+          setSelectedIds(new Set())
+          await refetchLedger()
+        }}
       />
       <MoveItemsDialog
         open={moveOpen}

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useMemo, useRef } from "react"
 import {
   Table,
   TableBody,
@@ -35,6 +35,7 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { History, Undo2, Loader2, Download, MoreHorizontal } from "lucide-react"
 import { INTERNAL_LOCATIONS, isInternalLocation } from "@/lib/data"
+import { useInventoryStore } from "@/lib/inventory-store"
 import { fetchTransactionBatchPage, type TransactionBatchSummary } from "@/lib/transaction-batches"
 import {
   LEDGER_PAGE_SIZE,
@@ -85,6 +86,14 @@ function getFilenameFromContentDisposition(contentDisposition: string | null): s
 
 export function TransactionHistoryContent() {
   const timeZone = useOrgTimezone()
+  const { inventory } = useInventoryStore()
+  const poolBySerial = useMemo(() => {
+    const pools = new Map<string, string | undefined>()
+    for (const item of inventory) {
+      if (!item.deletedAt) pools.set(item.serialNumber, item.stockPool)
+    }
+    return pools
+  }, [inventory])
   const { role } = useAuth()
   const canReverse = canReverseQuickScanBatches(role)
   const canExport = canExportAllTransactions(role)
@@ -725,7 +734,7 @@ export function TransactionHistoryContent() {
               )}
             </div>
           ) : null}
-        lines={viewingBatch ? drawerLines(viewingBatch) : []}
+        lines={viewingBatch ? drawerLines(viewingBatch, poolBySerial) : []}
         showInvoice={showFinancials}
         dimmed={viewingBatch?.isReversed}
       />
@@ -909,10 +918,16 @@ export function TransactionHistoryContent() {
   )
 }
 
-function drawerLines(batch: TransactionBatchSummary): BatchDrawerLine[] {
+function drawerLines(
+  batch: TransactionBatchSummary,
+  poolBySerial: Map<string, string | undefined>
+): BatchDrawerLine[] {
   const source =
     batch.lines && batch.lines.length > 0
       ? batch.lines
       : batch.serials.map((serialNumber) => ({ serialNumber }))
-  return source.map((line) => ({ serialNumber: line.serialNumber }))
+  return source.map((line) => ({
+    serialNumber: line.serialNumber,
+    stockPool: poolBySerial.get(line.serialNumber),
+  }))
 }

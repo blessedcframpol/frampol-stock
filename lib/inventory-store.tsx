@@ -117,6 +117,8 @@ export interface MovementParams {
     loanerInventoryItemId: string
     loanerSerial: string
   }
+  /** POC Return only. Required, with no default: sale or demo. */
+  returnPool?: "sale" | "demo"
   /** Resolve `transactions.client_id` when display text is "Name - Company" (returns + form edge cases). */
   clientDirectory?: { id: string; name: string; company: string }[]
 }
@@ -328,6 +330,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
         kitInspectionPayload,
         remediationCaseLoanerLink,
         clientDirectory,
+        returnPool,
       } = params
       const clientDisplay =
         clientDisplayOverride ?? (clientId ? getClientDisplay(clientId) : "Internal")
@@ -384,6 +387,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
         expectedVendor,
         movementMetadata,
         orgTimeZone,
+        returnPool,
       })
 
       if (result.saleDateError) {
@@ -533,9 +537,10 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
             else inventoryInserts.push(row)
           }
 
-          const transactionRows = result.newTransactions.map((t) =>
-            transactionToRow({ ...t, createdBy: user?.id })
-          )
+          const transactionRows = result.newTransactions.map((t) => {
+            const row = transactionToRow({ ...t, createdBy: user?.id })
+            return t.returnPool ? { ...row, return_pool: t.returnPool } : row
+          })
 
           let outboundBatchPayload: Database["public"]["Tables"]["outbound_batches"]["Insert"] | null = null
           if (newBatchId && (type === "POC Out" || type === "Rentals") && result.newTransactions.length > 0) {

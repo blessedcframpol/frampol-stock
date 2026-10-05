@@ -178,7 +178,7 @@ async function main() {
           serial_number: saleSerial,
           item_name: "Fixture",
           client: "Acme Holder",
-          date: today,
+          date: `${today}T00:00:00.000Z`,
           created_by: null,
         },
       ],

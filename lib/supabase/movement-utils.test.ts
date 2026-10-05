@@ -105,6 +105,23 @@ describe("validateMovementForItem", () => {
         it("allows Sale from POC", () => {
           expect(validateMovementForItem("Sale", item({ status: "POC" }), ctx)).toBeNull()
         })
+        it("blocks Sale of a rental or demo kit that is still In Stock", () => {
+          expect(validateMovementForItem("Sale", item({ status: "In Stock", stockPool: "rental" }), ctx)).toMatch(/sellable/)
+          expect(validateMovementForItem("Sale", item({ status: "In Stock", stockPool: "demo" }), ctx)).toMatch(/sellable/)
+        })
+      }
+      if (type === "Rentals") {
+        it("blocks Rentals from the demo group", () => {
+          expect(validateMovementForItem("Rentals", item({ status: "In Stock", stockPool: "demo" }), ctx)).toMatch(/demo/)
+          expect(
+            validateMovementForItem("Rentals", item({ status: "In Stock", vendor: "Fortinet" }), ctx),
+          ).toMatch(/Starlink/)
+        })
+      }
+      if (type === "POC Out") {
+        it("blocks POC Out from the rental group", () => {
+          expect(validateMovementForItem("POC Out", item({ status: "In Stock", stockPool: "rental" }), ctx)).toMatch(/rental/)
+        })
       }
     }
   })
@@ -372,28 +389,40 @@ describe("computeMovementResult", () => {
       status: "Rented",
       location: "Client Site",
       returnDate: "2026-07-01",
+      stockPool: "rental",
     })
     expect(result.newTransactions[0]?.type).toBe("Rentals")
   })
 
   it("POC Return: returns to In Stock at toLocation", () => {
     const result = computeMovementResult(
-      [item({ status: "POC", location: "Client Site", client: "Acme" })],
-      { ...baseParams, type: "POC Return", toLocation: "Warehouse B" }
+      [item({ status: "POC", location: "Client Site", client: "Acme", stockPool: "sale" })],
+      { ...baseParams, type: "POC Return", toLocation: "Warehouse B", returnPool: "demo" }
     )
     expect(result.updatedItems[0]).toMatchObject({
       status: "In Stock",
       location: "Warehouse B",
       client: undefined,
+      stockPool: "demo",
     })
+    expect(result.newTransactions[0]?.returnPool).toBe("demo")
   })
 
-  it("Rental Return: returns to In Stock", () => {
+  it("POC Return without a group choice is rejected", () => {
     const result = computeMovementResult(
-      [item({ status: "Rented", location: "Client Site" })],
+      [item({ status: "POC", location: "Client Site" })],
+      { ...baseParams, type: "POC Return", toLocation: "Warehouse A" }
+    )
+    expect(result.updatedItems).toHaveLength(0)
+    expect(result.rejected[0]?.reason).toMatch(/Back in sellable stock/)
+  })
+
+  it("Rental Return: pending inspection, rental group", () => {
+    const result = computeMovementResult(
+      [item({ status: "Rented", location: "Client Site", stockPool: "rental" })],
       { ...baseParams, type: "Rental Return", toLocation: "Warehouse A" }
     )
-    expect(result.updatedItems[0]?.status).toBe("In Stock")
+    expect(result.updatedItems[0]).toMatchObject({ status: "Pending Inspection", stockPool: "rental" })
   })
 
   it("Sale Return: moves Sold to RMA Hold", () => {

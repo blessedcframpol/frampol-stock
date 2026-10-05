@@ -339,7 +339,7 @@ async function main() {
         name: "rental_return",
         steps: [
           { type: "Rentals", status: "Rented", client: "I2b Client" },
-          { type: "Rental Return", status: "In Stock" },
+          { type: "Rental Return", status: "Pending Inspection" },
         ],
         restore: "Rented",
       },

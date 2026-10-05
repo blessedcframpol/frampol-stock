@@ -1,13 +1,16 @@
 "use client"
 
-import { useMemo, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useState, type ReactNode } from "react"
 import type { InventoryItem } from "@/lib/data"
 import { INTERNAL_LOCATIONS, LOCATIONS } from "@/lib/data"
 import { useInventoryStore, INVENTORY_TRASH_RETENTION_DAYS } from "@/lib/inventory-store"
 import { Textarea } from "@/components/ui/textarea"
 import { Loader2 } from "lucide-react"
 import { useAuth } from "@/lib/auth-context"
-import { canEditInventory, canRecordStockMovement } from "@/lib/permissions"
+import { canChangeStockPool, canEditInventory, canRecordStockMovement } from "@/lib/permissions"
+import { ChangeGroupDialog } from "@/components/change-group-dialog"
+import { StockPoolChip } from "@/components/stock-pool-chip"
+import { loadStockPoolChanges, type StockPoolChange } from "@/lib/stock-pools"
 import { BusinessDateLabel } from "@/components/business-date-label"
 import { useOrgTimezone } from "@/hooks/use-org-timezone"
 import { formatDateDDMMYYYY } from "@/lib/utils"
@@ -167,8 +170,11 @@ export function InventoryItemActionsMenu({ item, menuTrigger, onRecordMovement, 
   const { transactions, softDeleteItem, applyMovement, refetchLedger } = useInventoryStore()
   const { role } = useAuth()
   const isAdmin = canEditInventory(role)
+  const canChangeGroup = canChangeStockPool(role)
   const canMove = canRecordStockMovement(role)
   const [convertOpen, setConvertOpen] = useState(false)
+  const [groupOpen, setGroupOpen] = useState(false)
+  const [poolHistory, setPoolHistory] = useState<StockPoolChange[]>([])
   const [extendOpen, setExtendOpen] = useState(false)
 
   const [viewOpen, setViewOpen] = useState(false)
@@ -182,6 +188,21 @@ export function InventoryItemActionsMenu({ item, menuTrigger, onRecordMovement, 
   const [conditionNotes, setConditionNotes] = useState("")
   const [inspectionToLocation, setInspectionToLocation] = useState("Warehouse A")
   const [inspectionSubmitting, setInspectionSubmitting] = useState(false)
+
+  useEffect(() => {
+    if (!viewOpen) return
+    let cancelled = false
+    void loadStockPoolChanges(item.id)
+      .then((rows) => {
+        if (!cancelled) setPoolHistory(rows)
+      })
+      .catch(() => {
+        if (!cancelled) setPoolHistory([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [viewOpen, item.id, item.stockPool])
 
   const recentTxns = useMemo(() => {
     return transactions
@@ -272,6 +293,9 @@ export function InventoryItemActionsMenu({ item, menuTrigger, onRecordMovement, 
           {(item.status === "POC" || item.status === "Rented") && canMove && (
             <DropdownMenuItem onSelect={() => setExtendOpen(true)}>Extend</DropdownMenuItem>
           )}
+          {canChangeGroup && (item.status === "In Stock" || item.status === "Rented") && (
+            <DropdownMenuItem onSelect={() => setGroupOpen(true)}>Change group</DropdownMenuItem>
+          )}
           {isAdmin && (
             <>
               {onMoveToGroup && (
@@ -294,13 +318,29 @@ export function InventoryItemActionsMenu({ item, menuTrigger, onRecordMovement, 
         onOpenChange={setExtendOpen}
       />
 
+      <ChangeGroupDialog
+        open={groupOpen}
+        onOpenChange={setGroupOpen}
+        kits={[item]}
+        onSaved={async () => {
+          await refetchLedger()
+          setPoolHistory(await loadStockPoolChanges(item.id))
+        }}
+      />
+
       <Dialog open={viewOpen} onOpenChange={setViewOpen}>
         <DialogContent className="bg-card text-card-foreground max-w-[calc(100vw-2rem)] sm:max-w-lg max-h-[90vh] flex flex-col">
           <DialogHeader>
             <DialogTitle className="text-foreground">Item details</DialogTitle>
           </DialogHeader>
           <div className="overflow-y-auto flex-1 min-h-0 space-y-1 pr-1">
-            {detailRow("Serial", item.serialNumber)}
+            <div className="grid grid-cols-[minmax(0,120px)_1fr] gap-x-3 gap-y-1 text-sm border-b border-border py-2">
+              <span className="text-muted-foreground">Serial</span>
+              <span className="inline-flex items-center gap-2 font-mono text-foreground">
+                {item.serialNumber}
+                <StockPoolChip pool={item.stockPool} />
+              </span>
+            </div>
             {detailRow("Product name", item.name)}
             {detailRow("Vendor", item.vendor != null ? String(item.vendor) : undefined)}
             {detailRow("Status", item.status)}
@@ -313,6 +353,33 @@ export function InventoryItemActionsMenu({ item, menuTrigger, onRecordMovement, 
             {item.pocOutDate && detailRow("POC out", formatDateDDMMYYYY(item.pocOutDate))}
             {item.returnDate && detailRow("Return due", formatDateDDMMYYYY(item.returnDate))}
             {detailRow("Notes", item.notes)}
+            {detailRow(
+              "Group",
+              item.stockPool === "rental" ? "Rental" : item.stockPool === "demo" ? "Demo" : "Sale"
+            )}
+            <div className="pt-3">
+              <p className="text-xs font-medium text-muted-foreground mb-2">Group history</p>
+              {poolHistory.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No group changes.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {poolHistory.map((change) => (
+                    <li key={change.id} className="text-sm text-foreground">
+                      <span className="font-medium">
+                        {change.fromPool} → {change.toPool}
+                      </span>
+                      <span className="text-muted-foreground"> · {formatDateDDMMYYYY(change.changedAt)}</span>
+                      <p className="text-muted-foreground">{change.reason}</p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {canChangeGroup && (item.status === "In Stock" || item.status === "Rented") ? (
+                <Button type="button" variant="outline" className="mt-3" onClick={() => setGroupOpen(true)}>
+                  Change group
+                </Button>
+              ) : null}
+            </div>
             {item.cloudKey && detailRow("Cloud key", item.cloudKey)}
           </div>
           <div className="pt-2 border-t border-border">

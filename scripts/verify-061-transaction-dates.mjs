@@ -103,7 +103,7 @@ async function main() {
        WHERE table_schema = 'public' AND table_name = 'transactions' AND column_name = 'created_at'`
     )
     const constraint = await db.query(
-      `SELECT pg_get_constraintdef(oid) AS def
+      `SELECT pg_get_constraintdef(oid) AS def, convalidated
        FROM pg_constraint
        WHERE conrelid = 'public.transactions'::regclass
          AND conname = 'transactions_date_iso_utc'`
@@ -117,7 +117,10 @@ async function main() {
       createdAt.is_nullable === "YES" &&
       /now\(\)/i.test(createdAt.column_default ?? "") &&
       constraintDef.includes("date ~") &&
+      /T00:00:00\\.000Z/.test(constraintDef) &&
       constraintDef.includes("2020") &&
+      constraintDef.includes("2100") &&
+      constraint.rows[0]?.convalidated === true &&
       timeZone === "Africa/Harare"
 
     if (!schemaOk) {
@@ -157,7 +160,7 @@ async function main() {
       if (midnight.rows[0].bad === 0 && index.rowCount === 1) {
         pass(
           "1_created_at_and_midnight_dates",
-          "created_at nullable default now(); every date is midnight; transactions_date_iso_utc intact; index present"
+          "created_at nullable default now(); every date is midnight; transactions_date_iso_utc requires T00:00:00.000Z and is validated; index present"
         )
       } else {
         fail(
@@ -259,34 +262,88 @@ async function main() {
       }
 
       const lateId = `${PREFIX}late`
+      const expectedLate = businessDateToIso(todayBusinessDate("Africa/Harare", new Date(LATE_UTC)))
+      const converted = await db.query(
+        `SELECT to_char(($1::timestamptz) AT TIME ZONE 'Africa/Harare', 'YYYY-MM-DD') || 'T00:00:00.000Z' AS business_date`,
+        [LATE_UTC]
+      )
       await db.query(
         `INSERT INTO public.transactions (
            id, type, serial_number, item_name, client, date, created_at
          ) VALUES ($1, 'Sale', $2, 'verify-061 late utc', 'Internal', $3, $4::timestamptz)`,
-        [lateId, `${PREFIX}serial-late`, LATE_UTC, LATE_UTC]
-      )
-      await db.query(
-        `UPDATE public.transactions AS txn
-         SET date = to_char((txn.date::timestamptz) AT TIME ZONE settings.timezone, 'YYYY-MM-DD')
-                    || 'T00:00:00.000Z'
-         FROM public.app_settings AS settings
-         WHERE settings.id AND txn.id = $1`,
-        [lateId]
+        [lateId, `${PREFIX}serial-late`, expectedLate, LATE_UTC]
       )
       const late = await db.query(
         `SELECT date, created_at FROM public.transactions WHERE id = $1`,
         [lateId]
       )
-      const expectedLate = businessDateToIso(todayBusinessDate("Africa/Harare", new Date(LATE_UTC)))
+      const directId = `${PREFIX}direct-bad`
+      let directRejected = ""
+      try {
+        await db.query(
+          `INSERT INTO public.transactions (
+             id, type, serial_number, item_name, client, date
+           ) VALUES ($1, 'Sale', $2, 'verify-061 non-midnight', 'Internal', $3)`,
+          [directId, `${PREFIX}serial-direct-bad`, LATE_UTC]
+        )
+        directRejected = "stored"
+      } catch (error) {
+        directRejected = error.message
+      }
+      const movementId = `${PREFIX}movement-bad`
+      let movementRejected = ""
+      try {
+        await db.query(
+          `SELECT public.apply_stock_movement('[]'::jsonb, '[]'::jsonb, $1::jsonb)`,
+          [
+            JSON.stringify([
+              {
+                id: movementId,
+                type: "Sale",
+                serial_number: `${PREFIX}serial-movement-bad`,
+                item_name: "verify-061 non-midnight",
+                client: "Internal",
+                date: LATE_UTC,
+              },
+            ]),
+          ]
+        )
+        movementRejected = "stored"
+      } catch (error) {
+        movementRejected = error.message
+      }
+      const leaked = await db.query(
+        `SELECT count(*)::int AS n FROM public.transactions WHERE id = ANY($1::text[])`,
+        [[directId, movementId]]
+      )
       const lateRow = late.rows[0]
+      const midnightRejected =
+        /transactions_date_iso_utc/i.test(directRejected) &&
+        /business-date midnight/i.test(movementRejected) &&
+        leaked.rows[0].n === 0
       if (
         expectedLate === "2026-09-17T00:00:00.000Z" &&
+        converted.rows[0]?.business_date === expectedLate &&
         lateRow?.date === expectedLate &&
-        new Date(lateRow.created_at).getTime() === new Date(LATE_UTC).getTime()
+        new Date(lateRow.created_at).getTime() === new Date(LATE_UTC).getTime() &&
+        midnightRejected
       ) {
-        pass("3_late_utc_business_date", `${LATE_UTC} → ${lateRow.date}; created_at kept`)
+        pass(
+          "3_late_utc_business_date",
+          `${LATE_UTC} is ${expectedLate} in Africa/Harare; created_at kept; non-midnight insert and apply_stock_movement both rejected`
+        )
       } else {
-        fail("3_late_utc_business_date", JSON.stringify({ expectedLate, lateRow }))
+        fail(
+          "3_late_utc_business_date",
+          JSON.stringify({
+            expectedLate,
+            converted: converted.rows[0] ?? null,
+            lateRow,
+            directRejected,
+            movementRejected,
+            leaked: leaked.rows[0].n,
+          })
+        )
       }
 
       const movementFns = await db.query(

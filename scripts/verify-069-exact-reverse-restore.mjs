@@ -530,7 +530,7 @@ async function main() {
       const serial = `${PREFIX}-rental-return`
       await createInbound(serial)
       await move(serial, "Rentals", { ...stock, status: "Rented", location: "Client Site", ...held })
-      const returned = await move(serial, "Rental Return", stock, { txnClient: HOLDER, txnAssigned: ASSIGNEE })
+      const returned = await move(serial, "Rental Return", { ...stock, status: "Pending Inspection" }, { txnClient: HOLDER, txnAssigned: ASSIGNEE })
       await roundTrip("rental_return", serial, returned)
     }
 

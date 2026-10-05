@@ -78,6 +78,7 @@ export interface Database {
           product_id: string
           serial_number: string
           status: string
+          stock_pool: string
           date_added: string
           location: string
           client: string | null
@@ -97,6 +98,7 @@ export interface Database {
           product_id: string
           serial_number: string
           status: string
+          stock_pool?: string
           date_added: string
           location: string
           client?: string | null
@@ -116,6 +118,7 @@ export interface Database {
           product_id?: string
           serial_number?: string
           status?: string
+          stock_pool?: string
           date_added?: string
           location?: string
           client?: string | null
@@ -139,6 +142,39 @@ export interface Database {
             referencedColumns: ["id"]
           },
         ]
+      }
+      stock_pool_changes: {
+        Row: {
+          id: string
+          inventory_item_id: string
+          serial_number: string
+          from_pool: string
+          to_pool: string
+          reason: string
+          changed_by: string
+          changed_at: string
+        }
+        Insert: {
+          id?: string
+          inventory_item_id: string
+          serial_number: string
+          from_pool: string
+          to_pool: string
+          reason: string
+          changed_by: string
+          changed_at?: string
+        }
+        Update: {
+          id?: string
+          inventory_item_id?: string
+          serial_number?: string
+          from_pool?: string
+          to_pool?: string
+          reason?: string
+          changed_by?: string
+          changed_at?: string
+        }
+        Relationships: []
       }
       product_lines: {
         Row: {
@@ -329,12 +365,14 @@ export interface Database {
           previous_assigned_to: string | null
           previous_poc_out_date: string | null
           previous_return_date: string | null
+          previous_stock_pool: string | null
           after_status: string | null
           after_location: string | null
           after_client: string | null
           after_assigned_to: string | null
           after_poc_out_date: string | null
           after_return_date: string | null
+          after_stock_pool: string | null
           reverses_transaction_id: string | null
         }
         Insert: {
@@ -364,12 +402,14 @@ export interface Database {
           previous_assigned_to?: string | null
           previous_poc_out_date?: string | null
           previous_return_date?: string | null
+          previous_stock_pool?: string | null
           after_status?: string | null
           after_location?: string | null
           after_client?: string | null
           after_assigned_to?: string | null
           after_poc_out_date?: string | null
           after_return_date?: string | null
+          after_stock_pool?: string | null
           reverses_transaction_id?: string | null
         }
         Update: {
@@ -399,12 +439,14 @@ export interface Database {
           previous_assigned_to?: string | null
           previous_poc_out_date?: string | null
           previous_return_date?: string | null
+          previous_stock_pool?: string | null
           after_status?: string | null
           after_location?: string | null
           after_client?: string | null
           after_assigned_to?: string | null
           after_poc_out_date?: string | null
           after_return_date?: string | null
+          after_stock_pool?: string | null
           reverses_transaction_id?: string | null
         }
         Relationships: []
@@ -816,12 +858,14 @@ export interface Database {
           previous_assigned_to: string | null
           previous_poc_out_date: string | null
           previous_return_date: string | null
+          previous_stock_pool: string | null
           after_status: string | null
           after_location: string | null
           after_client: string | null
           after_assigned_to: string | null
           after_poc_out_date: string | null
           after_return_date: string | null
+          after_stock_pool: string | null
           reverses_transaction_id: string | null
         }
         Relationships: []
@@ -934,6 +978,14 @@ export interface Database {
       }
       cancel_holding_extension: {
         Args: { p_extension_id: string; p_reason: string }
+        Returns: undefined
+      }
+      change_stock_pool: {
+        Args: { p_item_id: string; p_pool: string; p_reason: string }
+        Returns: undefined
+      }
+      change_stock_pools: {
+        Args: { p_item_ids: string[]; p_pool: string; p_reason: string }
         Returns: undefined
       }
       apply_stock_movement: {

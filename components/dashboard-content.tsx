@@ -9,6 +9,7 @@ import { TransactionsTable } from "@/components/transactions-table"
 import { useInventoryStore } from "@/lib/inventory-store"
 import { PageHeader } from "@/components/page-nav"
 import { useAuth } from "@/lib/auth-context"
+import { inStockPoolCounts } from "@/lib/inventory-products"
 import { canRecordStockMovement } from "@/lib/permissions"
 import { useAlertFeed } from "@/hooks/use-alert-feed"
 
@@ -19,7 +20,7 @@ export function DashboardContent() {
   const showQuickScan = canRecordStockMovement(role)
   const statsReady = useIsClient()
 
-  const totalStock = inventory.filter((i) => i.status === "In Stock").length
+  const pools = inStockPoolCounts(inventory)
   const itemsSold = inventory.filter((i) => i.status === "Sold").length
   const pocActive = inventory.filter((i) => i.status === "POC").length
   const lowStockCount = feed?.counts.lowStock ?? 0
@@ -38,7 +39,8 @@ export function DashboardContent() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
         <StatCard
           label="Total inventory"
-          value={showStats ? totalStock : dash}
+          value={showStats ? pools.sale : dash}
+          caption={showStats ? `+ ${pools.rental} rental · ${pools.demo} demo` : undefined}
           variant="highlight"
         />
         <StatCard

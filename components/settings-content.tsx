@@ -181,7 +181,7 @@ export function SettingsContent() {
     }
     for (const item of inventory) {
       if (!item.productId || counts.has(item.productId)) continue
-      if (item.status !== "In Stock" || item.deletedAt) continue
+      if (item.status !== "In Stock" || item.deletedAt || (item.stockPool ?? "sale") !== "sale") continue
       counts.set(item.productId, (counts.get(item.productId) ?? 0) + 1)
     }
     return counts

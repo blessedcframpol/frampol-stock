@@ -3,6 +3,9 @@
 import { useEffect, useState } from "react"
 import { toast } from "sonner"
 import { BatchLinesDrawer } from "@/components/batch-lines-drawer"
+import { ChangeGroupDialog } from "@/components/change-group-dialog"
+import { ReturnPoolChoice } from "@/components/return-pool-choice"
+import { StockPoolChip } from "@/components/stock-pool-chip"
 import { ConvertToSaleDialog, ExtendHoldingDialog } from "@/components/holding-actions"
 import { Button } from "@/components/ui/button"
 import {
@@ -22,7 +25,7 @@ import { LOCATIONS, type InventoryItem } from "@/lib/data"
 import { useAuth } from "@/lib/auth-context"
 import { cancelHoldingExtension } from "@/lib/holdings"
 import { useInventoryStore } from "@/lib/inventory-store"
-import { canCancelHoldingExtension } from "@/lib/permissions"
+import { canCancelHoldingExtension, canChangeStockPool } from "@/lib/permissions"
 import { loadProfileLabels } from "@/lib/profile-labels"
 import { getSupabaseClient } from "@/lib/supabase/client"
 import { INVENTORY_ITEM_SELECT, rowToInventoryItem } from "@/lib/supabase/inventory-db"
@@ -63,9 +66,11 @@ export function DispatchedKitDrawer({
   const [statusOverride, setStatusOverride] = useState<string | null>(null)
   const [returnDateOverride, setReturnDateOverride] = useState<string | null | undefined>(undefined)
   const [convertOpen, setConvertOpen] = useState(false)
+  const [groupOpen, setGroupOpen] = useState(false)
   const [extendOpen, setExtendOpen] = useState(false)
   const [returnOpen, setReturnOpen] = useState(false)
   const [returnLocation, setReturnLocation] = useState<string>("Warehouse A")
+  const [returnPool, setReturnPool] = useState<"" | "sale" | "demo">("")
   const [returning, setReturning] = useState(false)
   const [extensions, setExtensions] = useState<HoldingExtensionRow[]>([])
   const [extensionReload, setExtensionReload] = useState(0)
@@ -152,6 +157,10 @@ export function DispatchedKitDrawer({
       toast.error("Select return location")
       return
     }
+    if (returnType === "POC Return" && returnPool !== "sale" && returnPool !== "demo") {
+      toast.error("Choose Back in sellable stock or Demo unit, not for sale")
+      return
+    }
     setReturning(true)
     try {
       const keptDate = returnDate
@@ -159,14 +168,20 @@ export function DispatchedKitDrawer({
         type: returnType,
         serialNumbers: [item.serialNumber],
         toLocation: returnLocation,
+        returnPool: returnType === "POC Return" && (returnPool === "sale" || returnPool === "demo") ? returnPool : undefined,
       })
       if (result.success.length === 0) {
         toast.error(result.rejected[0]?.reason ?? result.notFound[0] ?? "Could not record this return")
         return
       }
       setReturnDateOverride(keptDate)
-      setStatusOverride("In Stock")
-      setNote("Return recorded. This kit is back in stock.")
+      if (returnType === "Rental Return") {
+        setStatusOverride("Pending Inspection")
+        setNote("Return recorded. This kit is pending inspection and stays in the rental group.")
+      } else {
+        setStatusOverride("In Stock")
+        setNote("Return recorded. This kit is back in stock.")
+      }
       setReturnOpen(false)
       announceAlertsUpdated()
       onChanged()
@@ -253,6 +268,11 @@ export function DispatchedKitDrawer({
               {actions.includes("return") ? (
                 <Button type="button" variant="outline" size="sm" onClick={() => setReturnOpen(true)}>
                   Record return
+                </Button>
+              ) : null}
+              {canChangeStockPool(role) && item && (status === "Rented" || status === "In Stock") ? (
+                <Button type="button" variant="outline" size="sm" onClick={() => setGroupOpen(true)}>
+                  Change group
                 </Button>
               ) : null}
               {actions.includes("extend") ? (
@@ -349,7 +369,10 @@ export function DispatchedKitDrawer({
           </DialogHeader>
           <div className="grid gap-3">
             <p className="text-sm text-muted-foreground">
-              <span className="font-mono text-foreground">{item?.serialNumber}</span>
+              <span className="inline-flex items-center gap-2 font-mono text-foreground">
+                {item?.serialNumber}
+                <StockPoolChip pool={item?.stockPool} />
+              </span>
               {" · "}
               {returnType}
             </p>
@@ -368,12 +391,19 @@ export function DispatchedKitDrawer({
                 </SelectContent>
               </Select>
             </div>
+            {returnType === "POC Return" ? (
+              <ReturnPoolChoice value={returnPool} onChange={setReturnPool} />
+            ) : null}
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setReturnOpen(false)}>
               Cancel
             </Button>
-            <Button type="button" onClick={() => void recordReturn()} disabled={returning || !returnLocation}>
+            <Button
+              type="button"
+              onClick={() => void recordReturn()}
+              disabled={returning || !returnLocation || (returnType === "POC Return" && !returnPool)}
+            >
               Record return
             </Button>
           </DialogFooter>
@@ -426,6 +456,17 @@ export function DispatchedKitDrawer({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {item ? (
+        <ChangeGroupDialog
+          open={groupOpen}
+          onOpenChange={setGroupOpen}
+          kits={[item]}
+          onSaved={async () => {
+            await refetchLedger()
+            onChanged()
+          }}
+        />
+      ) : null}
     </>
   )
 }

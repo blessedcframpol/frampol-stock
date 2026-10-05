@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { InventoryItem } from "@/lib/data"
 import {
   activeInStockTotal,
+  inStockPoolCounts,
   buildInventoryProducts,
   canEditReorderLevel,
   canLaunchStockTake,
@@ -51,6 +52,20 @@ const items: InventoryItem[] = [
   item({ id: "sold", productId: "gen", status: "Sold" }),
   item({ id: "gone", productId: "gen", status: "POC", deletedAt: "2026-01-02" }),
 ]
+
+describe("in stock pool counts", () => {
+  it("counts In Stock kits by group and treats a missing pool as sale", () => {
+    expect(
+      inStockPoolCounts([
+        item({ id: "a", productId: "gen", status: "In Stock" }),
+        item({ id: "b", productId: "gen", status: "In Stock", stockPool: "rental" }),
+        item({ id: "c", productId: "gen", status: "In Stock", stockPool: "demo" }),
+        item({ id: "d", productId: "gen", status: "Sold", stockPool: "demo" }),
+        item({ id: "e", productId: "gen", status: "In Stock", stockPool: "sale", deletedAt: "2026-01-02" }),
+      ])
+    ).toEqual({ inStock: 3, sale: 1, rental: 1, demo: 1 })
+  })
+})
 
 describe("inventory product chips", () => {
   const rows = buildInventoryProducts(lowStock, lines, items, 2)

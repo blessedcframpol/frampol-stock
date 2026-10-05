@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { StatusPill } from "@/components/fs/status-pill"
+import { StockPoolChip } from "@/components/stock-pool-chip"
 
 /** Serial search appears once a batch is long enough that scanning the list is slower than filtering. */
 const SERIAL_SEARCH_MIN = 10
@@ -20,6 +21,7 @@ export type BatchDrawerLine = {
   recordedAt?: string
   status?: string
   assignedTo?: string
+  stockPool?: string | null
 }
 
 export type BatchDrawerFact = {
@@ -195,6 +197,7 @@ export function BatchLinesDrawer({
                   >
                     {line.serialNumber}
                   </Link>
+                  <StockPoolChip pool={line.stockPool} />
                   {line.status ? (
                     <>
                       <span className="text-muted-foreground" aria-hidden>

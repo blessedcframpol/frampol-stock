@@ -40,7 +40,7 @@ export const TRANSACTION_TYPE_CHOICES: TransactionTypeChoice[] = [
   { value: "POC Out", label: "POC Out", icon: Send, color: "text-info", bg: "bg-info-soft", desc: "Send for proof of concept" },
   { value: "POC Return", label: "POC Return", icon: RotateCcw, color: "text-info", bg: "bg-info-soft", desc: "Receive POC return" },
   { value: "Rentals", label: "Rentals", icon: Calendar, color: "text-brand", bg: "bg-brand/15", desc: "Rent out to client" },
-  { value: "Rental Return", label: "Rental Return", icon: RotateCcw, color: "text-brand", bg: "bg-brand/15", desc: "Receive rental return" },
+  { value: "Rental Return", label: "Rental Return", icon: RotateCcw, color: "text-brand", bg: "bg-brand/15", desc: "Receive a rental return for inspection" },
   {
     value: "Sale Return",
     label: "Sale Return",

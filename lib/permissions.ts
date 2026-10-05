@@ -61,6 +61,11 @@ export function canEditInventory(role: AppRole | null | undefined): boolean {
   return role === ADMIN
 }
 
+/** Change an In Stock kit between sale, rental, and demo. Admin only. */
+export function canChangeStockPool(role: AppRole | null | undefined): boolean {
+  return role === ADMIN
+}
+
 export function canViewFinancials(role: AppRole | null | undefined): boolean {
   return role === ADMIN || role === ACCOUNTS
 }

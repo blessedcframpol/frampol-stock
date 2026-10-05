@@ -2,6 +2,8 @@
 
 import { useEffect, useState, useMemo, useRef } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { ReturnPoolChoice } from "@/components/return-pool-choice"
+import { StockPoolChip } from "@/components/stock-pool-chip"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -128,6 +130,7 @@ export function QuickScan() {
   const [inboundReceiveLocation, setInboundReceiveLocation] = useState<string>("Warehouse A")
   const [scanVendor, setScanVendor] = useState<string>("General")
   const [returnLocation, setReturnLocation] = useState<string>("Warehouse A")
+  const [returnPool, setReturnPool] = useState<"" | "sale" | "demo">("")
 
   useEffect(() => {
     let cancelled = false
@@ -279,6 +282,10 @@ export function QuickScan() {
         toast.error("Select return location")
         return
       }
+      if (movementType === "POC Return" && returnPool !== "sale" && returnPool !== "demo") {
+        toast.error("Choose Back in sellable stock or Demo unit, not for sale")
+        return
+      }
       setLastDuplicateMessage(null)
       setIsSubmitting(true)
       try {
@@ -286,6 +293,7 @@ export function QuickScan() {
           type: movementType,
           serialNumbers: uniqueSerials,
           toLocation: returnLocation.trim(),
+          returnPool: movementType === "POC Return" && (returnPool === "sale" || returnPool === "demo") ? returnPool : undefined,
           expectedProductName: product,
           expectedVendor: normalizeInventoryVendor(scanVendor),
           clientDirectory,
@@ -659,6 +667,9 @@ export function QuickScan() {
             </Select>
           </div>
         )}
+        {movementType === "POC Return" ? (
+          <ReturnPoolChoice value={returnPool} onChange={setReturnPool} />
+        ) : null}
         <div className="flex flex-col gap-2">
           <Label className="text-xs text-muted-foreground">
             Serial numbers (comma or newline separated; paste a list to add commas)
@@ -672,6 +683,19 @@ export function QuickScan() {
             onPaste={handleSerialPaste}
             disabled={isSubmitting}
           />
+          {uniqueSerials.length > 0 && (
+            <ul className="flex flex-col gap-1">
+              {uniqueSerials.map((serial) => {
+                const known = inventory.find((item) => item.serialNumber === serial && !item.deletedAt)
+                return (
+                  <li key={serial} className="inline-flex items-center gap-2 font-mono text-xs text-foreground">
+                    {serial}
+                    <StockPoolChip pool={known?.stockPool} />
+                  </li>
+                )
+              })}
+            </ul>
+          )}
           {serialList.length > 0 && (
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
               <span className="font-medium text-foreground">
@@ -720,7 +744,13 @@ export function QuickScan() {
             className="flex-1"
             size="sm"
             onClick={handleRecord}
-            disabled={isSubmitting || uniqueSerials.length === 0 || !productName.trim() || !movementType}
+            disabled={
+              isSubmitting ||
+              uniqueSerials.length === 0 ||
+              !productName.trim() ||
+              !movementType ||
+              (movementType === "POC Return" && !returnPool)
+            }
           >
           {isSubmitting ? (
             <Loader2 className="w-4 h-4 animate-spin" />
@@ -733,7 +763,11 @@ export function QuickScan() {
           {requiresOutboundDetails
             ? "For Sale, POC Out, Rentals, Transfer and Dispose, serials must exist in inventory. You’ll enter client and site details next."
             : RETURN_LIKE_MOVEMENTS.includes(movementType)
-              ? "Returns require a return location. POC/Rental returns need matching status; Sale Return needs serials still marked Sold — items move to RMA Hold for vendor replacement (see docs)."
+              ? movementType === "Rental Return"
+                ? "Rental Return needs a rented kit and a return location. Status becomes Pending Inspection, and the kit stays in the rental group."
+                : movementType === "POC Return"
+                  ? "POC Return needs a kit on POC, a return location, and a group choice."
+                  : "Sale Return needs serials still marked Sold. Items move to RMA Hold."
               : movementType === "Decommissioned"
                 ? "Decommissioned: serials must be POC, Rented, or Sold (match product/vendor). Status becomes Pending Inspection. Unknown serials: use Inventory Movement for client/source."
                 : movementType === "Inbound"

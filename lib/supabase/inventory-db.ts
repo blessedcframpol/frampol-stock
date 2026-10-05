@@ -31,6 +31,7 @@ export function rowToInventoryItem(row: InventoryItemQueryRow | InventoryRow): I
     name,
     vendor: vendorRaw?.trim() ? vendorRaw : "General",
     status: row.status as InventoryItem["status"],
+    stockPool: row.stock_pool === "rental" || row.stock_pool === "demo" ? row.stock_pool : "sale",
     dateAdded: row.date_added,
     location: row.location,
     client: row.client ?? undefined,
@@ -93,6 +94,8 @@ export function rowToTransaction(
     | "after_assigned_to"
     | "after_poc_out_date"
     | "after_return_date"
+    | "previous_stock_pool"
+    | "after_stock_pool"
     | "reverses_transaction_id"
   > & {
     previous_status?: string | null

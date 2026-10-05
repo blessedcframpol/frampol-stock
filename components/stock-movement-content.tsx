@@ -35,6 +35,7 @@ import {
 } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
 import { StatusPill } from "@/components/fs/status-pill"
+import { ReturnPoolChoice } from "@/components/return-pool-choice"
 import { LOCATIONS, INTERNAL_LOCATIONS } from "@/lib/data"
 import { formatClientLabel } from "@/lib/client-label"
 import type { TransactionType, ClientSite, JsonValue } from "@/lib/data"
@@ -137,6 +138,7 @@ export function StockMovementContent({
   const [notes, setNotes] = useState("")
   const [fromLocation, setFromLocation] = useState<string>("")
   const [toLocation, setToLocation] = useState<string>("")
+  const [returnPool, setReturnPool] = useState<"" | "sale" | "demo">("")
   const [rentalReturnDate, setRentalReturnDate] = useState("")
   const [pocEndDate, setPocEndDate] = useState("")
   const [disposalReason, setDisposalReason] = useState("")
@@ -464,6 +466,7 @@ export function StockMovementContent({
       assignedTo: (outboundDetails?.clientName ?? outboundDetails?.clientCompany) ?? (clientId ? clients.find((c) => c.id === clientId)?.company : undefined),
       invoiceNumber: invoiceNumber.trim() || undefined,
       notes: notes.trim() || undefined,
+      returnPool: selectedType === "POC Return" && (returnPool === "sale" || returnPool === "demo") ? returnPool : undefined,
       returnDate:
         selectedType === "Rentals" && rentalReturnDate.trim()
           ? rentalReturnDate.trim()
@@ -620,6 +623,10 @@ export function StockMovementContent({
       !toLocation
     ) {
       toast.error("Select return location")
+      return
+    }
+    if (selectedType === "POC Return" && returnPool !== "sale" && returnPool !== "demo") {
+      toast.error("Choose Back in sellable stock or Demo unit, not for sale")
       return
     }
     if ((selectedType === "Sale" || selectedType === "Rentals") && !invoiceNumber.trim()) {
@@ -1439,6 +1446,14 @@ export function StockMovementContent({
                       Status becomes <strong>RMA Hold</strong>. Use notes for Starlink / vendor case IDs. When replacement arrives, inbound the new serial; use Dispose when the faulty unit is written off.
                     </p>
                   )}
+                  {selectedType === "Rental Return" ? (
+                    <p className="text-xs text-muted-foreground">
+                      Status becomes <strong>Pending Inspection</strong>. The kit stays in the rental group.
+                    </p>
+                  ) : null}
+                  {selectedType === "POC Return" ? (
+                    <ReturnPoolChoice value={returnPool} onChange={setReturnPool} />
+                  ) : null}
                 </div>
               )}
               {selectedType === "Dispose" && (
@@ -1546,6 +1561,14 @@ export function StockMovementContent({
                   <span className="text-sm text-foreground">{toLocation || "—"}</span>
                 </div>
               )}
+              {selectedType === "POC Return" ? (
+                <div className="flex items-center justify-between py-2 border-b border-border">
+                  <span className="text-sm text-muted-foreground">Group</span>
+                  <span className="text-sm text-foreground">
+                    {returnPool === "sale" ? "Back in sellable stock" : returnPool === "demo" ? "Demo unit" : "—"}
+                  </span>
+                </div>
+              ) : null}
               {selectedType === "Inbound" && (
                 <div className="flex items-center justify-between py-2 border-b border-border">
                   <span className="text-sm text-muted-foreground">Delivery note</span>

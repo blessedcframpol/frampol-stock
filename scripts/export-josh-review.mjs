@@ -13,7 +13,6 @@ const { Client } = require("pg")
 const { Workbook } = require("exceljs")
 
 const RENTAL_PRODUCT = "Starlink Standard Kit v4(Rental)"
-const PLACEHOLDERS = new Set(["", "n/a", "na", "n.a", "n.a.", "none", "-", "null", "nil"])
 
 function loadEnvLocal() {
   const envPath = path.join(process.cwd(), ".env.local")
@@ -31,15 +30,6 @@ function loadEnvLocal() {
   }
 }
 
-function normText(value) {
-  return String(value ?? "").trim().toLowerCase().replace(/\s+/g, " ")
-}
-
-function usable(value) {
-  const text = normText(value)
-  return PLACEHOLDERS.has(text) ? "" : text
-}
-
 function clientLabel(name, company) {
   const left = String(name ?? "").trim()
   const right = String(company ?? "").trim()
@@ -54,13 +44,8 @@ function ddmmyyyy(value) {
   return `${match[3]}/${match[2]}/${match[1]}`
 }
 
-function createdFromId(id, timeZone) {
-  const match = /^CLT-(\d{10,13})/.exec(String(id ?? ""))
-  if (!match) return ""
-  const raw = match[1]
-  const ms = Number(raw.length >= 13 ? raw.slice(0, 13) : raw.padEnd(13, "0"))
-  const instant = new Date(ms)
-  if (Number.isNaN(instant.getTime())) return ""
+function formatZonedDate(instant, timeZone) {
+  if (!(instant instanceof Date) || Number.isNaN(instant.getTime())) return ""
   const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone,
     day: "2-digit",
@@ -72,177 +57,22 @@ function createdFromId(id, timeZone) {
   return `${get("day")}/${get("month")}/${get("year")}`
 }
 
-function createdEpoch(id) {
-  const match = /^CLT-(\d{10,13})/.exec(String(id ?? ""))
-  if (!match) return Number.POSITIVE_INFINITY
-  const raw = match[1]
-  return Number(raw.length >= 13 ? raw.slice(0, 13) : raw.padEnd(13, "0"))
+function createdOn(value, timeZone) {
+  if (!value) return ""
+  const instant = value instanceof Date ? value : new Date(value)
+  return formatZonedDate(instant, timeZone)
 }
 
-function emailsOf(value) {
-  return String(value ?? "")
-    .split(/[;]/)
-    .map((part) => usable(part))
-    .filter(Boolean)
-}
-
-function phoneKey(value) {
-  const keys = []
-  for (const part of String(value ?? "").split(/[;/]/)) {
-    let digits = part.replace(/\s+/g, "")
-    if (!digits) continue
-    if (digits.startsWith("+263")) digits = digits.slice(4)
-    digits = digits.replace(/^0+/, "")
-    if (digits.length < 6) continue
-    if (/^(\d)\1+$/.test(digits)) continue
-    keys.push(digits)
-  }
-  return [...new Set(keys)]
+function storedInvoice(value) {
+  if (value == null) return "(none)"
+  if (String(value).trim() === "") return "(blank)"
+  return String(value)
 }
 
 function daysOverdue(due, today) {
   const start = Date.parse(`${String(due).slice(0, 10)}T00:00:00Z`)
   const end = Date.parse(`${today}T00:00:00Z`)
   return Math.round((end - start) / 86400000)
-}
-
-class UnionFind {
-  constructor() {
-    this.parent = new Map()
-  }
-  find(id) {
-    if (!this.parent.has(id)) this.parent.set(id, id)
-    let root = this.parent.get(id)
-    if (root !== id) {
-      root = this.find(root)
-      this.parent.set(id, root)
-    }
-    return root
-  }
-  union(left, right) {
-    const a = this.find(left)
-    const b = this.find(right)
-    if (a !== b) this.parent.set(a, b)
-  }
-}
-
-function contactScore(client) {
-  return [client.email, client.phone, client.company, client.address].filter((value) => usable(value)).length
-}
-
-function duplicateRows(clients, counts, timeZone) {
-  const byId = new Map(clients.map((client) => [client.id, client]))
-  const reasons = new Map(clients.map((client) => [client.id, new Set()]))
-  const buckets = new Map()
-  function add(key, id, reason) {
-    if (!buckets.has(key)) buckets.set(key, [])
-    buckets.get(key).push({ id, reason })
-  }
-  for (const client of clients) {
-    const name = usable(client.name)
-    if (name) add(`name:${name}`, client.id, "name")
-    const company = usable(client.company)
-    if (company) add(`company:${company}`, client.id, "company")
-    const label = clientLabel(client.name, client.company)
-    if (label.includes(" - ")) {
-      const key = usable(label)
-      if (key) add(`label:${key}`, client.id, "name - company")
-    }
-    for (const email of emailsOf(client.email)) add(`email:${email}`, client.id, "email")
-    for (const phone of phoneKey(client.phone)) add(`phone:${phone}`, client.id, "phone")
-  }
-  const uf = new UnionFind()
-  for (const members of buckets.values()) {
-    const ids = [...new Set(members.map((member) => member.id))]
-    if (ids.length < 2) continue
-    const reason = members[0].reason
-    for (const id of ids) {
-      uf.union(ids[0], id)
-      reasons.get(id).add(reason)
-    }
-  }
-  const groups = new Map()
-  for (const client of clients) {
-    const root = uf.find(client.id)
-    if (!groups.has(root)) groups.set(root, [])
-    groups.get(root).push(client.id)
-  }
-  const built = []
-  for (const ids of groups.values()) {
-    if (ids.length < 2) continue
-    const members = ids.map((id) => byId.get(id))
-    const reasonSet = new Set(members.flatMap((member) => [...reasons.get(member.id)]))
-    const names = members.map((member) => usable(member.name))
-    const sameName = names.every((name) => name && name === names[0])
-    const identity = reasonSet.has("name") || reasonSet.has("company") || reasonSet.has("name - company")
-    const low = !identity && !sameName
-    const ranked = members
-      .map((member) => ({
-        member,
-        orders: counts.get(member.id)?.orders ?? 0,
-        units: counts.get(member.id)?.units ?? 0,
-        score: contactScore(member),
-        epoch: createdEpoch(member.id),
-      }))
-      .sort((a, b) => b.orders - a.orders || b.score - a.score || a.epoch - b.epoch || a.member.id.localeCompare(b.member.id))
-    const keeper = ranked[0]
-    const orderTies = ranked.filter((row) => row.orders === keeper.orders)
-    const detailTies = orderTies.filter((row) => row.score === keeper.score)
-    let why = `Most orders (${keeper.orders})`
-    if (orderTies.length > 1 && detailTies.length === 1) {
-      why = `Tied on ${keeper.orders} orders; more complete contact details`
-    } else if (detailTies.length > 1) {
-      why = `Tied on ${keeper.orders} orders and contact details; oldest record`
-    }
-    built.push({
-      low,
-      size: members.length,
-      name: keeper.member.name || keeper.member.company || keeper.member.id,
-      rows: ranked.map((row) => ({
-        reasons: [...reasons.get(row.member.id)].sort().join(", "),
-        name: row.member.name ?? "",
-        company: row.member.company ?? "",
-        id: row.member.id,
-        email: row.member.email ?? "",
-        phone: row.member.phone ?? "",
-        orders: row.orders,
-        units: row.units,
-        created: createdFromId(row.member.id, timeZone),
-        keeper: row.member.id === keeper.member.id ? "Y" : "N",
-        why,
-        low,
-      })),
-    })
-  }
-  built.sort((a, b) => Number(a.low) - Number(b.low) || b.size - a.size || a.name.localeCompare(b.name))
-  const rows = []
-  built.forEach((group, index) => {
-    for (const row of group.rows) {
-      rows.push([
-        index + 1,
-        row.low ? "Low" : "High",
-        row.reasons,
-        row.name,
-        row.company,
-        row.id,
-        row.email,
-        row.phone,
-        row.orders,
-        row.units,
-        row.created,
-        row.keeper,
-        row.why,
-        "",
-        "",
-      ])
-    }
-  })
-  return {
-    rows,
-    groups: built.length,
-    high: built.filter((group) => !group.low).length,
-    low: built.filter((group) => group.low).length,
-  }
 }
 
 function styleSheet(sheet, headers, decisionCount) {
@@ -293,6 +123,7 @@ const SALE_SQL = `
     txn.id,
     coalesce(txn.batch_id, '') AS batch_id,
     txn.date,
+    txn.invoice_number,
     txn.serial_number,
     txn.item_name,
     txn.client AS stored_client,
@@ -301,7 +132,8 @@ const SALE_SQL = `
     count(*) OVER (
       PARTITION BY coalesce(nullif(txn.batch_id, ''), txn.id)
     )::int AS batch_qty,
-    coalesce(nullif(btrim(actor.display_name), ''), actor.email, '') AS recorded_by
+    coalesce(nullif(btrim(actor.display_name), ''), actor.email, '') AS recorded_by,
+    txn.created_at
   FROM public.active_transactions AS txn
   JOIN public.client_transaction_resolution AS resolution
     ON resolution.transaction_id = txn.id
@@ -336,24 +168,25 @@ async function main() {
       row.id,
       row.batch_id,
       ddmmyyyy(row.date),
+      storedInvoice(row.invoice_number),
       row.serial_number,
       row.item_name,
       row.resolved_name ? clientLabel(row.resolved_name, row.resolved_company) : "",
       row.stored_client ?? "",
       row.batch_qty,
       row.recorded_by,
+      createdOn(row.created_at, timeZone),
       "",
       "",
     ]
 
-    const clients = await db.query(
-      `SELECT id, name, company, email, phone, address FROM public.clients ORDER BY name, id`
-    )
-    const countRows = await db.query(
-      `SELECT client_id, orders, units FROM public.client_sale_dispatch_counts()`
-    )
-    const counts = new Map(countRows.rows.map((row) => [row.client_id, { orders: row.orders, units: row.units }]))
-    const duplicates = duplicateRows(clients.rows, counts, timeZone)
+    const todayLabel = ddmmyyyy(today)
+    const createdToday = zero.rows.filter((row) => createdOn(row.created_at, timeZone) === todayLabel)
+    const noInvoiceSplit = {}
+    for (const row of blank.rows) {
+      const label = storedInvoice(row.invoice_number)
+      noInvoiceSplit[label] = (noInvoiceSplit[label] ?? 0) + 1
+    }
 
     const overdue = await db.query(
       `SELECT
@@ -417,40 +250,19 @@ async function main() {
       "Transaction id",
       "Batch",
       "Business date",
+      "Stored invoice",
       "Kit serial",
       "Product",
       "Client",
       "Stored client text",
       "Quantity in batch",
       "Recorded by",
+      "Created",
       "Complimentary / Pending / Real invoice no.",
       "Reason or invoice no.",
     ]
     addTable(workbook, "Invoice 00000", invoiceHeaders, zero.rows.map(saleRow), 2)
     addTable(workbook, "No invoice", invoiceHeaders, blank.rows.map(saleRow), 2)
-    addTable(
-      workbook,
-      "Duplicate clients",
-      [
-        "Group no.",
-        "Confidence",
-        "Match reason(s)",
-        "Client name as stored",
-        "Company as stored",
-        "Record id",
-        "Email",
-        "Phone",
-        "Orders",
-        "Units",
-        "Date created",
-        "Suggested keeper",
-        "Why",
-        "Same client? Y/N",
-        "Keep this record? Y/N",
-      ],
-      duplicates.rows,
-      2
-    )
     addTable(
       workbook,
       "Overdue",
@@ -516,15 +328,11 @@ async function main() {
     const notes = [
       [
         "Invoice 00000",
-        "Sale lines that still count, whose invoice is exactly 00000. One row is one kit. In the yellow columns write Complimentary, Pending, or the real invoice number, and the reason or the invoice number.",
+        "Sale lines that still count, whose invoice is exactly 00000. One row is one kit. Stored invoice shows the value on the sale. Created is the day the sale was recorded. In the yellow columns write Complimentary, Pending, or the real invoice number, and the reason or the invoice number.",
       ],
       [
         "No invoice",
-        "Sale lines that still count, with a null invoice, a blank invoice, or N/A. Fill the yellow columns the same way as Invoice 00000.",
-      ],
-      [
-        "Duplicate clients",
-        "Every client record that matches another on a normalised name, company, or name - company, or on the same email (each address separated by a semicolon), or the same phone after spaces, +263, and a leading 0 are removed. Low confidence means the group is linked only by phone or email and the names differ. Suggested keeper is Y on the record with the most orders, then the most complete contact details, then the oldest record. Write Y or N for whether they are the same client, and Y or N for whether to keep that record.",
+        "Sale lines that still count whose invoice is null, blank, or N/A. Stored invoice shows (none) for null, (blank) for an empty value, or the exact text such as N/A. Fill the yellow columns the same way as Invoice 00000.",
       ],
       [
         "Overdue",
@@ -543,7 +351,7 @@ async function main() {
     readme.getRow(1).height = 22
     for (let rowIndex = 1; rowIndex <= readme.rowCount; rowIndex += 1) {
       const row = readme.getRow(rowIndex)
-      row.height = rowIndex === 1 ? 22 : 48
+      row.height = rowIndex === 1 ? 22 : 64
       for (let column = 1; column <= 2; column += 1) {
         const cell = row.getCell(column)
         cell.font = { name: "Arial", size: 10, bold: rowIndex === 1 }
@@ -557,15 +365,25 @@ async function main() {
     const dir = path.join(process.cwd(), "exports")
     fs.mkdirSync(dir, { recursive: true })
     const file = path.join(dir, `josh-review-${today}.xlsx`)
-    await workbook.xlsx.writeFile(file)
+    const temporary = path.join(dir, `josh-review-${today}.writing.xlsx`)
+    await workbook.xlsx.writeFile(temporary)
+    fs.rmSync(file, { force: true })
+    fs.renameSync(temporary, file)
     console.log(JSON.stringify({
       file,
       invoice00000: zero.rows.length,
+      invoice00000CreatedToday: createdToday.map((row) => ({
+        id: row.id,
+        batch: row.batch_id,
+        businessDate: ddmmyyyy(row.date),
+        created: createdOn(row.created_at, timeZone),
+        serial: row.serial_number,
+        product: row.item_name,
+        client: row.stored_client,
+        recordedBy: row.recorded_by,
+      })),
       noInvoice: blank.rows.length,
-      duplicateRows: duplicates.rows.length,
-      duplicateGroups: duplicates.groups,
-      highConfidenceGroups: duplicates.high,
-      lowConfidenceGroups: duplicates.low,
+      noInvoiceSplit,
       overdue: overdue.rows.length,
       rentalGroup: rental.rows.length,
     }, null, 2))

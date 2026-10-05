@@ -50,7 +50,7 @@ import { downloadCsv } from "@/lib/download-csv"
 import { filterOnHandInventory } from "@/lib/inventory-visibility"
 import { useInventoryStore } from "@/lib/inventory-store"
 import {
-  activeInStockTotal,
+  inStockPoolCounts,
   buildInventoryProducts,
   canEditReorderLevel,
   canExportInventory,
@@ -209,7 +209,7 @@ export function InventoryProductsContent() {
   const chips = useMemo(() => vendorChips(rows), [rows])
   const lowCount = useMemo(() => lowStockChipCount(rows), [rows])
   const activeCount = useMemo(() => rows.filter((row) => row.isActive).length, [rows])
-  const inStockTotal = useMemo(() => activeInStockTotal(rows), [rows])
+  const pools = useMemo(() => inStockPoolCounts(inventory), [inventory])
   const visible = useMemo(
     () =>
       sortInventoryProducts(
@@ -330,7 +330,9 @@ export function InventoryProductsContent() {
         <div>
           <h1 className={pageTitleClass}>Inventory</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {linesReady ? `${activeCount} products · ${inStockTotal} items in stock` : "Loading products"}
+            {linesReady
+              ? `${activeCount} products · ${pools.inStock} items in stock · Available for sale ${pools.sale} · Rental ${pools.rental} · Demo ${pools.demo}`
+              : "Loading products"}
           </p>
         </div>
         <div className="flex items-center gap-2">

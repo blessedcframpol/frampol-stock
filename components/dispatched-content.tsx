@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import {
@@ -12,6 +12,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { StatusPill } from "@/components/fs/status-pill"
+import { StockPoolChip } from "@/components/stock-pool-chip"
 import { EmptyState } from "@/components/fs/empty-state"
 import { FilterChip } from "@/components/fs/filter-chip"
 import { ListToolbar, ListToolbarSearch } from "@/components/fs/list-toolbar"
@@ -20,6 +21,11 @@ import { BusinessDateLabel } from "@/components/business-date-label"
 import { useOrgTimezone } from "@/hooks/use-org-timezone"
 import { PageHeader } from "@/components/page-nav"
 import { ArrowUpRight, Loader2 } from "lucide-react"
+import { ChangeGroupDialog } from "@/components/change-group-dialog"
+import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
+import type { InventoryItem } from "@/lib/data"
+import { canChangeStockPool, canViewFinancials } from "@/lib/permissions"
 import { toastFromApiErrorBody, toastFromCaughtError } from "@/lib/toast-reportable-error"
 import { BatchLinesDrawer } from "@/components/batch-lines-drawer"
 import { DispatchedKitDrawer } from "@/components/dispatched-kit-drawer"
@@ -33,8 +39,8 @@ import {
   pageCount,
 } from "@/lib/ledger-pages"
 import type { DispatchedResultKind, DispatchedRow } from "@/app/api/dispatched/route"
-import { canViewFinancials } from "@/lib/permissions"
 import { useAuth } from "@/lib/auth-context"
+import { useInventoryStore } from "@/lib/inventory-store"
 
 type DispatchedPage = {
   rows: DispatchedRow[]
@@ -49,6 +55,53 @@ export function DispatchedContent() {
   const itemId = searchParams.get("item")
   const timeZone = useOrgTimezone()
   const { role } = useAuth()
+  const { inventory, refetchLedger } = useInventoryStore()
+  const canChangeGroup = canChangeStockPool(role)
+  const [selectedKits, setSelectedKits] = useState<Map<string, InventoryItem>>(() => new Map())
+  const [groupOpen, setGroupOpen] = useState(false)
+  const poolBySerial = useMemo(() => {
+    const pools = new Map<string, string | undefined>()
+    for (const item of inventory) {
+      if (!item.deletedAt) pools.set(item.serialNumber, item.stockPool)
+    }
+    return pools
+  }, [inventory])
+  const itemBySerial = useMemo(() => {
+    const map = new Map<string, InventoryItem>()
+    for (const item of inventory) {
+      if (!item.deletedAt) map.set(item.serialNumber, item)
+    }
+    return map
+  }, [inventory])
+
+  function eligibleKits(row: DispatchedRow): InventoryItem[] {
+    const lines =
+      row.grain === "serial" && row.serialNumber
+        ? row.lines.filter((line) => line.serialNumber === row.serialNumber)
+        : row.lines
+    const kits: InventoryItem[] = []
+    const seen = new Set<string>()
+    for (const line of lines) {
+      const item = itemBySerial.get(line.serialNumber)
+      if (!item || seen.has(item.id)) continue
+      if (item.status !== "In Stock" && item.status !== "Rented") continue
+      seen.add(item.id)
+      kits.push(item)
+    }
+    return kits
+  }
+
+  function toggleRow(row: DispatchedRow) {
+    const kits = eligibleKits(row)
+    setSelectedKits((prev) => {
+      const next = new Map(prev)
+      const allOn = kits.length > 0 && kits.every((kit) => next.has(kit.id))
+      if (allOn) kits.forEach((kit) => next.delete(kit.id))
+      else kits.forEach((kit) => next.set(kit.id, kit))
+      return next
+    })
+  }
+
   const showFinancials = canViewFinancials(role)
   const [search, setSearch] = useState("")
   const [appliedSearch, setAppliedSearch] = useState("")
@@ -190,6 +243,18 @@ export function DispatchedContent() {
         ))}
       </div>
 
+      {canChangeGroup && selectedKits.size > 0 ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm text-foreground">{selectedKits.size} selected</span>
+          <Button type="button" size="sm" variant="outline" onClick={() => setGroupOpen(true)}>
+            Change group ({selectedKits.size})
+          </Button>
+          <Button type="button" size="sm" variant="ghost" onClick={() => setSelectedKits(new Map())}>
+            Clear
+          </Button>
+        </div>
+      ) : null}
+
       {loading ? (
             <div className="flex items-center justify-center py-16 text-muted-foreground">
               <Loader2 className="size-8 animate-spin" />
@@ -207,6 +272,29 @@ export function DispatchedContent() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  {canChangeGroup ? (
+                    <TableHead className="w-10 px-2">
+                      <Checkbox
+                        checked={
+                          data.rows.some((row) => eligibleKits(row).length > 0) &&
+                          data.rows.every((row) => eligibleKits(row).every((kit) => selectedKits.has(kit.id)))
+                        }
+                        onCheckedChange={(value) => {
+                          setSelectedKits((prev) => {
+                            const next = new Map(prev)
+                            for (const row of data.rows) {
+                              for (const kit of eligibleKits(row)) {
+                                if (value === true) next.set(kit.id, kit)
+                                else next.delete(kit.id)
+                              }
+                            }
+                            return next
+                          })
+                        }}
+                        aria-label="Select In Stock and Rented kits on this page"
+                      />
+                    </TableHead>
+                  ) : null}
                   <TableHead>Movement</TableHead>
                   <TableHead>Product</TableHead>
                   <TableHead>Client</TableHead>
@@ -216,7 +304,9 @@ export function DispatchedContent() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {data.rows.map((row) => (
+                {data.rows.map((row) => {
+                    const kits = canChangeGroup ? eligibleKits(row) : []
+                    return (
                     <TableRow
                       key={row.id}
                       className="cursor-pointer"
@@ -225,6 +315,16 @@ export function DispatchedContent() {
                         setViewing(row)
                       }}
                     >
+                    {canChangeGroup ? (
+                      <TableCell className="w-10 px-2" onClick={(event) => event.stopPropagation()}>
+                        <Checkbox
+                          checked={kits.length > 0 && kits.every((kit) => selectedKits.has(kit.id))}
+                          disabled={kits.length === 0}
+                          onCheckedChange={() => toggleRow(row)}
+                          aria-label={`Select kits in ${row.productName}`}
+                        />
+                      </TableCell>
+                    ) : null}
                     <TableCell>
                       {row.movement ? <StatusPill value={row.movement} /> : <span className="text-muted-foreground">—</span>}
                     </TableCell>
@@ -244,6 +344,7 @@ export function DispatchedContent() {
                           >
                             {row.serialNumber}
                           </Link>
+                          <StockPoolChip pool={row.serialNumber ? poolBySerial.get(row.serialNumber) : undefined} />
                           <button
                             type="button"
                             className="text-xs text-brand hover:underline"
@@ -272,7 +373,8 @@ export function DispatchedContent() {
                       </TableCell>
                     ) : null}
                   </TableRow>
-                ))}
+                    )
+                })}
               </TableBody>
             </Table>
       )}
@@ -316,8 +418,19 @@ export function DispatchedContent() {
           serialNumber: line.serialNumber,
           status: line.status,
           assignedTo: line.assignedTo ?? undefined,
+          stockPool: poolBySerial.get(line.serialNumber),
         }))}
         showInvoice={showFinancials}
+      />
+      <ChangeGroupDialog
+        open={groupOpen}
+        onOpenChange={setGroupOpen}
+        kits={[...selectedKits.values()]}
+        onSaved={async () => {
+          setSelectedKits(new Map())
+          await refetchLedger()
+          setReload((value) => value + 1)
+        }}
       />
     </div>
   )
