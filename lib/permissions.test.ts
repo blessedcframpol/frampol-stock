@@ -5,6 +5,7 @@ import {
   canAmendTransaction,
   canCreateStockRequest,
   canChangeStockPool,
+  canCompleteInspection,
   canEditInventory,
   canManageUsers,
   canRecordStockMovement,
@@ -100,6 +101,19 @@ describe("canAmendTransaction", () => {
       { role: "viewer", own: false, other: false, nullCreator: false },
       { role: null, own: false, other: false, nullCreator: false },
     ])
+  })
+})
+
+describe("canCompleteInspection", () => {
+  it.each([
+    ["admin", true],
+    ["technicians", false],
+    ["sales", false],
+    ["accounts", false],
+    ["viewer", false],
+    [null, false],
+  ] as const)("role %s → %s", (role, expected) => {
+    expect(canCompleteInspection(role)).toBe(expected)
   })
 })
 

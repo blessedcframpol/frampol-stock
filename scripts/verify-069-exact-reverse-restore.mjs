@@ -104,8 +104,12 @@ async function main() {
   const results = {}
   let fixturesOk = false
   const product = await db.query(
-    `SELECT id, product_name FROM public.product_lines WHERE is_active ORDER BY id LIMIT 1`
+    `SELECT id, product_name FROM public.product_lines
+     WHERE is_active AND vendor = 'Starlink'
+     ORDER BY id
+     LIMIT 1`
   )
+  if (!product.rows[0]) throw new Error("no active Starlink product for the rental fixture")
   const productId = product.rows[0].id
   const productName = product.rows[0].product_name
   const service = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
@@ -250,7 +254,12 @@ async function main() {
           to_location: after.location,
           client: extra.txnClient ?? after.client ?? "",
           assigned_to: extra.txnAssigned ?? after.assigned_to,
-          metadata: extra.metadata ?? null,
+          metadata:
+            extra.metadata ??
+            (type === "Rental Return" || type === "Decommissioned"
+              ? { reason_category: "Client cancelled", reason_text: "Recorded reason for the return" }
+              : null),
+          return_pool: extra.returnPool,
           previous_location: "CLIENT LIE",
           previous_client: "CLIENT LIE",
           after_location: "CLIENT LIE",
@@ -258,7 +267,70 @@ async function main() {
         },
       ]),
     ])
-    return { txnId, batchId, before, after: { ...after, deleted: false }, itemId: row.id }
+    const keptHolder = type === "Decommissioned" || type === "Rental Return"
+    return {
+      txnId,
+      batchId,
+      before,
+      after: keptHolder
+        ? { ...after, client: before.client, assigned_to: before.assigned_to, deleted: false }
+        : { ...after, deleted: false },
+      itemId: row.id,
+    }
+  }
+
+  async function inspect(serial, { result, outcome, location, after }) {
+    const current = await db.query(
+      `SELECT id, status, location, client, assigned_to, poc_out_date, return_date
+       FROM public.inventory_items
+       WHERE serial_number = $1 AND deleted_at IS NULL`,
+      [serial]
+    )
+    const row = current.rows[0]
+    const before = {
+      status: row.status,
+      location: row.location,
+      client: blank(row.client),
+      assigned_to: blank(row.assigned_to),
+      poc_out_date: blank(row.poc_out_date),
+      return_date: blank(row.return_date),
+      deleted: false,
+    }
+    const openCase = await db.query(
+      `SELECT id FROM public.kit_cases
+       WHERE inventory_item_id = $1 AND stage = 'open' AND case_type = 'decommission'`,
+      [row.id]
+    )
+    if (!openCase.rows[0]) throw new Error(`no open case for ${serial}`)
+    await setUser(db, adminId)
+    await db.query(
+      `SELECT public.complete_inspection($1, $2, $3, $4, $5, $6, NULL)`,
+      [
+        openCase.rows[0].id,
+        result,
+        "Checked the kit before choosing an outcome",
+        result === "Pass" ? "A" : "C",
+        outcome,
+        location,
+      ]
+    )
+    const applied = await db.query(
+      `SELECT payload->>'transaction_id' AS transaction_id, payload->>'batch_id' AS batch_id
+       FROM public.kit_case_events
+       WHERE case_id = $1 AND event_type = 'outcome_applied'
+       ORDER BY at DESC
+       LIMIT 1`,
+      [openCase.rows[0].id]
+    )
+    const recorded = applied.rows[0]
+    if (!recorded?.transaction_id || !recorded.batch_id) throw new Error(`inspection wrote no movement for ${serial}`)
+    return {
+      txnId: recorded.transaction_id,
+      batchId: recorded.batch_id,
+      before,
+      after: { ...after, deleted: false },
+      itemId: row.id,
+    }
   }
 
   async function expectRecorded(name, txnId, before, after, created) {
@@ -357,6 +429,25 @@ async function main() {
   }
 
   async function cleanup() {
+    await db.query(`ALTER TABLE public.kit_case_events DISABLE TRIGGER tr_kit_case_events_append_only`)
+    try {
+      await db.query(
+        `DELETE FROM public.kit_case_events WHERE case_id IN (
+           SELECT kc.id FROM public.kit_cases kc
+           JOIN public.inventory_items item ON item.id = kc.inventory_item_id
+           WHERE item.serial_number LIKE $1
+         )`,
+        [`${PREFIX}%`],
+      )
+    } finally {
+      await db.query(`ALTER TABLE public.kit_case_events ENABLE TRIGGER tr_kit_case_events_append_only`)
+    }
+    await db.query(
+      `DELETE FROM public.kit_cases WHERE inventory_item_id IN (
+         SELECT id FROM public.inventory_items WHERE serial_number LIKE $1
+       )`,
+      [`${PREFIX}%`],
+    )
     await db.query(
       `DELETE FROM public.holding_extensions
        WHERE item_id LIKE $1 OR serial_number LIKE $2`,
@@ -517,7 +608,7 @@ async function main() {
         serial,
         "POC Return",
         stock,
-        { txnClient: HOLDER, txnAssigned: ASSIGNEE }
+        { txnClient: HOLDER, txnAssigned: ASSIGNEE, returnPool: "sale" }
       )
       if (returned.before.return_date !== "2027-01-15") {
         fail(results, "poc_return_recorded", `previous return date ${returned.before.return_date}`)
@@ -564,7 +655,12 @@ async function main() {
       await createInbound(serial)
       await move(serial, "Sale", { ...stock, status: "Sold", location: "Delivered", client: HOLDER, assigned_to: ASSIGNEE })
       await move(serial, "Decommissioned", { ...stock, status: "Pending Inspection", location: "Service Center" })
-      const moved = await move(serial, "Inspection Pass", stock)
+      const moved = await inspect(serial, {
+        result: "Pass",
+        outcome: "Resell",
+        location: "Warehouse A",
+        after: stock,
+      })
       await roundTrip("inspection_pass", serial, moved)
     }
 
@@ -573,7 +669,19 @@ async function main() {
       await createInbound(serial)
       await move(serial, "Sale", { ...stock, status: "Sold", location: "Delivered", client: HOLDER, assigned_to: ASSIGNEE })
       await move(serial, "Decommissioned", { ...stock, status: "Pending Inspection", location: "Service Center" })
-      const moved = await move(serial, "Inspection Fail", { ...stock, status: "RMA Hold" })
+      const moved = await inspect(serial, {
+        result: "Fail",
+        outcome: "Return to vendor",
+        location: null,
+        after: {
+          status: "RMA Hold",
+          location: "Service Center",
+          client: HOLDER,
+          assigned_to: ASSIGNEE,
+          poc_out_date: null,
+          return_date: null,
+        },
+      })
       await roundTrip("inspection_fail", serial, moved)
     }
 
@@ -601,7 +709,7 @@ async function main() {
         poc_out_date: "2026-09-15",
         return_date: "2026-11-01",
       })
-      const returned = await move(serial, "POC Return", stock, { txnClient: HOLDER, txnAssigned: ASSIGNEE })
+      const returned = await move(serial, "POC Return", stock, { txnClient: HOLDER, txnAssigned: ASSIGNEE, returnPool: "sale" })
       await db.query(
         `UPDATE public.transactions
          SET previous_location = NULL, previous_client = NULL, previous_assigned_to = NULL,

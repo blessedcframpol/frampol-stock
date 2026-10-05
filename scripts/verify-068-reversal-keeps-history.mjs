@@ -180,6 +180,10 @@ async function main() {
           from_location: row.location,
           to_location: extra.location ?? row.location,
           client: extra.client ?? "",
+          metadata:
+            type === "Rental Return" || type === "Decommissioned"
+              ? { reason_category: "Client cancelled", reason_text: "Recorded reason for the return" }
+              : null,
         },
       ]),
     ])
@@ -230,6 +234,25 @@ async function main() {
   }
 
   async function cleanup() {
+    await db.query(`ALTER TABLE public.kit_case_events DISABLE TRIGGER tr_kit_case_events_append_only`)
+    try {
+      await db.query(
+        `DELETE FROM public.kit_case_events WHERE case_id IN (
+           SELECT kc.id FROM public.kit_cases kc
+           JOIN public.inventory_items item ON item.id = kc.inventory_item_id
+           WHERE item.serial_number LIKE $1
+         )`,
+        [`${PREFIX}%`],
+      )
+    } finally {
+      await db.query(`ALTER TABLE public.kit_case_events ENABLE TRIGGER tr_kit_case_events_append_only`)
+    }
+    await db.query(
+      `DELETE FROM public.kit_cases WHERE inventory_item_id IN (
+         SELECT id FROM public.inventory_items WHERE serial_number LIKE $1
+       )`,
+      [`${PREFIX}%`],
+    )
     await db.query(
       `DELETE FROM public.batch_reversals
        WHERE batch_id LIKE $1

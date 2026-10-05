@@ -3,6 +3,7 @@
 import { useEffect, useState, useMemo, useRef } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ReturnPoolChoice } from "@/components/return-pool-choice"
+import { IntakeReasonFields } from "@/components/intake-reason-fields"
 import { StockPoolChip } from "@/components/stock-pool-chip"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -130,6 +131,8 @@ export function QuickScan() {
   const [inboundReceiveLocation, setInboundReceiveLocation] = useState<string>("Warehouse A")
   const [scanVendor, setScanVendor] = useState<string>("General")
   const [returnLocation, setReturnLocation] = useState<string>("Warehouse A")
+  const [intakeCategory, setIntakeCategory] = useState("")
+  const [intakeReason, setIntakeReason] = useState("")
   const [returnPool, setReturnPool] = useState<"" | "sale" | "demo">("")
 
   useEffect(() => {
@@ -286,6 +289,16 @@ export function QuickScan() {
         toast.error("Choose Back in sellable stock or Demo unit, not for sale")
         return
       }
+      if (movementType === "Rental Return") {
+        if (intakeCategory !== "Client cancelled" && intakeCategory !== "Service termination") {
+          toast.error("Choose a reason category")
+          return
+        }
+        if (!intakeReason.trim()) {
+          toast.error("Enter the typed reason")
+          return
+        }
+      }
       setLastDuplicateMessage(null)
       setIsSubmitting(true)
       try {
@@ -293,6 +306,10 @@ export function QuickScan() {
           type: movementType,
           serialNumbers: uniqueSerials,
           toLocation: returnLocation.trim(),
+          movementMetadata:
+            movementType === "Rental Return"
+              ? { reason_category: intakeCategory, reason_text: intakeReason.trim() }
+              : undefined,
           returnPool: movementType === "POC Return" && (returnPool === "sale" || returnPool === "demo") ? returnPool : undefined,
           expectedProductName: product,
           expectedVendor: normalizeInventoryVendor(scanVendor),
@@ -328,6 +345,14 @@ export function QuickScan() {
         toast.error("Select hold location")
         return
       }
+      if (intakeCategory !== "Client cancelled" && intakeCategory !== "Service termination") {
+        toast.error("Choose a reason category")
+        return
+      }
+      if (!intakeReason.trim()) {
+        toast.error("Enter the typed reason")
+        return
+      }
       setLastDuplicateMessage(null)
       setIsSubmitting(true)
       try {
@@ -336,7 +361,8 @@ export function QuickScan() {
           serialNumbers: uniqueSerials,
           toLocation: returnLocation.trim(),
           movementMetadata: {
-            decommissionReason: "Quick scan",
+            reason_category: intakeCategory,
+            reason_text: intakeReason.trim(),
             source: "quick_scan",
           },
           expectedProductName: product,
@@ -670,6 +696,14 @@ export function QuickScan() {
         {movementType === "POC Return" ? (
           <ReturnPoolChoice value={returnPool} onChange={setReturnPool} />
         ) : null}
+        {movementType === "Rental Return" || movementType === "Decommissioned" ? (
+          <IntakeReasonFields
+            category={intakeCategory}
+            reason={intakeReason}
+            onCategory={setIntakeCategory}
+            onReason={setIntakeReason}
+          />
+        ) : null}
         <div className="flex flex-col gap-2">
           <Label className="text-xs text-muted-foreground">
             Serial numbers (comma or newline separated; paste a list to add commas)
@@ -749,7 +783,9 @@ export function QuickScan() {
               uniqueSerials.length === 0 ||
               !productName.trim() ||
               !movementType ||
-              (movementType === "POC Return" && !returnPool)
+              (movementType === "POC Return" && !returnPool) ||
+              ((movementType === "Rental Return" || movementType === "Decommissioned") &&
+                (intakeCategory !== "Client cancelled" && intakeCategory !== "Service termination" || !intakeReason.trim()))
             }
           >
           {isSubmitting ? (
@@ -764,12 +800,12 @@ export function QuickScan() {
             ? "For Sale, POC Out, Rentals, Transfer and Dispose, serials must exist in inventory. You’ll enter client and site details next."
             : RETURN_LIKE_MOVEMENTS.includes(movementType)
               ? movementType === "Rental Return"
-                ? "Rental Return needs a rented kit and a return location. Status becomes Pending Inspection, and the kit stays in the rental group."
+                ? "Rental Return needs a rented kit, a return location, a reason category, and a typed reason. Status becomes Pending Inspection. The kit keeps its holder and stays in the rental group."
                 : movementType === "POC Return"
                   ? "POC Return needs a kit on POC, a return location, and a group choice."
                   : "Sale Return needs serials still marked Sold. Items move to RMA Hold."
               : movementType === "Decommissioned"
-                ? "Decommissioned: serials must be POC, Rented, or Sold (match product/vendor). Status becomes Pending Inspection. Unknown serials: use Inventory Movement for client/source."
+                ? "Decommissioned: serials must be POC, Rented, or Sold. Status becomes Pending Inspection and the kit keeps its holder. A reason category and typed reason are required. Unknown serials: use Inventory Movement and pick a client."
                 : movementType === "Inbound"
                   ? "Inbound creates or updates inventory rows and logs one transaction batch. Serials already In Stock are blocked."
                   : "Choose vendor and product, then paste or type serial numbers. Use commas or new lines; pasted lines are auto-separated."}

@@ -73,6 +73,7 @@ import { useOrgTimezone } from "@/hooks/use-org-timezone"
 
 const inventoryChildren = [
   { href: "/inventory/dispatched", label: "Dispatched" },
+  { href: "/inventory/inspections", label: "Inspections" },
   { href: "/inventory/movement", label: "Inventory movement", viewerHidden: true as const },
   { href: "/inventory/remediation", label: "Remediation" },
   { href: "/inventory/stock-take", label: "Stock take", adminOnly: true as const },

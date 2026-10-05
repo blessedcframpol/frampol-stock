@@ -66,6 +66,10 @@ export function canChangeStockPool(role: AppRole | null | undefined): boolean {
   return role === ADMIN
 }
 
+export function canCompleteInspection(role: AppRole | null | undefined): boolean {
+  return role === ADMIN
+}
+
 export function canViewFinancials(role: AppRole | null | undefined): boolean {
   return role === ADMIN || role === ACCOUNTS
 }

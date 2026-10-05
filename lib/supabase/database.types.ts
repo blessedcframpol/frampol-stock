@@ -451,6 +451,84 @@ export interface Database {
         }
         Relationships: []
       }
+      kit_cases: {
+        Row: {
+          id: string
+          case_type: string
+          inventory_item_id: string
+          client_id: string | null
+          source_transaction_id: string
+          reason_category: string
+          reason_text: string
+          stage: string
+          outcome: string | null
+          opened_at: string
+          opened_by: string | null
+          closed_at: string | null
+          closed_by: string | null
+        }
+        Insert: {
+          id?: string
+          case_type: string
+          inventory_item_id: string
+          client_id?: string | null
+          source_transaction_id: string
+          reason_category: string
+          reason_text: string
+          stage: string
+          outcome?: string | null
+          opened_at?: string
+          opened_by?: string | null
+          closed_at?: string | null
+          closed_by?: string | null
+        }
+        Update: {
+          id?: string
+          case_type?: string
+          inventory_item_id?: string
+          client_id?: string | null
+          source_transaction_id?: string
+          reason_category?: string
+          reason_text?: string
+          stage?: string
+          outcome?: string | null
+          opened_at?: string
+          opened_by?: string | null
+          closed_at?: string | null
+          closed_by?: string | null
+        }
+        Relationships: []
+      }
+      kit_case_events: {
+        Row: {
+          id: string
+          case_id: string
+          event_type: string
+          actor: string | null
+          at: string
+          payload: Json
+          reason: string | null
+        }
+        Insert: {
+          id?: string
+          case_id: string
+          event_type: string
+          actor?: string | null
+          at?: string
+          payload?: Json
+          reason?: string | null
+        }
+        Update: {
+          id?: string
+          case_id?: string
+          event_type?: string
+          actor?: string | null
+          at?: string
+          payload?: Json
+          reason?: string | null
+        }
+        Relationships: []
+      }
       kit_inspections: {
         Row: {
           id: string
@@ -870,6 +948,39 @@ export interface Database {
         }
         Relationships: []
       }
+      kit_case_list: {
+        Row: {
+          id: string
+          case_type: string
+          stage: string
+          outcome: string | null
+          reason_category: string
+          reason_text: string
+          opened_at: string
+          closed_at: string | null
+          opened_by: string | null
+          closed_by: string | null
+          client_id: string | null
+          inventory_item_id: string
+          serial_number: string
+          kit_status: string
+          stock_pool: string
+          location: string | null
+          holder: string | null
+          product_id: string | null
+          product_name: string | null
+          vendor: string | null
+          source_type: string
+          source_label: string
+          client_name: string | null
+          client_company: string | null
+          grade: string | null
+          result: string | null
+          comments: string | null
+          closed_by_name: string | null
+        }
+        Relationships: []
+      }
       low_stock_products: {
         Row: {
           product_id: string
@@ -979,6 +1090,18 @@ export interface Database {
       cancel_holding_extension: {
         Args: { p_extension_id: string; p_reason: string }
         Returns: undefined
+      }
+      complete_inspection: {
+        Args: {
+          p_case_id: string
+          p_result: string
+          p_comments: string
+          p_grade: string
+          p_outcome: string
+          p_location?: string | null
+          p_reason_category?: string | null
+        }
+        Returns: string
       }
       change_stock_pool: {
         Args: { p_item_id: string; p_pool: string; p_reason: string }

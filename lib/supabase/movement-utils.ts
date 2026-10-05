@@ -363,6 +363,7 @@ export function computeMovementResult(
           name: d.name,
           vendor: v,
           status: "Pending Inspection",
+          stockPool: "sale",
           dateAdded: date.slice(0, 10),
           location: holdLoc,
           client: clientDisplay !== "Internal" ? clientDisplay : undefined,
@@ -501,11 +502,7 @@ export function computeMovementResult(
       case "Rental Return":
         it.status = "Pending Inspection"
         it.stockPool = "rental"
-        it.location = toLocation ?? "Warehouse A"
-        it.client = undefined
-        it.assignedTo = undefined
-        it.pocOutDate = undefined
-        it.returnDate = undefined
+        it.location = toLocation ?? it.location ?? "Warehouse A"
         break
       case "Sale Return":
         it.status = "RMA Hold"
@@ -536,8 +533,6 @@ export function computeMovementResult(
       case "Decommissioned":
         it.status = "Pending Inspection"
         it.location = toLocation ?? it.location ?? "Warehouse A"
-        it.pocOutDate = undefined
-        it.returnDate = undefined
         break
       case "Inspection Pass":
         it.status = "In Stock"

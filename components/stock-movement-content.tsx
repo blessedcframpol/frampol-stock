@@ -36,6 +36,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { StatusPill } from "@/components/fs/status-pill"
 import { ReturnPoolChoice } from "@/components/return-pool-choice"
+import { IntakeReasonFields } from "@/components/intake-reason-fields"
 import { LOCATIONS, INTERNAL_LOCATIONS } from "@/lib/data"
 import { formatClientLabel } from "@/lib/client-label"
 import type { TransactionType, ClientSite, JsonValue } from "@/lib/data"
@@ -177,8 +178,8 @@ export function StockMovementContent({
   /** Admin sale business date. Defaults to today in the organisation timezone. */
   const [adminSaleDate, setAdminSaleDate] = useState(() => todayBusinessDate(DEFAULT_ORG_TIMEZONE))
   const [adminSaleDateError, setAdminSaleDateError] = useState<string | null>(null)
-  const [decommissionReason, setDecommissionReason] = useState("")
-  const [decommissionReceivedDate, setDecommissionReceivedDate] = useState("")
+  const [intakeCategory, setIntakeCategory] = useState("")
+  const [intakeReason, setIntakeReason] = useState("")
   const [decommissionDocFile, setDecommissionDocFile] = useState<File | null>(null)
   const [remediationCaseId, setRemediationCaseId] = useState("")
 
@@ -405,11 +406,11 @@ export function StockMovementContent({
     }
 
     let movementMetadata: JsonValue | undefined
-    if (selectedType === "Decommissioned") {
+    if (selectedType === "Decommissioned" || selectedType === "Rental Return") {
       movementMetadata = {
-        decommissionReason: decommissionReason.trim(),
-        receivedDate: decommissionReceivedDate.trim() || undefined,
-        documentUrl: decommissionDocumentUrl || undefined,
+        reason_category: intakeCategory,
+        reason_text: intakeReason.trim(),
+        documentUrl: selectedType === "Decommissioned" ? decommissionDocumentUrl || undefined : undefined,
       }
     }
     if (selectedType === "Remediation Loaner Issue") {
@@ -504,9 +505,11 @@ export function StockMovementContent({
         setAuthorisedBy("")
       }
       if (selectedType === "Inbound") setDeliveryNoteFile(null)
+      if (selectedType === "Decommissioned" || selectedType === "Rental Return") {
+        setIntakeCategory("")
+        setIntakeReason("")
+      }
       if (selectedType === "Decommissioned") {
-        setDecommissionReason("")
-        setDecommissionReceivedDate("")
         setDecommissionDocFile(null)
         setToLocation("")
       }
@@ -643,18 +646,24 @@ export function StockMovementContent({
         return
       }
     }
+    if (selectedType === "Decommissioned" || selectedType === "Rental Return") {
+      if (intakeCategory !== "Client cancelled" && intakeCategory !== "Service termination") {
+        toast.error("Choose a reason category")
+        return
+      }
+      if (!intakeReason.trim()) {
+        toast.error("Enter the typed reason")
+        return
+      }
+    }
     if (selectedType === "Decommissioned") {
       if (!toLocation?.trim()) {
         toast.error("Select a hold / receive location for decommissioned kits")
         return
       }
-      if (!decommissionReason.trim()) {
-        toast.error("Enter a reason for decommission")
-        return
-      }
       const hasUnknown = uniqueSerials.some((s) => !inventorySerialSet.has(s))
       if (hasUnknown && !clientId) {
-        toast.error("Select a client (source) when decommissioning serials not previously in inventory")
+        toast.error("Select a client when decommissioning a serial that is not in inventory")
         return
       }
     }
@@ -1097,30 +1106,12 @@ export function StockMovementContent({
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="flex flex-col gap-2">
-                    <Label className="text-foreground">Reason for decommission</Label>
-                    <Select value={decommissionReason} onValueChange={setDecommissionReason}>
-                      <SelectTrigger className="bg-card text-foreground border-border">
-                        <SelectValue placeholder="Select reason..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Client cancellation">Client cancellation</SelectItem>
-                        <SelectItem value="Upgrade">Upgrade</SelectItem>
-                        <SelectItem value="Fault">Fault</SelectItem>
-                        <SelectItem value="End of contract">End of contract</SelectItem>
-                        <SelectItem value="Other">Other</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    <Label className="text-foreground">Date received / decommissioned (optional)</Label>
-                    <Input
-                      type="date"
-                      className="bg-card text-foreground border-border max-w-xs"
-                      value={decommissionReceivedDate}
-                      onChange={(e) => setDecommissionReceivedDate(e.target.value)}
-                    />
-                  </div>
+                  <IntakeReasonFields
+                    category={intakeCategory}
+                    reason={intakeReason}
+                    onCategory={setIntakeCategory}
+                    onReason={setIntakeReason}
+                  />
                   <div className="flex flex-col gap-2">
                     <Label className="text-foreground flex items-center gap-2">
                       <Upload className="w-4 h-4 text-muted-foreground" />
@@ -1154,7 +1145,7 @@ export function StockMovementContent({
                     )}
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Status becomes <strong>Pending Inspection</strong>. Serials must be POC, Rented, or Sold — or new serials with product/vendor above for manual intake.
+                    Status becomes <strong>Pending Inspection</strong>. The kit keeps its holder and group until the inspection outcome. A serial that is not already in inventory needs a client from the directory. Only the return date is recorded.
                   </p>
                 </>
               )}
@@ -1447,9 +1438,17 @@ export function StockMovementContent({
                     </p>
                   )}
                   {selectedType === "Rental Return" ? (
-                    <p className="text-xs text-muted-foreground">
-                      Status becomes <strong>Pending Inspection</strong>. The kit stays in the rental group.
-                    </p>
+                    <>
+                      <IntakeReasonFields
+                        category={intakeCategory}
+                        reason={intakeReason}
+                        onCategory={setIntakeCategory}
+                        onReason={setIntakeReason}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Status becomes <strong>Pending Inspection</strong>. The kit keeps its holder and stays in the rental group until the inspection outcome.
+                      </p>
+                    </>
                   ) : null}
                   {selectedType === "POC Return" ? (
                     <ReturnPoolChoice value={returnPool} onChange={setReturnPool} />

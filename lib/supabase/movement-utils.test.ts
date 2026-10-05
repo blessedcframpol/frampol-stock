@@ -417,12 +417,17 @@ describe("computeMovementResult", () => {
     expect(result.rejected[0]?.reason).toMatch(/Back in sellable stock/)
   })
 
-  it("Rental Return: pending inspection, rental group", () => {
+  it("Rental Return: pending inspection, rental group, holder kept", () => {
     const result = computeMovementResult(
-      [item({ status: "Rented", location: "Client Site", stockPool: "rental" })],
+      [item({ status: "Rented", location: "Client Site", stockPool: "rental", client: "Ada - Co", assignedTo: "Ada - Co" })],
       { ...baseParams, type: "Rental Return", toLocation: "Warehouse A" }
     )
-    expect(result.updatedItems[0]).toMatchObject({ status: "Pending Inspection", stockPool: "rental" })
+    expect(result.updatedItems[0]).toMatchObject({
+      status: "Pending Inspection",
+      stockPool: "rental",
+      client: "Ada - Co",
+      assignedTo: "Ada - Co",
+    })
   })
 
   it("Sale Return: moves Sold to RMA Hold", () => {

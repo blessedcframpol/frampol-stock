@@ -5,6 +5,7 @@ import { toast } from "sonner"
 import { BatchLinesDrawer } from "@/components/batch-lines-drawer"
 import { ChangeGroupDialog } from "@/components/change-group-dialog"
 import { ReturnPoolChoice } from "@/components/return-pool-choice"
+import { PendingInspectionCaseLink } from "@/components/pending-inspection-case-link"
 import { StockPoolChip } from "@/components/stock-pool-chip"
 import { ConvertToSaleDialog, ExtendHoldingDialog } from "@/components/holding-actions"
 import { Button } from "@/components/ui/button"
@@ -256,7 +257,14 @@ export function DispatchedKitDrawer({
               }
             : undefined
         }
-        notice={note ? <p className="px-4 pb-2 text-sm text-foreground">{note}</p> : undefined}
+        notice={
+          note || (status === "Pending Inspection" && item) ? (
+            <div className="px-4 pb-2 flex flex-col gap-2">
+              {note ? <p className="text-sm text-foreground">{note}</p> : null}
+              {status === "Pending Inspection" && item ? <PendingInspectionCaseLink itemId={item.id} /> : null}
+            </div>
+          ) : undefined
+        }
         actions={
           actions.length > 0 ? (
             <>
