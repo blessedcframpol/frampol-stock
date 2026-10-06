@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { Card } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { EmptyState } from "@/components/fs/empty-state"
 import { FilterChip } from "@/components/fs/filter-chip"
 import { StatusPill } from "@/components/fs/status-pill"
@@ -15,7 +16,9 @@ import { useAlertFeed } from "@/hooks/use-alert-feed"
 import { formatBusinessDate } from "@/lib/business-date.mjs"
 import {
   alertChipFromSearch,
+  canRecordReturn,
   dispatchedKitHref,
+  dispatchedResolveHref,
   formatReturnAge,
   groupReturnRows,
   isInternalHolder,
@@ -37,14 +40,37 @@ const CHIPS: { id: AlertChip; label: string; count: (counts: AlertCounts) => num
   { id: "rental", label: "Rental", count: (counts) => counts.rental },
 ]
 
-function ReturnTable({ rows, today }: { rows: ReturnAlertRow[]; today: string }) {
+function ReturnTable({
+  rows,
+  today,
+  selectedIds,
+  onToggle,
+  onToggleAll,
+}: {
+  rows: ReturnAlertRow[]
+  today: string
+  selectedIds?: ReadonlySet<string>
+  onToggle?: (id: string) => void
+  onToggleAll?: (on: boolean, ids: string[]) => void
+}) {
   const router = useRouter()
   const groups = groupReturnRows(rows)
+  const selectable = onToggle != null && selectedIds != null
+  const columns = selectable ? 7 : 6
   return (
     <div className="overflow-x-auto">
       <Table>
         <TableHeader>
           <TableRow className="hover:bg-transparent">
+            {selectable ? (
+              <TableHead className="w-10 px-2">
+                <Checkbox
+                  checked={rows.length > 0 && rows.every((row) => selectedIds.has(row.id))}
+                  onCheckedChange={(value) => onToggleAll?.(value === true, rows.map((row) => row.id))}
+                  aria-label="Select overdue kits"
+                />
+              </TableHead>
+            ) : null}
             <TableHead>Serial</TableHead>
             <TableHead>Product</TableHead>
             <TableHead>Type</TableHead>
@@ -60,7 +86,7 @@ function ReturnTable({ rows, today }: { rows: ReturnAlertRow[]; today: string })
               <Fragment key={group.key}>
                 {grouped ? (
                   <TableRow className="bg-muted/40 hover:bg-muted/40">
-                    <TableCell colSpan={6} className="whitespace-normal">
+                    <TableCell colSpan={columns} className="whitespace-normal">
                       <span className="text-sm font-medium text-foreground">
                         {group.holder}
                         <span className="font-normal text-muted-foreground">
@@ -77,6 +103,15 @@ function ReturnTable({ rows, today }: { rows: ReturnAlertRow[]; today: string })
                     className="cursor-pointer"
                     onClick={() => router.push(dispatchedKitHref(row.id))}
                   >
+                    {selectable ? (
+                      <TableCell className="w-10 px-2" onClick={(event) => event.stopPropagation()}>
+                        <Checkbox
+                          checked={selectedIds.has(row.id)}
+                          onCheckedChange={() => onToggle(row.id)}
+                          aria-label={`Select ${row.serialNumber}`}
+                        />
+                      </TableCell>
+                    ) : null}
                     <TableCell className="font-mono text-sm text-foreground">
                       <Link
                         href={dispatchedKitHref(row.id)}
@@ -124,6 +159,8 @@ export function AlertsContent() {
     setChip(alertChipFromSearch(chipParam))
   }
   const [hideInternal, setHideInternal] = useState(false)
+  const [selectedOverdue, setSelectedOverdue] = useState<Set<string>>(() => new Set())
+  const canResolve = canRecordReturn(role)
   const counts = feed?.counts
 
   return (
@@ -171,15 +208,56 @@ export function AlertsContent() {
         <div className="flex flex-col gap-6">
           {showsSection(chip, "overdue") ? (
             <section className="flex flex-col gap-3">
-              <h2 className="text-sm font-medium text-foreground">
-                Overdue returns
-                <span className="ml-2 tabular-nums text-muted-foreground">{sectionCount(counts, "overdue", chip)}</span>
-              </h2>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h2 className="text-sm font-medium text-foreground">
+                  Overdue returns
+                  <span className="ml-2 tabular-nums text-muted-foreground">{sectionCount(counts, "overdue", chip)}</span>
+                </h2>
+                {canResolve && selectedOverdue.size > 0 ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => router.push(dispatchedResolveHref([...selectedOverdue]))}
+                  >
+                    Resolve selected
+                  </Button>
+                ) : null}
+              </div>
               {visibleReturnRows(feed.overdue, chip, hideInternal).length === 0 ? (
                 <EmptyState message="No overdue returns." />
               ) : (
                 <Card className="border-border p-0">
-                  <ReturnTable rows={visibleReturnRows(feed.overdue, chip, hideInternal)} today={feed.today} />
+                  <ReturnTable
+                    rows={visibleReturnRows(feed.overdue, chip, hideInternal)}
+                    today={feed.today}
+                    selectedIds={canResolve ? selectedOverdue : undefined}
+                    onToggle={
+                      canResolve
+                        ? (id) => {
+                            setSelectedOverdue((prev) => {
+                              const next = new Set(prev)
+                              if (next.has(id)) next.delete(id)
+                              else next.add(id)
+                              return next
+                            })
+                          }
+                        : undefined
+                    }
+                    onToggleAll={
+                      canResolve
+                        ? (on, ids) => {
+                            setSelectedOverdue((prev) => {
+                              const next = new Set(prev)
+                              for (const id of ids) {
+                                if (on) next.add(id)
+                                else next.delete(id)
+                              }
+                              return next
+                            })
+                          }
+                        : undefined
+                    }
+                  />
                 </Card>
               )}
             </section>

@@ -64,18 +64,26 @@ function parseRow(value: Json): DispatchedRow & { createdBy: string | null } {
     throw new Error("Dispatched row is invalid")
   }
   const id = value.id
-  const batchKey = value.batchKey
   const productName = value.productName
   const clientDisplay = value.clientDisplay
-  if (typeof id !== "string" || typeof batchKey !== "string" || typeof productName !== "string") {
+  if (typeof id !== "string" || typeof productName !== "string") {
     throw new Error("Dispatched row is missing its identity")
   }
-  const lines = Array.isArray(value.lines) ? value.lines.map(parseLine).filter((line): line is DispatchedLine => line != null) : []
+  const serialNumber = typeof value.serialNumber === "string" && value.serialNumber.trim() ? value.serialNumber : null
+  const batchKey = typeof value.batchKey === "string" && value.batchKey.trim() ? value.batchKey : id
+  let lines = Array.isArray(value.lines) ? value.lines.map(parseLine).filter((line): line is DispatchedLine => line != null) : []
+  if (lines.length === 0 && serialNumber) {
+    lines = [{
+      serialNumber,
+      status: typeof value.status === "string" && value.status.trim() ? value.status : "—",
+      assignedTo: typeof value.assignedTo === "string" && value.assignedTo.trim() ? value.assignedTo : null,
+    }]
+  }
   return {
     id,
-    grain: value.grain === "serial" ? "serial" : "batch",
+    grain: value.grain === "batch" ? "batch" : serialNumber ? "serial" : "batch",
     batchKey,
-    serialNumber: typeof value.serialNumber === "string" ? value.serialNumber : null,
+    serialNumber,
     productName,
     movement: typeof value.movement === "string" ? value.movement : null,
     clientDisplay: collapseClientLabel(typeof clientDisplay === "string" ? clientDisplay : "") || "—",

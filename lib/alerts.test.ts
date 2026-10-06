@@ -5,6 +5,7 @@ import {
   alertChipFromSearch,
   canRecordReturn,
   dispatchedKitHref,
+  dispatchedResolveHref,
   formatReturnAge,
   holdingDrawerActions,
   groupReturnRows,
@@ -31,6 +32,12 @@ describe("alertChipFromSearch", () => {
     expect(alertChipFromSearch("lowStock")).toBe("lowStock")
     expect(alertChipFromSearch("nope")).toBe("all")
     expect(alertChipFromSearch(null)).toBe("all")
+  })
+})
+
+describe("dispatchedResolveHref", () => {
+  it("opens the resolve table on Dispatched", () => {
+    expect(dispatchedResolveHref(["kit-a", "kit-b"])).toBe("/inventory/dispatched?resolve=kit-a%2Ckit-b")
   })
 })
 

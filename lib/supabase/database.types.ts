@@ -1235,6 +1235,10 @@ export interface Database {
         Args: { p_item_ids: string[]; p_pool: string; p_reason: string }
         Returns: undefined
       }
+      bulk_resolve_holdings: {
+        Args: { p_rows: Json }
+        Returns: Json
+      }
       apply_stock_movement: {
         Args: {
           p_inventory_upserts: Json

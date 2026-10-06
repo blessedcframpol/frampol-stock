@@ -19,9 +19,13 @@ import { ListToolbar, ListToolbarSearch } from "@/components/fs/list-toolbar"
 import { Pagination } from "@/components/fs/pagination"
 import { BusinessDateLabel } from "@/components/business-date-label"
 import { useOrgTimezone } from "@/hooks/use-org-timezone"
+import { todayBusinessDate } from "@/lib/business-date.mjs"
+import { announceAlertsUpdated, canRecordReturn } from "@/lib/alerts"
+import { isOverdueHolding } from "@/lib/bulk-resolve"
 import { PageHeader } from "@/components/page-nav"
 import { ArrowUpRight, Loader2 } from "lucide-react"
 import { ChangeGroupDialog } from "@/components/change-group-dialog"
+import { ResolveHoldingsDialog } from "@/components/resolve-holdings-dialog"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import type { InventoryItem } from "@/lib/data"
@@ -54,11 +58,17 @@ export function DispatchedContent() {
   const searchParams = useSearchParams()
   const itemId = searchParams.get("item")
   const timeZone = useOrgTimezone()
+  const today = todayBusinessDate(timeZone)
   const { role } = useAuth()
   const { inventory, refetchLedger } = useInventoryStore()
   const canChangeGroup = canChangeStockPool(role)
+  const canResolve = canRecordReturn(role)
   const [selectedKits, setSelectedKits] = useState<Map<string, InventoryItem>>(() => new Map())
   const [groupOpen, setGroupOpen] = useState(false)
+  const [resolveOpen, setResolveOpen] = useState(false)
+  const [resolveKits, setResolveKits] = useState<InventoryItem[]>([])
+  const resolveParam = searchParams.get("resolve")
+  const [consumedResolve, setConsumedResolve] = useState<string | null>(null)
   const poolBySerial = useMemo(() => {
     const pools = new Map<string, string | undefined>()
     for (const item of inventory) {
@@ -73,6 +83,24 @@ export function DispatchedContent() {
     }
     return map
   }, [inventory])
+
+  if (resolveParam && resolveParam !== consumedResolve && inventory.length > 0) {
+    const ids = new Set(resolveParam.split(",").map((id) => id.trim()).filter(Boolean))
+    const kits = inventory.filter((item) => ids.has(item.id) && isOverdueHolding(item, today))
+    setConsumedResolve(resolveParam)
+    if (kits.length > 0) {
+      setResolveKits(kits)
+      setResolveOpen(true)
+    }
+  }
+
+  useEffect(() => {
+    if (!consumedResolve || searchParams.get("resolve") !== consumedResolve) return
+    const params = new URLSearchParams(searchParams.toString())
+    params.delete("resolve")
+    const query = params.toString()
+    router.replace(query ? `/inventory/dispatched?${query}` : "/inventory/dispatched", { scroll: false })
+  }, [consumedResolve, router, searchParams])
 
   function eligibleKits(row: DispatchedRow): InventoryItem[] {
     const lines =
@@ -91,8 +119,36 @@ export function DispatchedContent() {
     return kits
   }
 
+  function resolveKitsIn(row: DispatchedRow): InventoryItem[] {
+    if (!canResolve) return []
+    const lines =
+      row.grain === "serial" && row.serialNumber
+        ? row.lines.filter((line) => line.serialNumber === row.serialNumber)
+        : row.lines
+    const kits: InventoryItem[] = []
+    const seen = new Set<string>()
+    for (const line of lines) {
+      const item = itemBySerial.get(line.serialNumber)
+      if (!item || seen.has(item.id) || !isOverdueHolding(item, today)) continue
+      seen.add(item.id)
+      kits.push(item)
+    }
+    return kits
+  }
+
+  function selectableKits(row: DispatchedRow): InventoryItem[] {
+    const kits: InventoryItem[] = []
+    const seen = new Set<string>()
+    for (const kit of [...(canChangeGroup ? eligibleKits(row) : []), ...resolveKitsIn(row)]) {
+      if (seen.has(kit.id)) continue
+      seen.add(kit.id)
+      kits.push(kit)
+    }
+    return kits
+  }
+
   function toggleRow(row: DispatchedRow) {
-    const kits = eligibleKits(row)
+    const kits = selectableKits(row)
     setSelectedKits((prev) => {
       const next = new Map(prev)
       const allOn = kits.length > 0 && kits.every((kit) => next.has(kit.id))
@@ -243,12 +299,26 @@ export function DispatchedContent() {
         ))}
       </div>
 
-      {canChangeGroup && selectedKits.size > 0 ? (
+      {(canChangeGroup || canResolve) && selectedKits.size > 0 ? (
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm text-foreground">{selectedKits.size} selected</span>
-          <Button type="button" size="sm" variant="outline" onClick={() => setGroupOpen(true)}>
-            Change group ({selectedKits.size})
-          </Button>
+          {canChangeGroup && [...selectedKits.values()].some((kit) => kit.status === "In Stock" || kit.status === "Rented") ? (
+            <Button type="button" size="sm" variant="outline" onClick={() => setGroupOpen(true)}>
+              Change group ({[...selectedKits.values()].filter((kit) => kit.status === "In Stock" || kit.status === "Rented").length})
+            </Button>
+          ) : null}
+          {canResolve && [...selectedKits.values()].some((kit) => isOverdueHolding(kit, today)) ? (
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => {
+                setResolveKits([...selectedKits.values()].filter((kit) => isOverdueHolding(kit, today)))
+                setResolveOpen(true)
+              }}
+            >
+              Resolve selected
+            </Button>
+          ) : null}
           <Button type="button" size="sm" variant="ghost" onClick={() => setSelectedKits(new Map())}>
             Clear
           </Button>
@@ -272,18 +342,18 @@ export function DispatchedContent() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  {canChangeGroup ? (
+                  {canChangeGroup || canResolve ? (
                     <TableHead className="w-10 px-2">
                       <Checkbox
                         checked={
-                          data.rows.some((row) => eligibleKits(row).length > 0) &&
-                          data.rows.every((row) => eligibleKits(row).every((kit) => selectedKits.has(kit.id)))
+                          data.rows.some((row) => selectableKits(row).length > 0) &&
+                          data.rows.every((row) => selectableKits(row).every((kit) => selectedKits.has(kit.id)))
                         }
                         onCheckedChange={(value) => {
                           setSelectedKits((prev) => {
                             const next = new Map(prev)
                             for (const row of data.rows) {
-                              for (const kit of eligibleKits(row)) {
+                              for (const kit of selectableKits(row)) {
                                 if (value === true) next.set(kit.id, kit)
                                 else next.delete(kit.id)
                               }
@@ -291,7 +361,7 @@ export function DispatchedContent() {
                             return next
                           })
                         }}
-                        aria-label="Select In Stock and Rented kits on this page"
+                        aria-label="Select kits on this page"
                       />
                     </TableHead>
                   ) : null}
@@ -305,7 +375,7 @@ export function DispatchedContent() {
               </TableHeader>
               <TableBody>
                 {data.rows.map((row) => {
-                    const kits = canChangeGroup ? eligibleKits(row) : []
+                    const kits = selectableKits(row)
                     return (
                     <TableRow
                       key={row.id}
@@ -315,7 +385,7 @@ export function DispatchedContent() {
                         setViewing(row)
                       }}
                     >
-                    {canChangeGroup ? (
+                    {canChangeGroup || canResolve ? (
                       <TableCell className="w-10 px-2" onClick={(event) => event.stopPropagation()}>
                         <Checkbox
                           checked={kits.length > 0 && kits.every((kit) => selectedKits.has(kit.id))}
@@ -422,10 +492,21 @@ export function DispatchedContent() {
         }))}
         showInvoice={showFinancials}
       />
+      <ResolveHoldingsDialog
+        open={resolveOpen}
+        kits={resolveKits}
+        onOpenChange={setResolveOpen}
+        onCompleted={async () => {
+          setSelectedKits(new Map())
+          await refetchLedger()
+          setReload((value) => value + 1)
+          announceAlertsUpdated()
+        }}
+      />
       <ChangeGroupDialog
         open={groupOpen}
         onOpenChange={setGroupOpen}
-        kits={[...selectedKits.values()]}
+        kits={[...selectedKits.values()].filter((kit) => kit.status === "In Stock" || kit.status === "Rented")}
         onSaved={async () => {
           setSelectedKits(new Map())
           await refetchLedger()

@@ -208,6 +208,13 @@ export function dispatchedKitHref(itemId: string): string {
   return `/inventory/dispatched?item=${encodeURIComponent(itemId)}`
 }
 
+/** Overdue kits open the resolve table on Dispatched. */
+export function dispatchedResolveHref(itemIds: readonly string[]): string {
+  const params = new URLSearchParams()
+  params.set("resolve", itemIds.join(","))
+  return `/inventory/dispatched?${params.toString()}`
+}
+
 export function recordReturnHref(kind: ReturnKind, serials: readonly string[]): string {
   const params = new URLSearchParams()
   params.set("type", kind === "POC" ? "POC Return" : "Rental Return")
