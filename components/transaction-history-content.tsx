@@ -75,6 +75,7 @@ const HISTORY_MOVEMENT_ORDER = [
   "Reversed",
 ]
 import { SignedStorageLink } from "@/components/signed-storage-link"
+import { formatCount } from "@/lib/format-display"
 import { reversalResultLine, type RestorePlanRow, type ReversePlanRow } from "@/lib/quick-scan-reversal-inventory"
 
 const MIN_REASON_LENGTH = 15
@@ -585,10 +586,10 @@ export function TransactionHistoryContent() {
                         )}
                       </TableCell>
                       <TableCell className="text-right text-sm tabular-nums text-foreground">
-                        {entry.count}
+                        {formatCount(entry.count)}
                       </TableCell>
                       {showFinancials ? (
-                        <TableCell className="font-mono text-xs text-muted-foreground">
+                        <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
                           {entry.invoiceNumber || "—"}
                         </TableCell>
                       ) : null}

@@ -26,6 +26,7 @@ import { FileText, Loader2 } from "lucide-react"
 import { toastFromApiErrorBody, toastFromCaughtError } from "@/lib/toast-reportable-error"
 import { SESSION_EXPIRED_MESSAGE } from "@/lib/unauthorized"
 import { SignedStorageLink } from "@/components/signed-storage-link"
+import { formatCount } from "@/lib/format-display"
 
 const RECENT_BATCH_LIMIT = 10
 
@@ -97,7 +98,7 @@ export function TransactionsTable() {
                 <TableHead className="hidden md:table-cell">Client</TableHead>
                 <TableHead className="text-right">Items</TableHead>
                 {showFinancials && (
-                  <TableHead className="hidden lg:table-cell">Invoice</TableHead>
+                  <TableHead className="hidden lg:table-cell min-w-[9.5rem]">Invoice</TableHead>
                 )}
                 <TableHead className="hidden xl:table-cell w-24">Delivery note</TableHead>
               </TableRow>
@@ -118,10 +119,10 @@ export function TransactionsTable() {
                     {entry.clientDisplay}
                   </TableCell>
                   <TableCell className="text-right text-sm tabular-nums text-foreground">
-                    {entry.count} item{entry.count !== 1 ? "s" : ""}
+                    {formatCount(entry.count)} item{entry.count !== 1 ? "s" : ""}
                   </TableCell>
                   {showFinancials && (
-                    <TableCell className="font-mono text-xs text-muted-foreground hidden lg:table-cell">
+                    <TableCell className="text-xs text-muted-foreground hidden lg:table-cell whitespace-nowrap">
                       {entry.invoiceNumber || "\u2014"}
                     </TableCell>
                   )}

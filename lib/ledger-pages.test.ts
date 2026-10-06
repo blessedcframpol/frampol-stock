@@ -88,7 +88,7 @@ describe("dispatchRowsForBatch", () => {
 
 describe("dispatchResultLabel", () => {
   it("names the row grain", () => {
-    expect(dispatchResultLabel(702, "batch")).toBe("702 dispatches")
+    expect(dispatchResultLabel(1262, "batch")).toBe("1,262 dispatches")
     expect(dispatchResultLabel(1, "batch")).toBe("1 dispatch")
     expect(dispatchResultLabel(2, "serial")).toBe("2 serials")
     expect(dispatchResultLabel(3, "mixed")).toBe("3 results")

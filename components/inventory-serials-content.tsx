@@ -44,6 +44,7 @@ import { rentalConversionLabel } from "@/lib/rental-conversion"
 import { canChangeStockPool, canRecordStockMovement } from "@/lib/permissions"
 import { buildStockTakeUrl } from "@/lib/stock-take"
 import { buildCsvFilename, formatDateDDMMYYYY } from "@/lib/utils"
+import { formatCount } from "@/lib/format-display"
 import { BusinessDateLabel } from "@/components/business-date-label"
 import { useOrgTimezone } from "@/hooks/use-org-timezone"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -229,7 +230,7 @@ export function InventorySerialsContent({ productId }: { productId: string }) {
         <div>
           <h1 className={pageTitleClass}>{productName}</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {vendor} · {onHand.length} in stock
+            {vendor} · {formatCount(onHand.length)} in stock
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -256,7 +257,7 @@ export function InventorySerialsContent({ productId }: { productId: string }) {
             className="font-mono"
           />
         }
-        count={`${filtered.length} of ${onHand.length}`}
+        count={`${formatCount(filtered.length)} of ${formatCount(onHand.length)}`}
         secondary={
           canExport ? (
             <Button type="button" variant="ghost" onClick={exportItems}>

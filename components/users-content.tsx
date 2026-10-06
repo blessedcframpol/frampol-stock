@@ -46,6 +46,7 @@ import { PageBreadcrumbs } from "@/components/page-breadcrumbs"
 import { toast } from "sonner"
 import { toastFromApiErrorBody, toastFromCaughtError } from "@/lib/toast-reportable-error"
 import { buildCsvFilename, cn, formatDateDDMMYYYY } from "@/lib/utils"
+import { displayInitials } from "@/lib/format-display"
 
 type ProfileRow = {
   id: string
@@ -68,14 +69,7 @@ const ROLE_LABELS: Record<AppRole, string> = {
 }
 
 function profileInitials(display: string | null | undefined, email: string | null | undefined): string {
-  const s = (display || "").trim()
-  if (s) {
-    const parts = s.split(/\s+/).filter(Boolean)
-    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase().slice(0, 2)
-    return s.slice(0, 2).toUpperCase()
-  }
-  const e = (email || "").split("@")[0]
-  return e.slice(0, 2).toUpperCase() || "?"
+  return displayInitials(display, (email || "").split("@")[0])
 }
 
 function formatJoined(iso: string | undefined): string {

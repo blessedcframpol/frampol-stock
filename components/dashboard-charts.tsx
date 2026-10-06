@@ -26,6 +26,7 @@ import { todayBusinessDate } from "@/lib/business-date.mjs"
 import { allUnitsByVendor, inStockByVendor, monthlySaleUnits } from "@/lib/dashboard-metrics"
 import { useOrgTimezone } from "@/hooks/use-org-timezone"
 import { chartAxisTick, chartGridProps, chartTooltipStyle } from "@/components/fs/chart-theme"
+import { formatCount, hundredTicks } from "@/lib/format-display"
 
 const CHART_SERIES = [
   "var(--chart-1)",
@@ -36,14 +37,18 @@ const CHART_SERIES = [
 ]
 
 const barValueLabel = {
-  position: "right" as const,
   fill: "var(--foreground)",
   fontSize: 12,
+  formatter: (value: number | string) => formatCount(Number(value) || 0),
 }
 
 export function StockByVendorChart() {
   const { inventory } = useInventoryStore()
   const stockByVendor = useMemo(() => inStockByVendor(inventory), [inventory])
+  const axis = useMemo(
+    () => hundredTicks(Math.max(0, ...stockByVendor.map((row) => row.units))),
+    [stockByVendor],
+  )
 
   return (
     <Card className="h-full flex flex-col">
@@ -65,7 +70,16 @@ export function StockByVendorChart() {
               margin={{ top: 4, right: 36, left: 4, bottom: 4 }}
             >
               <CartesianGrid {...chartGridProps} horizontal={false} vertical />
-              <XAxis type="number" tickLine={false} axisLine={false} allowDecimals={false} tick={chartAxisTick} />
+              <XAxis
+                type="number"
+                tickLine={false}
+                axisLine={false}
+                allowDecimals={false}
+                tick={chartAxisTick}
+                domain={axis.domain}
+                ticks={axis.ticks}
+                tickFormatter={(value: number) => formatCount(value)}
+              />
               <YAxis
                 type="category"
                 dataKey="vendor"
@@ -76,7 +90,7 @@ export function StockByVendorChart() {
               />
               <ChartTooltip content={<ChartTooltipContent />} />
               <Bar dataKey="units" fill="var(--chart-1)" radius={[0, 8, 8, 0]} name="In stock">
-                <LabelList dataKey="units" {...barValueLabel} />
+                <LabelList dataKey="units" position="right" {...barValueLabel} />
               </Bar>
             </BarChart>
           </ResponsiveContainer>
@@ -122,11 +136,18 @@ export function VendorDistributionChart() {
                 ))}
               </Pie>
               <Tooltip
-                formatter={(value: number, name: string) => [`${value} items`, name]}
+                formatter={(value: number, name: string) => [`${formatCount(value)} items`, name]}
                 contentStyle={chartTooltipStyle}
               />
               <Legend
-                formatter={(value) => <span className="text-foreground text-[11px]">{value}</span>}
+                formatter={(value, entry) => {
+                  const count = (entry as { payload?: { value?: number } }).payload?.value ?? 0
+                  return (
+                    <span className="text-[11px] text-foreground">
+                      {value} ({formatCount(count)})
+                    </span>
+                  )
+                }}
               />
             </PieChart>
           </ResponsiveContainer>
@@ -165,6 +186,10 @@ export function MonthlySalesChart() {
     () => monthlySaleUnits(sales, todayBusinessDate(timeZone)),
     [sales, timeZone]
   )
+  const salesAxis = useMemo(
+    () => hundredTicks(Math.max(0, ...monthlyData.map((row) => row.units))),
+    [monthlyData],
+  )
 
   return (
     <Card className="h-full flex flex-col">
@@ -180,7 +205,7 @@ export function MonthlySalesChart() {
           className="h-[240px] sm:h-[280px]"
         >
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={monthlyData} margin={{ top: 5, right: 10, left: 8, bottom: 5 }}>
+            <BarChart data={monthlyData} margin={{ top: 24, right: 10, left: 8, bottom: 5 }}>
               <CartesianGrid {...chartGridProps} />
               <XAxis dataKey="month" tickLine={false} axisLine={false} tick={chartAxisTick} />
               <YAxis
@@ -189,6 +214,9 @@ export function MonthlySalesChart() {
                 allowDecimals={false}
                 tick={chartAxisTick}
                 width={48}
+                domain={salesAxis.domain}
+                ticks={salesAxis.ticks}
+                tickFormatter={(value: number) => formatCount(value)}
                 label={{
                   value: "Units",
                   angle: -90,
@@ -198,7 +226,9 @@ export function MonthlySalesChart() {
                 }}
               />
               <ChartTooltip content={<ChartTooltipContent />} />
-              <Bar dataKey="units" fill="var(--chart-1)" radius={[8, 8, 0, 0]} name="Units" />
+              <Bar dataKey="units" fill="var(--chart-1)" radius={[8, 8, 0, 0]} name="Units">
+                <LabelList dataKey="units" position="top" {...barValueLabel} />
+              </Bar>
             </BarChart>
           </ResponsiveContainer>
         </ChartContainer>

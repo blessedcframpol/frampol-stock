@@ -32,18 +32,20 @@ describe("invoice choice", () => {
 describe("invoice labels", () => {
   it("shows the state a reader should see", () => {
     expect(invoiceStateLabel({ status: "invoiced", invoiceNumber: "80183" })).toBe("80183")
-    expect(invoiceStateLabel({ status: "pending", legacy: true })).toBe("Invoice pending · legacy")
+    expect(invoiceStateLabel({ status: "pending", legacy: true })).toBe("Pending")
     expect(invoiceStateLabel({ status: "not_invoiced", approval: "awaiting" })).toBe("Awaiting approval")
-    expect(invoiceStateLabel({ status: "legacy_unreviewed" })).toBe("00000 — unreviewed")
-    expect(displayedInvoice({ type: "Sale", invoiceNumber: "00000" })).toBe("—")
+    expect(invoiceStateLabel({ status: "legacy_unreviewed" })).toBe("Legacy")
+    expect(displayedInvoice({ type: "Sale", invoiceNumber: "00000" })).toBe("Legacy")
     expect(
       displayedInvoice({
         type: "Sale",
         invoiceNumber: "00000",
         invoiceState: { status: "legacy_unreviewed", legacy: true },
       }),
-    ).toBe("00000 — unreviewed")
-    expect(displayedInvoice({ type: "Dispose", invoiceNumber: "00000" })).toBe("00000")
+    ).toBe("Legacy")
+    expect(displayedInvoice({ type: "Dispose", invoiceNumber: "00000" })).toBe("Legacy")
+    expect(displayedInvoice({ type: "Sale", invoiceNumber: "" })).toBe("Not invoiced")
+    expect(displayedInvoice({ type: "Dispose", invoiceNumber: "" })).toBe("—")
     expect(
       invoiceEventLabel({
         id: "1",

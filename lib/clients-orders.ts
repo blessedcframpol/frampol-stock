@@ -1,4 +1,5 @@
 import { invoiceBatchKey } from "@/lib/invoices"
+import { formatCount } from "@/lib/format-display"
 import { getSupabaseClient } from "@/lib/supabase/client"
 import type { Transaction } from "@/lib/data"
 import { invoiceStateFromRow } from "@/lib/supabase/invoices-db"
@@ -33,7 +34,7 @@ export function dispatchCountLabel(
 ): string {
   if (row && !row.reliable) return "Unmatched"
   const value = row?.[field]
-  return String(value ?? 0)
+  return formatCount(value ?? 0)
 }
 
 /** Higher counts first. Unmatched clients sort after every number. */

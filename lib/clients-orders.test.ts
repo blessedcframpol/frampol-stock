@@ -13,6 +13,7 @@ describe("dispatchCountLabel", () => {
   it("keeps a 9-serial sale as 1 order and 9 units", () => {
     expect(dispatchCountLabel(matched, "orders")).toBe("1")
     expect(dispatchCountLabel(matched, "units")).toBe("9")
+    expect(dispatchCountLabel({ orders: 1262, units: 1850, reliable: true }, "units")).toBe("1,850")
   })
 
   it("does not invent a zero when the count query failed", () => {

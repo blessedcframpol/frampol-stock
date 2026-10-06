@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { fetchKitHistory, fetchKitHistoryBySerial, type KitHistory } from "@/lib/kit-history"
+import { displayInvoiceNumber } from "@/lib/invoices"
 
 export function KitHistoryPanel({
   open,
@@ -119,7 +120,9 @@ export function KitHistoryPanel({
                     {entry.invoice ? (
                       <p className="mt-1 text-xs text-muted-foreground">
                         Invoice {entry.invoice.status}
-                        {entry.invoice.invoice_number ? ` ${entry.invoice.invoice_number}` : ""}
+                        {entry.invoice.invoice_number
+                          ? ` ${displayInvoiceNumber(entry.invoice.invoice_number)}`
+                          : ""}
                         {entry.invoice.approval ? ` · ${entry.invoice.approval}` : ""}
                       </p>
                     ) : null}

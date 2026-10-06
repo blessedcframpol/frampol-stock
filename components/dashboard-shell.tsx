@@ -198,12 +198,10 @@ function filterNavByRole(items: NavItem[], role: string | null | undefined): Nav
 
 function SidebarNav({
   onNavigate,
-  alertCount = 0,
   navItems,
   onSignOut,
 }: {
   onNavigate?: () => void
-  alertCount?: number
   navItems: NavItem[]
   onSignOut: () => void
 }) {
@@ -221,7 +219,7 @@ function SidebarNav({
         {navItems.map((item) => {
           const hasChildren = "children" in item && item.children && item.children.length > 0
           const isParentActive = item.href === "/inventory" ? pathname.startsWith("/inventory") : pathname === item.href
-          const badge = item.href === "/alerts" ? alertCount : item.badge
+          const badge = item.badge
 
           if (hasChildren && item.children) {
             const isExpanded = item.href === "/inventory" ? inventoryExpanded : false
@@ -501,13 +499,6 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
     [role]
   )
   const { unread: inboxUnread, count: inboxCount, markRead: markInboxRead } = useInboxNotifications()
-  const navWithBadges = useMemo(
-    () =>
-      filteredNavItems.map((item) =>
-        item.href === "/requests" && inboxCount > 0 ? { ...item, badge: inboxCount } : item
-      ),
-    [filteredNavItems, inboxCount]
-  )
   const bottomNavFiltered = useMemo(() => filterBottomNavForRole(role), [role])
   const timeZone = useOrgTimezone()
   const headerToday = mounted ? formatHeaderToday(timeZone) : "Today"
@@ -609,12 +600,12 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           {collapsed ? (
             <>
               <nav className="flex flex-1 flex-col items-center gap-1 overflow-y-auto px-2 py-4" aria-label="Main">
-                {navWithBadges.map((item) => {
+                {filteredNavItems.map((item) => {
                   const isActive =
                     item.href === "/inventory"
                       ? pathname.startsWith("/inventory")
                       : pathname === item.href
-                  const badge = item.href === "/alerts" ? alertCount : item.badge ?? 0
+                  const badge = item.badge ?? 0
                   if (item.children && item.children.length > 0) {
                     return (
                       <InventoryRailItem
@@ -664,8 +655,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
             </>
           ) : (
             <SidebarNav
-              alertCount={alertCount}
-              navItems={navWithBadges}
+              navItems={filteredNavItems}
               onSignOut={() => void handleSignOut()}
             />
           )}
@@ -685,8 +675,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           </SheetHeader>
           <SidebarNav
             onNavigate={() => setMobileOpen(false)}
-            alertCount={alertCount}
-            navItems={navWithBadges}
+            navItems={filteredNavItems}
             onSignOut={() => {
               setMobileOpen(false)
               void handleSignOut()

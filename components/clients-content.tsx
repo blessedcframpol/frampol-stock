@@ -50,6 +50,7 @@ import { clientCompanyDetail } from "@/lib/client-label"
 import { todayBusinessDate } from "@/lib/business-date.mjs"
 import { useOrgTimezone } from "@/hooks/use-org-timezone"
 import { formatDateDDMMYYYY } from "@/lib/utils"
+import { displayInitials, formatCount } from "@/lib/format-display"
 import type { Client, ClientSite } from "@/lib/data"
 import {
   MoreHorizontal,
@@ -85,13 +86,8 @@ const CHIPS: { id: ClientListChip; label: string }[] = [
   { id: "noContact", label: "No contact details" },
 ]
 
-function clientInitials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean)
-  if (parts.length === 0) return "?"
-  return parts
-    .slice(0, 2)
-    .map((n) => n[0]!.toUpperCase())
-    .join("")
+function clientInitials(client: Client): string {
+  return displayInitials(client.name, client.company)
 }
 
 export function ClientsContent() {
@@ -293,7 +289,7 @@ export function ClientsContent() {
     <div className="flex flex-col gap-4 md:gap-6 min-w-0">
       <PageHeader
         title="Clients"
-        description={isLoading ? "Loading…" : `${clients.length} clients`}
+        description={isLoading ? "Loading…" : `${formatCount(clients.length)} clients`}
         actions={
           canEdit ? (
             <Button onClick={openAddClient} className="w-fit shrink-0">
@@ -432,7 +428,6 @@ export function ClientsContent() {
             aria-label="Search clients"
           />
         }
-        count={isLoading ? "Loading…" : `${filtered.length}`}
         secondary={
           <Select value={sort} onValueChange={(value) => setSort(value as ClientSort)}>
             <SelectTrigger className="h-10 w-[180px]" aria-label="Sort clients">
@@ -454,7 +449,9 @@ export function ClientsContent() {
             key={item.id}
             label={item.label}
             count={
-              isLoading || ((item.id === "out" || item.id === "overdue") && !holdingsReady)
+              item.id === "all" ||
+              isLoading ||
+              ((item.id === "out" || item.id === "overdue") && !holdingsReady)
                 ? undefined
                 : counts[item.id]
             }
@@ -489,7 +486,7 @@ export function ClientsContent() {
       {!isLoading && filtered.length > 0 && (
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm text-muted-foreground">
-            Showing {rangeStart}–{rangeEnd} of {filtered.length}
+            Showing {formatCount(rangeStart)}–{formatCount(rangeEnd)} of {formatCount(filtered.length)}
             {search.trim() ? " matching" : ""}
           </p>
           <Pagination page={safePage} pageCount={totalPages} onPageChange={setPage} />
@@ -555,7 +552,7 @@ function ClientListTable({
                 <div className="flex items-center gap-3 min-w-0">
                   <Avatar className="w-8 h-8 shrink-0">
                     <AvatarFallback className="bg-muted text-foreground text-xs font-semibold">
-                      {clientInitials(identity.title)}
+                      {clientInitials(client)}
                     </AvatarFallback>
                   </Avatar>
                   <div className="min-w-0">
@@ -579,7 +576,7 @@ function ClientListTable({
                 {dispatchCell(dispatchCounts.get(client.id), "units", dispatchReady, dispatchError)}
               </TableCell>
               <TableCell className="hidden lg:table-cell text-right text-xs tabular-nums text-muted-foreground">
-                {stats.get(client.id)?.out ?? 0}
+                {stats.get(client.id)?.out != null ? formatCount(stats.get(client.id)!.out) : "0"}
               </TableCell>
               <TableCell className="hidden md:table-cell text-xs text-muted-foreground">
                 {last ? formatDateDDMMYYYY(last) : "—"}

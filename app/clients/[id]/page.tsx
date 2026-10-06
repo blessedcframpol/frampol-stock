@@ -77,6 +77,7 @@ import { isAuthFailure, SESSION_EXPIRED_MESSAGE } from "@/lib/unauthorized"
 import { ledgerTextDiffersFromClient } from "@/lib/client-transactions"
 import { InvoiceRecordPanel } from "@/components/invoice-record-panel"
 import { displayedInvoice, invoiceBatchKey } from "@/lib/invoices"
+import { formatCount } from "@/lib/format-display"
 import { fetchClientTransactions, type ResolvedClientTransaction } from "@/lib/clients-orders"
 import type { ClientSite, Transaction } from "@/lib/data"
 import { StatusPill } from "@/components/fs/status-pill"
@@ -420,11 +421,11 @@ export default function ClientDetailPage() {
               ) : null}
             </div>
             <dl className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-              <Stat label="Items held" value={String(held.length)} />
-              <Stat label="Orders" value={ledgerReady ? String(saleStats.orders) : "…"} />
-              <Stat label="Units" value={ledgerReady ? String(saleStats.units) : "…"} />
-              <Stat label="Overdue returns" value={String(overdueHeld.length)} />
-              <Stat label="Open requests" value={String(openRequests.length)} />
+              <Stat label="Items held" value={formatCount(held.length)} />
+              <Stat label="Orders" value={ledgerReady ? formatCount(saleStats.orders) : "…"} />
+              <Stat label="Units" value={ledgerReady ? formatCount(saleStats.units) : "…"} />
+              <Stat label="Overdue returns" value={formatCount(overdueHeld.length)} />
+              <Stat label="Open requests" value={formatCount(openRequests.length)} />
               <Stat label="Last activity" value={!ledgerReady ? "…" : lastActivity ? formatDateDDMMYYYY(lastActivity) : "—"} />
             </dl>
           </CardHeader>
@@ -606,7 +607,7 @@ export default function ClientDetailPage() {
                       Serial / Ref
                     </TableHead>
                     {showFinancials && (
-                      <TableHead className="hidden lg:table-cell">
+                      <TableHead className="hidden lg:table-cell min-w-[9.5rem]">
                         Invoice
                       </TableHead>
                     )}
@@ -633,10 +634,19 @@ export default function ClientDetailPage() {
                             <StatusPill value={row.type} />
                             <LedgerMismatch labels={mismatchLabels(row.transactions, activeClient)} />
                           </TableCell>
-                          <TableCell className="text-right text-sm font-medium tabular-nums">{row.count} item{row.count !== 1 ? "s" : ""}</TableCell>
-                          <TableCell className="text-sm text-muted-foreground hidden sm:table-cell">—</TableCell>
+                          <TableCell className="text-right text-sm font-medium tabular-nums">{formatCount(row.count)} item{row.count !== 1 ? "s" : ""}</TableCell>
+                          <TableCell className="text-sm text-muted-foreground hidden sm:table-cell">
+                            {row.transactions[0]?.serialNumber ? (
+                              <span className="inline-flex items-baseline gap-1">
+                                <KitSerial serial={row.transactions[0].serialNumber} />
+                                {row.count > 1 ? <span>+{formatCount(row.count - 1)}</span> : null}
+                              </span>
+                            ) : (
+                              "—"
+                            )}
+                          </TableCell>
                           {showFinancials && (
-                            <TableCell className="font-mono text-xs text-muted-foreground hidden lg:table-cell">
+                            <TableCell className="text-xs text-muted-foreground hidden lg:table-cell whitespace-nowrap">
                               {row.invoiceNumber || "—"}
                             </TableCell>
                           )}
@@ -665,7 +675,7 @@ export default function ClientDetailPage() {
                           <KitSerial serial={t.serialNumber} />
                         </TableCell>
                         {showFinancials && (
-                          <TableCell className="font-mono text-xs text-muted-foreground hidden lg:table-cell">
+                          <TableCell className="text-xs text-muted-foreground hidden lg:table-cell whitespace-nowrap">
                             {displayedInvoice(t)}
                           </TableCell>
                         )}

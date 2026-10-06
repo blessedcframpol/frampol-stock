@@ -8,9 +8,11 @@ export type FilterChipModel = {
 }
 
 /** The number printed on a chip. Absent when the caller has no count. */
+import { formatCount } from "@/lib/format-display"
+
 export function filterChipCountText(count: number | undefined): string | null {
   if (count == null || Number.isNaN(count)) return null
-  return String(count)
+  return formatCount(count)
 }
 
 /** "Clear all (n)" counts chips, not the sum of their result counts. */

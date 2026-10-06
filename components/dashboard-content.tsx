@@ -12,6 +12,7 @@ import { useAuth } from "@/lib/auth-context"
 import { inStockPoolCounts } from "@/lib/inventory-products"
 import { canRecordStockMovement } from "@/lib/permissions"
 import { useAlertFeed } from "@/hooks/use-alert-feed"
+import { EMPTY, formatCount } from "@/lib/format-display"
 
 export function DashboardContent() {
   const { inventory } = useInventoryStore()
@@ -26,7 +27,7 @@ export function DashboardContent() {
   const lowStockCount = feed?.counts.lowStock ?? 0
 
   const showStats = statsReady
-  const dash = "—" as const
+  const dash = EMPTY
 
   return (
     <div className="flex flex-col gap-4 md:gap-6 min-w-0">
@@ -39,21 +40,21 @@ export function DashboardContent() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
         <StatCard
           label="Total inventory"
-          value={showStats ? pools.sale : dash}
-          caption={showStats ? `+ ${pools.rental} rental · ${pools.demo} demo` : undefined}
+          value={showStats ? formatCount(pools.sale) : dash}
+          caption={showStats ? `+ ${formatCount(pools.rental)} rental · ${formatCount(pools.demo)} demo` : undefined}
           variant="highlight"
         />
         <StatCard
           label="Items sold"
-          value={showStats ? itemsSold : dash}
+          value={showStats ? formatCount(itemsSold) : dash}
         />
         <StatCard
           label="POC active"
-          value={showStats ? pocActive : dash}
+          value={showStats ? formatCount(pocActive) : dash}
         />
         <StatCard
           label="Low stock alerts"
-          value={showStats && !lowStockLoading ? lowStockCount : dash}
+          value={showStats && !lowStockLoading ? formatCount(lowStockCount) : dash}
           href="/alerts?chip=lowStock"
           linkLabel="View low stock"
         />
@@ -63,7 +64,7 @@ export function DashboardContent() {
       <div
         className={
           showQuickScan
-            ? "grid grid-cols-1 lg:grid-cols-2 gap-3 md:gap-4 items-start"
+            ? "grid grid-cols-1 items-stretch gap-3 md:gap-4 lg:grid-cols-2"
             : "grid grid-cols-1 gap-3 md:gap-4"
         }
       >

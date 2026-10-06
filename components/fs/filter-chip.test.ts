@@ -15,6 +15,7 @@ const chips: FilterChipModel[] = [
 describe("filter chip counts", () => {
   it("prints each chip's own count and omits a missing one", () => {
     expect(filterChipCountText(12)).toBe("12")
+    expect(filterChipCountText(1262)).toBe("1,262")
     expect(filterChipCountText(0)).toBe("0")
     expect(filterChipCountText(undefined)).toBeNull()
   })

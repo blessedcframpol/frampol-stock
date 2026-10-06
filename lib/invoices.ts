@@ -67,21 +67,33 @@ export function invoiceChoiceProblem(
 }
 
 export function invoiceStateLabel(state: InvoiceState | null | undefined): string {
-  if (!state) return "—"
-  if (state.status === "invoiced") return state.invoiceNumber?.trim() || "—"
-  if (state.status === "pending") return state.legacy ? "Invoice pending · legacy" : "Invoice pending"
-  if (state.status === "legacy_unreviewed") return "00000 — unreviewed"
+  if (!state) return "Not invoiced"
+  if (state.status === "invoiced") return displayInvoiceNumber(state.invoiceNumber)
+  if (state.status === "pending") return "Pending"
+  if (state.status === "legacy_unreviewed") return "Legacy"
   if (state.approval === "awaiting") return "Awaiting approval"
   if (state.approval === "approved") return "Not invoiced"
   return "Not invoiced"
 }
 
-/** Sale and Rentals show the batch invoice. Other movements keep the legacy column. */
+/** Never a raw 00000 or a blank invoice cell. */
+export function displayInvoiceNumber(value: string | null | undefined): string {
+  const trimmed = (value ?? "").trim()
+  if (!trimmed) return "Not invoiced"
+  if (/^0+$/.test(trimmed)) return "Legacy"
+  return trimmed
+}
+
+/** Sale and Rentals show the batch invoice. Other movements keep the stored column, never 00000. */
 export function displayedInvoice(txn: Pick<Transaction, "type" | "invoiceNumber" | "invoiceState">): string {
-  if (txn.type === "Sale" || txn.type === "Rentals" || txn.invoiceState) {
-    return invoiceStateLabel(txn.invoiceState)
+  if (txn.invoiceState) return invoiceStateLabel(txn.invoiceState)
+  if (txn.type === "Sale" || txn.type === "Rentals") {
+    return displayInvoiceNumber(txn.invoiceNumber)
   }
-  return txn.invoiceNumber?.trim() || "—"
+  const trimmed = (txn.invoiceNumber ?? "").trim()
+  if (!trimmed) return "—"
+  if (/^0+$/.test(trimmed)) return "Legacy"
+  return trimmed
 }
 
 export function invoiceEventLabel(event: InvoiceEvent): string {

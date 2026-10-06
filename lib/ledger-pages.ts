@@ -1,5 +1,6 @@
 import { isQuickScanStockReversibleMovement } from "@/lib/quick-scan-reversal-inventory"
 import { canExportAllTransactions, canReverseQuickScanBatches, type AppRole } from "@/lib/permissions"
+import { formatCount } from "@/lib/format-display"
 
 export const LEDGER_PAGE_SIZE = 24
 
@@ -14,8 +15,8 @@ export function historyBatchCountLabel(
   movement: string | null | undefined
 ): string {
   const noun = total === 1 ? "batch" : "batches"
-  if (movement || reversed <= 0) return `${total} ${noun}`
-  return `${total} ${noun} · ${reversed} reversed`
+  if (movement || reversed <= 0) return `${formatCount(total)} ${noun}`
+  return `${formatCount(total)} ${noun} · ${formatCount(reversed)} reversed`
 }
 
 /** Total for the active movement. Null movement is every chip, including unnamed rows. */
@@ -112,7 +113,8 @@ export function dispatchRowsForBatch(members: readonly DispatchMember[], needle:
 }
 
 export function dispatchResultLabel(total: number, kind: "batch" | "serial" | "mixed"): string {
-  if (kind === "serial") return `${total} ${total === 1 ? "serial" : "serials"}`
-  if (kind === "mixed") return `${total} ${total === 1 ? "result" : "results"}`
-  return `${total} ${total === 1 ? "dispatch" : "dispatches"}`
+  const n = formatCount(total)
+  if (kind === "serial") return `${n} ${total === 1 ? "serial" : "serials"}`
+  if (kind === "mixed") return `${n} ${total === 1 ? "result" : "results"}`
+  return `${n} ${total === 1 ? "dispatch" : "dispatches"}`
 }

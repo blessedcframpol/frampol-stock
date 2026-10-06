@@ -75,6 +75,7 @@ import {
 } from "@/lib/settings"
 import { buildStockTakeUrl } from "@/lib/stock-take"
 import { buildCsvFilename } from "@/lib/utils"
+import { formatCount } from "@/lib/format-display"
 
 const VENDOR_LABELS = ["Starlink", "Fortinet"]
 
@@ -331,7 +332,7 @@ export function InventoryProductsContent() {
           <h1 className={pageTitleClass}>Inventory</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             {linesReady
-              ? `${activeCount} products · ${pools.inStock} items in stock · Available for sale ${pools.sale} · Rental ${pools.rental} · Demo ${pools.demo}`
+              ? `${formatCount(activeCount)} products · ${formatCount(pools.inStock)} items in stock · Available for sale ${formatCount(pools.sale)} · Rental ${formatCount(pools.rental)} · Demo ${formatCount(pools.demo)}`
               : "Loading products"}
           </p>
         </div>

@@ -37,6 +37,7 @@ import { canAccessSettings, canManageUsers, canViewAuditLog } from "@/lib/permis
 import { AuditLogPanel } from "@/components/audit-log-panel"
 import { useInventoryStore } from "@/lib/inventory-store"
 import { cn } from "@/lib/utils"
+import { displayInitials } from "@/lib/format-display"
 import { Mail, Plus, Trash2, Info, UsersRound, ArrowRight } from "lucide-react"
 import { PageHeader } from "@/components/page-nav"
 import { toast } from "sonner"
@@ -88,14 +89,7 @@ function SettingsSection({
 }
 
 function profileInitials(display: string | null | undefined, email: string | null | undefined): string {
-  const s = (display || "").trim()
-  if (s) {
-    const parts = s.split(/\s+/).filter(Boolean)
-    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase().slice(0, 2)
-    return s.slice(0, 2).toUpperCase()
-  }
-  const e = (email || "").split("@")[0]
-  return e.slice(0, 2).toUpperCase() || "?"
+  return displayInitials(display, (email || "").split("@")[0])
 }
 
 export function SettingsContent() {
