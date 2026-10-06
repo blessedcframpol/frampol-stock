@@ -37,6 +37,8 @@ import { Badge } from "@/components/ui/badge"
 import { StatusPill } from "@/components/fs/status-pill"
 import { ReturnPoolChoice } from "@/components/return-pool-choice"
 import { IntakeReasonFields } from "@/components/intake-reason-fields"
+import { InvoiceChoiceFields } from "@/components/invoice-choice-fields"
+import { invoiceChoiceProblem, type InvoiceChoice } from "@/lib/invoices"
 import { LOCATIONS, INTERNAL_LOCATIONS } from "@/lib/data"
 import { formatClientLabel } from "@/lib/client-label"
 import type { TransactionType, ClientSite, JsonValue } from "@/lib/data"
@@ -136,6 +138,8 @@ export function StockMovementContent({
   const [productName, setProductName] = useState(() => embedMode?.fixedProductName ?? "")
   const [clientId, setClientId] = useState<string>("")
   const [invoiceNumber, setInvoiceNumber] = useState("")
+  const [invoiceChoice, setInvoiceChoice] = useState<InvoiceChoice | "">("")
+  const [invoiceReason, setInvoiceReason] = useState("")
   const [notes, setNotes] = useState("")
   const [fromLocation, setFromLocation] = useState<string>("")
   const [toLocation, setToLocation] = useState<string>("")
@@ -466,6 +470,8 @@ export function StockMovementContent({
           : undefined,
       assignedTo: (outboundDetails?.clientName ?? outboundDetails?.clientCompany) ?? (clientId ? clients.find((c) => c.id === clientId)?.company : undefined),
       invoiceNumber: invoiceNumber.trim() || undefined,
+      invoiceChoice: selectedType === "Sale" || selectedType === "Rentals" ? invoiceChoice || undefined : undefined,
+      invoiceReason: invoiceReason.trim() || undefined,
       notes: notes.trim() || undefined,
       returnPool: selectedType === "POC Return" && (returnPool === "sale" || returnPool === "demo") ? returnPool : undefined,
       returnDate:
@@ -499,6 +505,8 @@ export function StockMovementContent({
       }
       setSerialNumbers("")
       setInvoiceNumber("")
+      setInvoiceChoice("")
+      setInvoiceReason("")
       setNotes("")
       if (selectedType === "Dispose") {
         setDisposalReason("")
@@ -632,9 +640,12 @@ export function StockMovementContent({
       toast.error("Choose Back in sellable stock or Demo unit, not for sale")
       return
     }
-    if ((selectedType === "Sale" || selectedType === "Rentals") && !invoiceNumber.trim()) {
-      toast.error("Invoice number is required for Sale and Rentals")
-      return
+    if (selectedType === "Sale" || selectedType === "Rentals") {
+      const invoiceProblem = invoiceChoiceProblem(invoiceChoice, invoiceNumber, invoiceReason)
+      if (invoiceProblem) {
+        toast.error(invoiceProblem)
+        return
+      }
     }
     if (selectedType === "Dispose") {
       if (!disposalReason.trim()) {
@@ -1483,17 +1494,29 @@ export function StockMovementContent({
                   </div>
                 </>
               )}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="flex flex-col gap-2">
-                  <Label className="text-foreground">Invoice Number</Label>
-                  <Input
-                    placeholder="e.g., INV-2024-0892"
-                    className="font-mono text-sm bg-card text-foreground border-border"
-                    value={invoiceNumber}
-                    onChange={(e) => setInvoiceNumber(e.target.value)}
-                  />
+              {selectedType === "Sale" || selectedType === "Rentals" ? (
+                <InvoiceChoiceFields
+                  idPrefix="movement-invoice"
+                  choice={invoiceChoice}
+                  invoiceNumber={invoiceNumber}
+                  reason={invoiceReason}
+                  onChoice={setInvoiceChoice}
+                  onInvoiceNumber={setInvoiceNumber}
+                  onReason={setInvoiceReason}
+                />
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="flex flex-col gap-2">
+                    <Label className="text-foreground">Invoice Number</Label>
+                    <Input
+                      placeholder="e.g., INV-2024-0892"
+                      className="font-mono text-sm bg-card text-foreground border-border"
+                      value={invoiceNumber}
+                      onChange={(e) => setInvoiceNumber(e.target.value)}
+                    />
+                  </div>
                 </div>
-              </div>
+              )}
               <div className="flex flex-col gap-2">
                 <Label className="text-foreground">Notes / Description</Label>
                 <Textarea
@@ -1576,7 +1599,17 @@ export function StockMovementContent({
               )}
               <div className="flex items-center justify-between py-2 border-b border-border">
                 <span className="text-sm text-muted-foreground">Invoice</span>
-                <span className="text-sm text-foreground">{invoiceNumber || "—"}</span>
+                <span className="text-sm text-foreground">
+                  {selectedType === "Sale" || selectedType === "Rentals"
+                    ? invoiceChoice === "number"
+                      ? invoiceNumber || "—"
+                      : invoiceChoice === "pending"
+                        ? "Invoice pending"
+                        : invoiceChoice === "not_invoiced"
+                          ? "00000 — not invoiced"
+                          : "—"
+                    : invoiceNumber || "—"}
+                </span>
               </div>
               <div className="flex items-center justify-between py-2">
                 <span className="text-sm text-muted-foreground">Notes</span>

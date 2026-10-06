@@ -7,6 +7,7 @@ import { useInventoryStore, INVENTORY_TRASH_RETENTION_DAYS } from "@/lib/invento
 import { useRouter } from "next/navigation"
 import { PendingInspectionCaseLink } from "@/components/pending-inspection-case-link"
 import { loadOpenCaseId } from "@/lib/kit-cases"
+import { rentalConversionLabel } from "@/lib/rental-conversion"
 import { useAuth } from "@/lib/auth-context"
 import { canChangeStockPool, canEditInventory, canRecordStockMovement } from "@/lib/permissions"
 import { ChangeGroupDialog } from "@/components/change-group-dialog"
@@ -367,17 +368,23 @@ export function InventoryItemActionsMenu({ item, menuTrigger, onRecordMovement, 
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {recentTxns.map((t) => (
+                    {recentTxns.map((t) => {
+                      const period = rentalConversionLabel(t.metadata, t.date)
+                      return (
                       <TableRow key={t.id}>
                         <TableCell className="text-xs py-1.5 whitespace-nowrap">
                           <BusinessDateLabel date={t.date} createdAt={t.createdAt} timeZone={timeZone} />
                         </TableCell>
-                        <TableCell className="text-xs py-1.5">{t.type}</TableCell>
+                        <TableCell className="text-xs py-1.5">
+                          {t.type}
+                          {period ? <p className="mt-1 text-muted-foreground">{period}</p> : null}
+                        </TableCell>
                         <TableCell className="text-xs py-1.5 max-w-[140px] truncate" title={t.client}>
                           {t.client}
                         </TableCell>
                       </TableRow>
-                    ))}
+                      )
+                    })}
                   </TableBody>
                 </Table>
               </div>

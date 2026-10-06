@@ -4,6 +4,8 @@ import { useEffect, useState, useMemo, useRef } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ReturnPoolChoice } from "@/components/return-pool-choice"
 import { IntakeReasonFields } from "@/components/intake-reason-fields"
+import { InvoiceChoiceFields } from "@/components/invoice-choice-fields"
+import { invoiceChoiceProblem, type InvoiceChoice } from "@/lib/invoices"
 import { StockPoolChip } from "@/components/stock-pool-chip"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -122,6 +124,9 @@ export function QuickScan() {
   const [outboundReturnDate, setOutboundReturnDate] = useState("")
   /** Admin sale business date. Defaults to today in the organisation timezone. */
   const [adminSaleDate, setAdminSaleDate] = useState(() => todayBusinessDate(DEFAULT_ORG_TIMEZONE))
+  const [invoiceChoice, setInvoiceChoice] = useState<InvoiceChoice | "">("")
+  const [invoiceNumber, setInvoiceNumber] = useState("")
+  const [invoiceReason, setInvoiceReason] = useState("")
   const [adminSaleDateError, setAdminSaleDateError] = useState<string | null>(null)
 
   // When some serials are not in inventory for outbound: offer to add them first
@@ -508,6 +513,15 @@ export function QuickScan() {
           : outboundDetails.clientName && outboundDetails.clientCompany
             ? `${outboundDetails.clientName} - ${outboundDetails.clientCompany}`
             : undefined
+      const needsInvoice = pendingOutbound.movementType === "Sale" || pendingOutbound.movementType === "Rentals"
+      if (needsInvoice) {
+        const invoiceProblem = invoiceChoiceProblem(invoiceChoice, invoiceNumber, invoiceReason)
+        if (invoiceProblem) {
+          toast.error(invoiceProblem)
+          setIsSubmitting(false)
+          return
+        }
+      }
       let saleTransactionDateIso: string | undefined
       if (pendingOutbound.movementType === "Sale" && isAdmin && adminSaleDate.trim()) {
         const parsed = parseSaleDateOverride(adminSaleDate.trim())
@@ -529,6 +543,9 @@ export function QuickScan() {
         returnDate,
         cloudKeysBySerial,
         saleTransactionDateIso,
+        invoiceNumber: invoiceNumber.trim() || undefined,
+        invoiceChoice: needsInvoice ? invoiceChoice || undefined : undefined,
+        invoiceReason: invoiceReason.trim() || undefined,
         expectedProductName: pendingOutbound.productName.trim(),
         expectedVendor: normalizeInventoryVendor(pendingOutbound.vendor),
         clientDirectory,
@@ -540,6 +557,9 @@ export function QuickScan() {
         setPendingOutbound(null)
         setOutboundReturnDate("")
         if (pendingOutbound.movementType === "Sale") setAdminSaleDate("")
+        setInvoiceChoice("")
+        setInvoiceNumber("")
+        setInvoiceReason("")
         setNewClientName("")
         setNewClientCompany("")
         setNewClientEmail("")
@@ -924,6 +944,18 @@ export function QuickScan() {
                     className="h-9"
                   />
                 </div>
+              )}
+
+              {(pendingOutbound.movementType === "Sale" || pendingOutbound.movementType === "Rentals") && (
+                <InvoiceChoiceFields
+                  idPrefix="quick-scan-invoice"
+                  choice={invoiceChoice}
+                  invoiceNumber={invoiceNumber}
+                  reason={invoiceReason}
+                  onChoice={setInvoiceChoice}
+                  onInvoiceNumber={setInvoiceNumber}
+                  onReason={setInvoiceReason}
+                />
               )}
 
               {pendingOutbound.movementType === "Sale" && isAdmin && (

@@ -39,6 +39,7 @@ import {
   showSerialCheckboxes,
 } from "@/lib/inventory-products"
 import { recordReturnHref } from "@/lib/alerts"
+import { rentalConversionLabel } from "@/lib/rental-conversion"
 import { canChangeStockPool, canRecordStockMovement } from "@/lib/permissions"
 import { buildStockTakeUrl } from "@/lib/stock-take"
 import { buildCsvFilename, formatDateDDMMYYYY } from "@/lib/utils"
@@ -196,12 +197,17 @@ export function InventorySerialsContent({ productId }: { productId: string }) {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {kitHistory.slice(0, 20).map((txn) => (
+                  {kitHistory.slice(0, 20).map((txn) => {
+                    const period = rentalConversionLabel(txn.metadata, txn.date)
+                    return (
                     <TableRow key={txn.id}>
                       <TableCell>
                         <BusinessDateLabel date={txn.date} createdAt={txn.createdAt} timeZone={timeZone} />
                       </TableCell>
-                      <TableCell>{txn.type}</TableCell>
+                      <TableCell>
+                        {txn.type}
+                        {period ? <p className="mt-1 text-xs text-muted-foreground">{period}</p> : null}
+                      </TableCell>
                       <TableCell>{txn.itemName}</TableCell>
                       <TableCell>
                         {txn.type === "Transfer" && txn.fromLocation && txn.toLocation
@@ -209,7 +215,8 @@ export function InventorySerialsContent({ productId }: { productId: string }) {
                           : txn.client}
                       </TableCell>
                     </TableRow>
-                  ))}
+                    )
+                  })}
                 </TableBody>
               </Table>
             )}

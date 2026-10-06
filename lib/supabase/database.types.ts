@@ -835,6 +835,90 @@ export interface Database {
         }
         Relationships: []
       }
+      batch_invoices: {
+        Row: {
+          batch_id: string
+          status: string
+          invoice_number: string | null
+          not_invoiced_reason: string | null
+          entered_by: string | null
+          entered_at: string | null
+          approval: string | null
+          approved_by: string | null
+          approved_at: string | null
+          rejection_reason: string | null
+          legacy: boolean
+        }
+        Insert: {
+          batch_id: string
+          status: string
+          invoice_number?: string | null
+          not_invoiced_reason?: string | null
+          entered_by?: string | null
+          entered_at?: string | null
+          approval?: string | null
+          approved_by?: string | null
+          approved_at?: string | null
+          rejection_reason?: string | null
+          legacy?: boolean
+        }
+        Update: {
+          batch_id?: string
+          status?: string
+          invoice_number?: string | null
+          not_invoiced_reason?: string | null
+          entered_by?: string | null
+          entered_at?: string | null
+          approval?: string | null
+          approved_by?: string | null
+          approved_at?: string | null
+          rejection_reason?: string | null
+          legacy?: boolean
+        }
+        Relationships: []
+      }
+      batch_invoice_events: {
+        Row: {
+          id: string
+          batch_id: string
+          old_status: string | null
+          new_status: string | null
+          old_invoice_number: string | null
+          new_invoice_number: string | null
+          old_approval: string | null
+          new_approval: string | null
+          actor_id: string | null
+          reason: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          batch_id: string
+          old_status?: string | null
+          new_status?: string | null
+          old_invoice_number?: string | null
+          new_invoice_number?: string | null
+          old_approval?: string | null
+          new_approval?: string | null
+          actor_id?: string | null
+          reason?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          batch_id?: string
+          old_status?: string | null
+          new_status?: string | null
+          old_invoice_number?: string | null
+          new_invoice_number?: string | null
+          old_approval?: string | null
+          new_approval?: string | null
+          actor_id?: string | null
+          reason?: string | null
+          created_at?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           id: string
@@ -908,6 +992,29 @@ export interface Database {
       }
     }
     Views: {
+      batch_invoice_list: {
+        Row: {
+          batch_id: string
+          status: string
+          invoice_number: string | null
+          not_invoiced_reason: string | null
+          entered_by: string | null
+          entered_at: string | null
+          approval: string | null
+          approved_by: string | null
+          approved_at: string | null
+          rejection_reason: string | null
+          legacy: boolean
+          movement_type: string | null
+          client_name: string | null
+          quantity: number
+          serials: string | null
+          product_name: string | null
+          sale_date: string | null
+          days_waiting: number | null
+        }
+        Relationships: []
+      }
       active_transactions: {
         Row: {
           id: string
@@ -1089,6 +1196,23 @@ export interface Database {
       }
       cancel_holding_extension: {
         Args: { p_extension_id: string; p_reason: string }
+        Returns: undefined
+      }
+      set_batch_invoice: {
+        Args: {
+          p_batch_id: string
+          p_choice: string
+          p_invoice_number: string
+          p_reason: string
+        }
+        Returns: undefined
+      }
+      approve_batch_invoice: {
+        Args: { p_batch_id: string }
+        Returns: undefined
+      }
+      reject_batch_invoice: {
+        Args: { p_batch_id: string; p_reason: string }
         Returns: undefined
       }
       complete_inspection: {

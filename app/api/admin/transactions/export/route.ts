@@ -3,6 +3,9 @@ import { apiErrorResponse } from "@/lib/api-error-response"
 import { requireAdmin } from "@/lib/require-admin"
 import { buildCsvFilename } from "@/lib/utils"
 import { rowToTransaction } from "@/lib/supabase/inventory-db"
+import { displayedInvoice } from "@/lib/invoices"
+import { fetchInvoiceStates, withInvoiceStates } from "@/lib/supabase/invoices-db"
+import { rentalDaysFromMetadata } from "@/lib/rental-conversion"
 import { fetchAllPages } from "@/lib/supabase/postgrest-page"
 
 function csvEscape(value: unknown): string {
@@ -41,7 +44,8 @@ export async function GET() {
         .range(from, to)
     )
     const countAfter = await countActive()
-    const transactions = txnRows.map(rowToTransaction)
+    const invoiceStates = await fetchInvoiceStates(supabase)
+    const transactions = withInvoiceStates(txnRows.map(rowToTransaction), invoiceStates)
     if (transactions.length !== countBefore || transactions.length !== countAfter) {
       return apiErrorResponse(409, "Export row count did not match active transactions", {
         detail: `CSV rows ${transactions.length}, active before ${countBefore}, active after ${countAfter}`,
@@ -58,6 +62,8 @@ export async function GET() {
         "Client",
         "Client ID",
         "Invoice Number",
+        "Invoice status",
+        "Rental days",
         "From Location",
         "To Location",
         "Assigned To",
@@ -81,7 +87,9 @@ export async function GET() {
         txn.itemName,
         txn.client,
         txn.clientId ?? "",
-        txn.invoiceNumber ?? "",
+        displayedInvoice(txn) === "—" ? "" : displayedInvoice(txn),
+        txn.invoiceState?.status ?? "",
+        rentalDaysFromMetadata(txn.metadata)?.toString() ?? "",
         txn.fromLocation ?? "",
         txn.toLocation ?? "",
         txn.assignedTo ?? "",

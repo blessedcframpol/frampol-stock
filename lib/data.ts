@@ -120,6 +120,8 @@ export interface Transaction {
   /** Reference to clients.id when client selected from directory */
   clientId?: string
   invoiceNumber?: string
+  /** Batch invoice. Sale and Rentals display this instead of the legacy column. */
+  invoiceState?: import("@/lib/invoices").InvoiceState
   notes?: string
   /** For Transfer: origin location */
   fromLocation?: string

@@ -24,6 +24,7 @@ import { toast } from "sonner"
 import type { Database } from "./supabase/database.types"
 import { businessDateToIso, DEFAULT_ORG_TIMEZONE } from "./business-date.mjs"
 import { fetchAppSettings } from "./settings"
+import { fetchInvoiceStates, withInvoiceStates } from "./supabase/invoices-db"
 
 function generateId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
@@ -81,6 +82,10 @@ export interface MovementParams {
   toLocation?: string
   assignedTo?: string
   invoiceNumber?: string
+  /** Sale and Rentals. number, pending, or not_invoiced (00000). */
+  invoiceChoice?: "number" | "pending" | "not_invoiced"
+  /** Required when invoiceChoice is not_invoiced. */
+  invoiceReason?: string
   notes?: string
   /** For Rentals: when the kit is due to be returned (ISO date). Defaults to 30 days from today if omitted. */
   returnDate?: string
@@ -102,6 +107,10 @@ export interface MovementParams {
   expectedVendor?: string
   /** Stored on transaction rows (JSON). */
   movementMetadata?: JsonValue
+  /** Sale from Rented. The Rentals business date. */
+  rentalStartDate?: string
+  /** Sale from Rented. Inclusive rental end, on or before today. */
+  rentalEndDate?: string
   /** When type is Inspection Pass / Fail: persist kit_inspections after transactions. */
   kitInspectionPayload?: {
     inventoryItemId: string
@@ -272,7 +281,8 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
             .order("id", { ascending: false })
             .range(from, to)
         )
-        if (!stale()) setTransactions(allTxnRows.map(rowToTransaction))
+        const invoiceStates = await fetchInvoiceStates(supabase)
+        if (!stale()) setTransactions(withInvoiceStates(allTxnRows.map(rowToTransaction), invoiceStates))
       } catch (error) {
         console.error("refetchLedger:", error)
       }
@@ -315,6 +325,8 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
         toLocation,
         assignedTo,
         invoiceNumber,
+        invoiceChoice,
+        invoiceReason,
         notes,
         returnDate,
         disposalReason,
@@ -327,6 +339,8 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
         expectedProductName,
         expectedVendor,
         movementMetadata,
+        rentalStartDate,
+        rentalEndDate,
         kitInspectionPayload,
         remediationCaseLoanerLink,
         clientDirectory,
@@ -374,6 +388,8 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
         toLocation,
         assignedTo,
         invoiceNumber,
+        invoiceChoice,
+        invoiceReason,
         notes,
         returnDate,
         disposalReason,
@@ -388,6 +404,8 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
         movementMetadata,
         orgTimeZone,
         returnPool,
+        rentalStartDate,
+        rentalEndDate,
       })
 
       if (result.saleDateError) {

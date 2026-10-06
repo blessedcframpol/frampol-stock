@@ -1,5 +1,7 @@
+import { invoiceBatchKey } from "@/lib/invoices"
 import { getSupabaseClient } from "@/lib/supabase/client"
 import type { Transaction } from "@/lib/data"
+import { invoiceStateFromRow } from "@/lib/supabase/invoices-db"
 import { rowToTransaction } from "@/lib/supabase/inventory-db"
 
 /** Sale dispatches for one directory client, counted in SQL. */
@@ -74,10 +76,25 @@ export async function fetchClientTransactions(clientId: string): Promise<Resolve
   const supabase = getSupabaseClient()
   const { data, error } = await supabase.rpc("client_transactions", { p_client_id: clientId })
   if (error) throw new Error(error.message)
-  return (data ?? []).map((row) => ({
+  const transactions = (data ?? []).map((row) => ({
     ...rowToTransaction(row),
     batchKey: row.batch_key,
   }))
+  const keys = [...new Set(transactions.map((txn) => invoiceBatchKey(txn)))]
+  const states = new Map<string, ReturnType<typeof invoiceStateFromRow>>()
+  for (let index = 0; index < keys.length; index += 80) {
+    const chunk = keys.slice(index, index + 80)
+    const { data: invoiceRows, error: invoiceError } = await supabase
+      .from("batch_invoices")
+      .select("*")
+      .in("batch_id", chunk)
+    if (invoiceError) throw new Error(invoiceError.message)
+    for (const row of invoiceRows ?? []) states.set(row.batch_id, invoiceStateFromRow(row))
+  }
+  return transactions.map((txn) => {
+    const invoiceState = states.get(invoiceBatchKey(txn))
+    return invoiceState ? { ...txn, invoiceState } : txn
+  })
 }
 
 /** Latest business date per client, from client_last_activity(). */

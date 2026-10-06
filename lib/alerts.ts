@@ -200,8 +200,7 @@ export type HoldingDrawerAction = "convert" | "return" | "extend"
 /** Actions on a Dispatched kit. Same role gate as the old Alerts buttons, and only while the kit is out. */
 export function holdingDrawerActions(status: string, role: AppRole | null | undefined): HoldingDrawerAction[] {
   if (!canRecordReturn(role)) return []
-  if (status === "POC") return ["convert", "return", "extend"]
-  if (status === "Rented") return ["return", "extend"]
+  if (status === "POC" || status === "Rented") return ["convert", "return", "extend"]
   return []
 }
 

@@ -35,6 +35,7 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { History, Undo2, Loader2, Download, MoreHorizontal } from "lucide-react"
 import { INTERNAL_LOCATIONS, isInternalLocation } from "@/lib/data"
+import { InvoiceRecordPanel } from "@/components/invoice-record-panel"
 import { useInventoryStore } from "@/lib/inventory-store"
 import { fetchTransactionBatchPage, type TransactionBatchSummary } from "@/lib/transaction-batches"
 import {
@@ -151,6 +152,9 @@ export function TransactionHistoryContent() {
         })
         if (cancelled) return
         setBatches(next.batches)
+        setViewingBatch((current) =>
+          current ? next.batches.find((batch) => batch.batchKey === current.batchKey) ?? current : current,
+        )
         setCounts(next.counts)
         setTotal(next.total)
       } catch (e) {
@@ -672,7 +676,16 @@ export function TransactionHistoryContent() {
           date: (
             <BusinessDateLabel date={viewingBatch.date} createdAt={viewingBatch.recordedAt} timeZone={timeZone} />
           ),
-          invoice: viewingBatch.invoiceNumber || "—",
+          invoice: viewingBatch.invoiceBatchId ? (
+            <InvoiceRecordPanel
+              batchId={viewingBatch.invoiceBatchId}
+              state={viewingBatch.invoiceState}
+              timeZone={timeZone}
+              onChanged={() => setReloadToken((value) => value + 1)}
+            />
+          ) : (
+            viewingBatch.invoiceNumber || "—"
+          ),
           deliveryNote: viewingBatch.deliveryNoteUrl ? (
             <SignedStorageLink path={viewingBatch.deliveryNoteUrl} className="text-brand hover:underline">
               View
@@ -691,6 +704,12 @@ export function TransactionHistoryContent() {
               : null,
             viewingBatch.movementType === "Dispose" && viewingBatch.authorisedBySummary
               ? { label: "Authorised by", value: viewingBatch.authorisedBySummary }
+              : null,
+            viewingBatch.rentalPeriod
+              ? { label: "Rental", value: viewingBatch.rentalPeriod, span: 2 as const }
+              : null,
+            viewingBatch.rentalDays != null
+              ? { label: "Rental days", value: String(viewingBatch.rentalDays) }
               : null,
             viewingBatch.notesSummary
               ? {

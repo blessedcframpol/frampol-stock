@@ -1,6 +1,8 @@
 import type { Transaction, TransactionType } from "@/lib/data"
 import { compareBusinessDatesDesc, latestRecordedAt } from "@/lib/business-date.mjs"
 import { getTransactionOrderGroupKey } from "@/lib/client-transactions"
+import { displayedInvoice, invoiceBatchKey } from "@/lib/invoices"
+import { rentalConversionLabel, rentalDaysFromMetadata } from "@/lib/rental-conversion"
 
 /** One logical submission / batch for history UI (matches grouped `transactions` rows). */
 export type TransactionBatchSummary = {
@@ -28,6 +30,10 @@ export type TransactionBatchSummary = {
   /** When movementType is Reversal: original movement type (Inbound, Sale, etc.). */
   originalMovementType?: TransactionType
   invoiceNumber?: string
+  /** Batch invoice state when the movement is a Sale or Rentals. */
+  invoiceState?: import("@/lib/invoices").InvoiceState
+  /** batch_invoices key for this batch, when it has an invoice record. */
+  invoiceBatchId?: string
   hasDeliveryNote: boolean
   /** First delivery note URL in batch (Inbound), if any */
   deliveryNoteUrl?: string
@@ -40,6 +46,10 @@ export type TransactionBatchSummary = {
   toLocation?: string
   /** Unique assignee values, comma-separated when several. */
   assignedToSummary?: string
+  /** Sale converted from a rental: the period sentence, when every row agrees. */
+  rentalPeriod?: string
+  /** Sale converted from a rental: days to invoice, when every row agrees. */
+  rentalDays?: number
   /** Aggregated for Dispose rows (comma-separated if multiple distinct). */
   disposalReasonSummary?: string
   authorisedBySummary?: string
@@ -109,7 +119,10 @@ function commaSeparatedUnique(txns: Transaction[], getter: (t: Transaction) => s
 }
 
 function invoiceNumberFromTransactions(txns: Transaction[]): string | undefined {
-  return commaSeparatedUnique(txns, (t) => t.invoiceNumber)
+  return commaSeparatedUnique(txns, (t) => {
+    const label = displayedInvoice(t)
+    return label === "—" ? undefined : label
+  })
 }
 
 function productLabelFromTransactions(txns: Transaction[]): string {
@@ -231,6 +244,8 @@ export function groupTransactionsIntoBatches(
       reversesBatchId: reversalMeta.reversedBatchId,
       originalMovementType,
       invoiceNumber: invoiceNumberFromTransactions(sorted),
+      invoiceState: sorted.find((txn) => txn.invoiceState)?.invoiceState,
+      invoiceBatchId: sorted.find((txn) => txn.invoiceState) ? invoiceBatchKey(sorted.find((txn) => txn.invoiceState)!) : undefined,
       hasDeliveryNote: sorted.some((t) => !!t.deliveryNoteUrl),
       deliveryNoteUrl: sorted.find((t) => t.deliveryNoteUrl)?.deliveryNoteUrl,
       clientId: clientIdUniformFromTransactions(sorted),
@@ -238,6 +253,12 @@ export function groupTransactionsIntoBatches(
       fromLocation: uniformTrimmedField(sorted, (t) => t.fromLocation),
       toLocation: uniformTrimmedField(sorted, (t) => t.toLocation),
       assignedToSummary: assignedToSummaryFromTransactions(sorted),
+      rentalPeriod: uniformTrimmedField(sorted, (txn) => rentalConversionLabel(txn.metadata, txn.date) ?? undefined),
+      rentalDays: (() => {
+        const days = sorted.map((txn) => rentalDaysFromMetadata(txn.metadata))
+        const first = days[0]
+        return first != null && days.every((value) => value === first) ? first : undefined
+      })(),
       disposalReasonSummary: commaSeparatedUnique(sorted, (t) => t.disposalReason),
       authorisedBySummary: commaSeparatedUnique(sorted, (t) => t.authorisedBy),
     })

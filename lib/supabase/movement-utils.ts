@@ -1,6 +1,7 @@
 import type { InventoryItem, ItemStatus, JsonValue, Transaction, TransactionType } from "@/lib/data"
 import { businessDateToIso, DEFAULT_ORG_TIMEZONE, todayBusinessDate } from "@/lib/business-date.mjs"
 import { movementResult } from "@/lib/movement-transitions.mjs"
+import { inclusiveRentalDays, rentalConversionProblem } from "@/lib/rental-conversion"
 
 /**
  * Given current inventory and movement params, compute the updated items and new transactions.
@@ -120,6 +121,9 @@ export function validateMovementForItem(
   if (type === "Sale" && st === "In Stock" && pool !== "sale") {
     return `Sale requires a sellable kit. Move ${item.serialNumber} from ${pool} to sale first`
   }
+  if (type === "Sale" && st === "Rented" && item.vendor !== "Starlink") {
+    return `Convert to sale is only for Starlink kits (${item.serialNumber})`
+  }
   if (type === "Rentals" && item.vendor !== "Starlink") {
     return `Rentals is only for Starlink kits (${item.serialNumber})`
   }
@@ -203,6 +207,10 @@ export function computeMovementResult(
     toLocation?: string
     assignedTo?: string
     invoiceNumber?: string
+    /** Sale and Rentals. number, pending, or not_invoiced (00000). */
+    invoiceChoice?: "number" | "pending" | "not_invoiced"
+    /** Required when invoiceChoice is not_invoiced. */
+    invoiceReason?: string
     notes?: string
     /** For Rentals: due date (ISO date). Defaults to DEFAULT_RENTAL_DAYS from today. */
     returnDate?: string
@@ -228,6 +236,10 @@ export function computeMovementResult(
     expectedVendor?: string
     /** Extra JSON stored on transaction rows (decommission reason, remediation case id, etc.) */
     movementMetadata?: JsonValue
+    /** Sale from Rented. The rental start is the Rentals business date. */
+    rentalStartDate?: string
+    /** Sale from Rented. Inclusive end of the rental, on or before today, not after the sale date. */
+    rentalEndDate?: string
     /** POC Return only. Required: sale or demo. There is no default. */
     returnPool?: "sale" | "demo"
   }
@@ -248,7 +260,9 @@ export function computeMovementResult(
     fromLocation,
     toLocation,
     assignedTo,
-    invoiceNumber,
+    invoiceNumber: invoiceNumberArg,
+    invoiceChoice,
+    invoiceReason,
     notes,
     returnDate,
     disposalReason,
@@ -264,6 +278,8 @@ export function computeMovementResult(
     clientDirectory,
     orgTimeZone,
     returnPool,
+    rentalStartDate,
+    rentalEndDate,
   } = params
   const businessToday = businessDateToIso(todayBusinessDate(orgTimeZone?.trim() || DEFAULT_ORG_TIMEZONE))
   let date = businessToday
@@ -342,7 +358,7 @@ export function computeMovementResult(
           client: clientDisplay,
           date,
           clientId,
-          invoiceNumber,
+          invoiceNumber: invoiceNumberArg,
           notes,
           assignedTo: undefined,
           fromLocation: undefined,
@@ -380,7 +396,7 @@ export function computeMovementResult(
           client: clientDisplay,
           date,
           clientId,
-          invoiceNumber,
+          invoiceNumber: invoiceNumberArg,
           notes,
           assignedTo: undefined,
           fromLocation: undefined,
@@ -416,6 +432,18 @@ export function computeMovementResult(
     if (reason) {
       rejected.push({ serial: trimmed, reason })
       continue
+    }
+    if (type === "Sale" && it.status === "Rented") {
+      const problem = rentalConversionProblem({
+        rentalStart: rentalStartDate,
+        rentalEnd: rentalEndDate,
+        saleDate: date.slice(0, 10),
+        today: businessToday.slice(0, 10),
+      })
+      if (problem) {
+        rejected.push({ serial: trimmed, reason: problem })
+        continue
+      }
     }
 
     success.push(trimmed)
@@ -456,12 +484,13 @@ export function computeMovementResult(
         it.assignedTo = undefined
         break
       case "Sale": {
-        const converting = it.status === "POC"
+        const convertingPoc = it.status === "POC"
+        const convertingRental = it.status === "Rented"
         const keptClient = it.client
         const keptAssigned = it.assignedTo
         const pocOutDate = it.pocOutDate
         it.status = "Sold"
-        if (converting) {
+        if (convertingPoc) {
           it.returnDate = undefined
           it.client = keptClient
           it.assignedTo = keptAssigned
@@ -472,6 +501,21 @@ export function computeMovementResult(
           txnMetadata = mergeRecordMeta(movementMetadata, {
             converted_from: "POC",
             poc_out_date: pocOutDate ?? null,
+          })
+        } else if (convertingRental) {
+          const start = (rentalStartDate ?? "").slice(0, 10)
+          const end = (rentalEndDate ?? "").slice(0, 10)
+          it.returnDate = undefined
+          it.client = keptClient
+          it.assignedTo = keptAssigned
+          txnClientDisplay = keptClient?.trim() || txnClientDisplay
+          txnClientId =
+            resolveClientIdFromDirectoryLabel(txnClientDisplay, clientDirectory) ?? txnClientId
+          txnMetadata = mergeRecordMeta(movementMetadata, {
+            converted_from: "Rentals",
+            rental_start: start,
+            rental_end: end,
+            rental_days: inclusiveRentalDays(start, end),
           })
         } else {
           it.location = "Delivered"
@@ -565,6 +609,23 @@ export function computeMovementResult(
     it.assignmentHistory = history.length ? history : it.assignmentHistory
     next[idx] = it
     updatedItems.push(it)
+    const invoiceApplies = type === "Sale" || type === "Rentals"
+    const storedInvoice = !invoiceApplies
+      ? invoiceNumberArg
+      : invoiceChoice === "number"
+        ? invoiceNumberArg?.trim() || undefined
+        : invoiceChoice === "not_invoiced"
+          ? "00000"
+          : invoiceChoice === "pending"
+            ? undefined
+            : invoiceNumberArg
+    const storedMetadata =
+      invoiceApplies && invoiceChoice
+        ? mergeRecordMeta(txnMetadata, {
+            invoice_choice: invoiceChoice,
+            ...(invoiceChoice === "not_invoiced" ? { invoice_reason: (invoiceReason ?? "").trim() } : {}),
+          })
+        : txnMetadata
     newTransactions.push({
       id: `TXN-${Date.now()}-${success.length}-${Math.random().toString(36).slice(2, 9)}`,
       type,
@@ -574,7 +635,6 @@ export function computeMovementResult(
       date,
       clientId: txnClientId,
       returnPool: type === "POC Return" ? returnPool : undefined,
-      invoiceNumber,
       notes,
       assignedTo:
         assignedTo ??
@@ -596,7 +656,8 @@ export function computeMovementResult(
       authorisedBy: type === "Dispose" ? authorisedBy : undefined,
       batchId: batchId ?? undefined,
       deliveryNoteUrl: type === "Inbound" ? deliveryNoteUrl : undefined,
-      metadata: txnMetadata,
+      invoiceNumber: storedInvoice,
+      metadata: storedMetadata,
     })
   }
 

@@ -129,7 +129,7 @@ describe("record return", () => {
     for (const role of ROLES) {
       const actions = holdingDrawerActions("POC", role)
       expect(actions).toEqual(allowed.has(role) ? ["convert", "return", "extend"] : [])
-      expect(holdingDrawerActions("Rented", role)).toEqual(allowed.has(role) ? ["return", "extend"] : [])
+      expect(holdingDrawerActions("Rented", role)).toEqual(allowed.has(role) ? ["convert", "return", "extend"] : [])
     }
     expect(holdingDrawerActions("POC", null)).toEqual([])
     for (const status of ["Sold", "Disposed", "Maintenance", "In Stock"]) {

@@ -93,7 +93,7 @@ describe("validateMovementForItem", () => {
       })
       const blocked = (
         type === "Sale"
-          ? ["Sold", "Rented", "Maintenance", "RMA Hold", "Disposed", "Pending Inspection"]
+          ? ["Sold", "Maintenance", "RMA Hold", "Disposed", "Pending Inspection"]
           : ["Sold", "POC", "Rented", "Maintenance", "RMA Hold", "Disposed", "Pending Inspection"]
       ) as ItemStatus[]
       for (const st of blocked) {
@@ -104,6 +104,13 @@ describe("validateMovementForItem", () => {
       if (type === "Sale") {
         it("allows Sale from POC", () => {
           expect(validateMovementForItem("Sale", item({ status: "POC" }), ctx)).toBeNull()
+        })
+        it("allows Sale from a rented Starlink kit", () => {
+          expect(validateMovementForItem("Sale", item({ status: "Rented", location: "Client Site" }), ctx)).toBeNull()
+          expect(movementResult("Rented", "Sale")).toBe("Sold")
+        })
+        it("blocks Sale from a rented kit that is not Starlink", () => {
+          expect(validateMovementForItem("Sale", item({ status: "Rented", vendor: "Ubiquiti" }), ctx)).toMatch(/Starlink/)
         })
         it("blocks Sale of a rental or demo kit that is still In Stock", () => {
           expect(validateMovementForItem("Sale", item({ status: "In Stock", stockPool: "rental" }), ctx)).toMatch(/sellable/)
@@ -377,6 +384,64 @@ describe("computeMovementResult", () => {
       date: "2026-10-01T00:00:00.000Z",
       metadata: { converted_from: "POC", poc_out_date: "2026-06-01" },
     })
+  })
+
+  it("Sale from Rented keeps the client, clears the return date, and records the rental period", () => {
+    const today = todayBusinessDate("Africa/Harare")
+    const result = computeMovementResult(
+      [
+        item({
+          status: "Rented",
+          location: "Client Site",
+          stockPool: "rental",
+          client: "Ada - Co",
+          assignedTo: "Ada - Co",
+          returnDate: "2026-12-01",
+        }),
+      ],
+      {
+        ...baseParams,
+        type: "Sale",
+        invoiceNumber: "INV-1",
+        saleTransactionDateIso: today,
+        rentalStartDate: today,
+        rentalEndDate: today,
+        orgTimeZone: "Africa/Harare",
+      },
+    )
+    expect(result.success).toEqual(["SN-1"])
+    expect(result.updatedItems[0]).toMatchObject({
+      status: "Sold",
+      location: "Client Site",
+      stockPool: "rental",
+      client: "Ada - Co",
+      assignedTo: "Ada - Co",
+      returnDate: undefined,
+    })
+    expect(result.newTransactions[0]).toMatchObject({
+      type: "Sale",
+      client: "Ada - Co",
+      invoiceNumber: "INV-1",
+      date: `${today}T00:00:00.000Z`,
+      metadata: { converted_from: "Rentals", rental_start: today, rental_end: today, rental_days: 1 },
+    })
+  })
+
+  it("rejects a rental conversion whose sale date is before the rental end", () => {
+    const today = todayBusinessDate("Africa/Harare")
+    const result = computeMovementResult(
+      [item({ status: "Rented", location: "Client Site", client: "Ada - Co" })],
+      {
+        ...baseParams,
+        type: "Sale",
+        saleTransactionDateIso: "2020-01-02",
+        rentalStartDate: "2020-01-02",
+        rentalEndDate: today,
+        orgTimeZone: "Africa/Harare",
+      },
+    )
+    expect(result.success).toEqual([])
+    expect(result.rejected[0]?.reason).toMatch(/before the rental end/)
   })
 
   it("Rentals: sets Rented / Client Site with returnDate", () => {

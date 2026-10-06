@@ -74,6 +74,11 @@ export function canViewFinancials(role: AppRole | null | undefined): boolean {
   return role === ADMIN || role === ACCOUNTS
 }
 
+/** Enter, change, and review batch invoices. Admin and accounts. Approval is admin only. */
+export function canManageInvoices(role: AppRole | null | undefined): boolean {
+  return role === ADMIN || role === ACCOUNTS
+}
+
 export function canCreateStockRequest(role: AppRole | null | undefined): boolean {
   return role === ADMIN || role === SALES || role === TECHNICIANS
 }

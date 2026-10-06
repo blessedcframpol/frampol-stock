@@ -4,6 +4,8 @@ import { getTransactionOrderGroupKey } from "@/lib/client-transactions"
 import { collapseClientLabel, formatClientLabel } from "@/lib/client-label"
 import { loadProfileLabels } from "@/lib/profile-labels"
 import { groupTransactionsIntoBatches, type TransactionBatchLine } from "@/lib/transaction-batches"
+import { displayedInvoice, invoiceBatchKey } from "@/lib/invoices"
+import { invoiceStateFromRow } from "@/lib/supabase/invoices-db"
 import { rowToTransaction } from "@/lib/supabase/inventory-db"
 import { fetchAllPages } from "@/lib/supabase/postgrest-page"
 import { createServerSupabaseClient } from "@/lib/supabase/server"
@@ -112,6 +114,21 @@ export async function GET(request: Request) {
     if (byId.size !== ids.length) {
       throw new Error(`Batch page is incomplete: expected ${ids.length} transactions, got ${byId.size}`)
     }
+    const invoiceKeys = [...new Set([...byId.values()].map((txn) => invoiceBatchKey(txn)))]
+    for (let index = 0; index < invoiceKeys.length; index += ID_CHUNK) {
+      const chunk = invoiceKeys.slice(index, index + ID_CHUNK)
+      const { data: invoiceRows, error: invoiceError } = await supabase
+        .from("batch_invoices")
+        .select("*")
+        .in("batch_id", chunk)
+      if (invoiceError) throw new Error(invoiceError.message)
+      for (const row of invoiceRows ?? []) {
+        const state = invoiceStateFromRow(row)
+        for (const [id, txn] of byId) {
+          if (invoiceBatchKey(txn) === row.batch_id) byId.set(id, { ...txn, invoiceState: state })
+        }
+      }
+    }
 
     const batchIds = [
       ...new Set(
@@ -176,7 +193,7 @@ export async function GET(request: Request) {
       list.push({
         serialNumber: txn.serialNumber,
         client: txn.client,
-        invoiceNumber: txn.invoiceNumber,
+        invoiceNumber: displayedInvoice(txn) === "—" ? undefined : displayedInvoice(txn),
         date: txn.date,
         recordedAt: txn.createdAt,
         assignedTo: txn.assignedTo,

@@ -7,7 +7,7 @@ import { ChangeGroupDialog } from "@/components/change-group-dialog"
 import { ReturnPoolChoice } from "@/components/return-pool-choice"
 import { PendingInspectionCaseLink } from "@/components/pending-inspection-case-link"
 import { StockPoolChip } from "@/components/stock-pool-chip"
-import { ConvertToSaleDialog, ExtendHoldingDialog } from "@/components/holding-actions"
+import { ConvertRentalToSaleDialog, ConvertToSaleDialog, ExtendHoldingDialog } from "@/components/holding-actions"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -27,6 +27,7 @@ import { useAuth } from "@/lib/auth-context"
 import { cancelHoldingExtension } from "@/lib/holdings"
 import { useInventoryStore } from "@/lib/inventory-store"
 import { canCancelHoldingExtension, canChangeStockPool } from "@/lib/permissions"
+import { rentalDaysFromMetadata, rentalSaleSentence } from "@/lib/rental-conversion"
 import { loadProfileLabels } from "@/lib/profile-labels"
 import { getSupabaseClient } from "@/lib/supabase/client"
 import { INVENTORY_ITEM_SELECT, rowToInventoryItem } from "@/lib/supabase/inventory-db"
@@ -57,7 +58,7 @@ export function DispatchedKitDrawer({
   onChanged: () => void
 }) {
   const { role } = useAuth()
-  const { inventory, applyMovement, refetchLedger } = useInventoryStore()
+  const { inventory, transactions, applyMovement, refetchLedger } = useInventoryStore()
   const timeZone = useOrgTimezone()
   const today = todayBusinessDate(timeZone)
   const storeItem = inventory.find((row) => row.id === itemId) ?? null
@@ -67,6 +68,7 @@ export function DispatchedKitDrawer({
   const [statusOverride, setStatusOverride] = useState<string | null>(null)
   const [returnDateOverride, setReturnDateOverride] = useState<string | null | undefined>(undefined)
   const [convertOpen, setConvertOpen] = useState(false)
+  const [convertKind, setConvertKind] = useState<"poc" | "rental" | null>(null)
   const [groupOpen, setGroupOpen] = useState(false)
   const [extendOpen, setExtendOpen] = useState(false)
   const [returnOpen, setReturnOpen] = useState(false)
@@ -148,6 +150,16 @@ export function DispatchedKitDrawer({
 
   const item = storeItem ?? fetched
   const status = statusOverride ?? item?.status ?? ""
+  const rentalSale = item
+    ? transactions.reduce<(typeof transactions)[number] | null>((best, txn) => {
+        if (txn.serialNumber !== item.serialNumber || txn.type !== "Sale") return best
+        if (rentalDaysFromMetadata(txn.metadata) == null) return best
+        if (!best || txn.date > best.date) return txn
+        return best
+      }, null)
+    : null
+  const rentalPeriod = item && rentalSale ? rentalSaleSentence(transactions, item.serialNumber) : null
+  const rentalDays = rentalSale ? rentalDaysFromMetadata(rentalSale.metadata) : null
   const returnDate = returnDateOverride !== undefined ? returnDateOverride : (item?.returnDate ?? null)
   const actions = holdingDrawerActions(status, role)
   const returnType = status === "Rented" ? "Rental Return" : "POC Return"
@@ -253,14 +265,18 @@ export function DispatchedKitDrawer({
                 movement: status || "—",
                 client: item.client || "—",
                 date: returnDate ? formatBusinessDate(returnDate) : "—",
-                extra: [{ label: "Due", value: returnDate ? formatReturnAge(returnDate, today) : "—" }],
+                extra: [
+                  { label: "Due", value: returnDate ? formatReturnAge(returnDate, today) : "—" },
+                  ...(rentalDays != null ? [{ label: "Rental days", value: String(rentalDays) }] : []),
+                ],
               }
             : undefined
         }
         notice={
-          note || (status === "Pending Inspection" && item) ? (
+          note || rentalPeriod || (status === "Pending Inspection" && item) ? (
             <div className="px-4 pb-2 flex flex-col gap-2">
-              {note ? <p className="text-sm text-foreground">{note}</p> : null}
+              {rentalPeriod ? <p className="text-sm text-foreground">{rentalPeriod}</p> : null}
+              {note && note !== rentalPeriod ? <p className="text-sm text-foreground">{note}</p> : null}
               {status === "Pending Inspection" && item ? <PendingInspectionCaseLink itemId={item.id} /> : null}
             </div>
           ) : undefined
@@ -269,7 +285,15 @@ export function DispatchedKitDrawer({
           actions.length > 0 ? (
             <>
               {actions.includes("convert") ? (
-                <Button type="button" variant="outline" size="sm" onClick={() => setConvertOpen(true)}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setConvertKind(status === "Rented" ? "rental" : "poc")
+                    setConvertOpen(true)
+                  }}
+                >
                   Convert to sale
                 </Button>
               ) : null}
@@ -341,7 +365,7 @@ export function DispatchedKitDrawer({
           ) : null
         }
       />
-      {item && (convertOpen || actions.includes("convert")) ? (
+      {item && convertKind === "poc" ? (
         <ConvertToSaleDialog
           open={convertOpen}
           serial={item.serialNumber}
@@ -352,6 +376,20 @@ export function DispatchedKitDrawer({
             setReturnDateOverride(returnDate)
             setStatusOverride("Sold")
             setNote("Converted to a sale.")
+            onChanged()
+          }}
+        />
+      ) : null}
+      {item && convertKind === "rental" ? (
+        <ConvertRentalToSaleDialog
+          open={convertOpen}
+          serial={item.serialNumber}
+          clientName={item.client ?? ""}
+          onOpenChange={setConvertOpen}
+          onCompleted={(sentence) => {
+            setReturnDateOverride(null)
+            setStatusOverride("Sold")
+            setNote(sentence)
             onChanged()
           }}
         />

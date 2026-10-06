@@ -74,6 +74,8 @@ import { toast } from "sonner"
 import { toastFromCaughtError } from "@/lib/toast-reportable-error"
 import { isAuthFailure, SESSION_EXPIRED_MESSAGE } from "@/lib/unauthorized"
 import { ledgerTextDiffersFromClient } from "@/lib/client-transactions"
+import { InvoiceRecordPanel } from "@/components/invoice-record-panel"
+import { displayedInvoice, invoiceBatchKey } from "@/lib/invoices"
 import { fetchClientTransactions, type ResolvedClientTransaction } from "@/lib/clients-orders"
 import type { ClientSite, Transaction } from "@/lib/data"
 import { StatusPill } from "@/components/fs/status-pill"
@@ -251,7 +253,7 @@ export default function ClientDetailPage() {
           batchId: batchKey,
           type: first.type,
           date: first.date,
-          invoiceNumber: first.invoiceNumber,
+          invoiceNumber: displayedInvoice(first) === "—" ? undefined : displayedInvoice(first),
           count: txns.length,
           transactions: txns,
         })
@@ -663,7 +665,7 @@ export default function ClientDetailPage() {
                         </TableCell>
                         {showFinancials && (
                           <TableCell className="font-mono text-xs text-muted-foreground hidden lg:table-cell">
-                            {t.invoiceNumber || "—"}
+                            {displayedInvoice(t)}
                           </TableCell>
                         )}
                         <TableCell>
@@ -796,7 +798,18 @@ export default function ClientDetailPage() {
                 {showFinancials && (
                   <div className="flex flex-wrap gap-2 text-sm">
                     <span className="text-muted-foreground">Invoice:</span>
-                    <span className="font-mono">{selectedConsignment.invoiceNumber || "—"}</span>
+                    {selectedConsignment.transactions[0]?.invoiceState ? (
+                      <InvoiceRecordPanel
+                        batchId={invoiceBatchKey(selectedConsignment.transactions[0])}
+                        state={selectedConsignment.transactions[0].invoiceState}
+                        timeZone={timeZone}
+                        onChanged={() => {
+                          void fetchClientTransactions(id).then(setLedger)
+                        }}
+                      />
+                    ) : (
+                      <span className="font-mono">{selectedConsignment.invoiceNumber || "—"}</span>
+                    )}
                   </div>
                 )}
                 <div className="min-w-0 w-full max-w-full">
@@ -849,12 +862,26 @@ export default function ClientDetailPage() {
                     />
                   </dd>
                 </div>
-                {showFinancials && selectedTransaction.invoiceNumber && (
+                {showFinancials && (selectedTransaction.invoiceState || selectedTransaction.type === "Sale" || selectedTransaction.type === "Rentals") ? (
+                  <div>
+                    <dt className="text-muted-foreground text-xs font-medium">Invoice</dt>
+                    <dd className="mt-0.5">
+                      <InvoiceRecordPanel
+                        batchId={invoiceBatchKey(selectedTransaction)}
+                        state={selectedTransaction.invoiceState}
+                        timeZone={timeZone}
+                        onChanged={() => {
+                          void fetchClientTransactions(id).then(setLedger)
+                        }}
+                      />
+                    </dd>
+                  </div>
+                ) : showFinancials && selectedTransaction.invoiceNumber ? (
                   <div>
                     <dt className="text-muted-foreground text-xs font-medium">Invoice</dt>
                     <dd className="font-mono mt-0.5">{selectedTransaction.invoiceNumber}</dd>
                   </div>
-                )}
+                ) : null}
                 {selectedTransaction.fromLocation != null && (
                   <div>
                     <dt className="text-muted-foreground text-xs font-medium">From</dt>

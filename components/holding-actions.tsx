@@ -18,6 +18,14 @@ import { todayBusinessDate } from "@/lib/business-date.mjs"
 import { extendHolding } from "@/lib/holdings"
 import { useInventoryStore } from "@/lib/inventory-store"
 import { useOrgTimezone } from "@/hooks/use-org-timezone"
+import { InvoiceChoiceFields } from "@/components/invoice-choice-fields"
+import { invoiceChoiceProblem, type InvoiceChoice } from "@/lib/invoices"
+import {
+  inclusiveRentalDays,
+  latestRentalStart,
+  rentalConversionLabel,
+  rentalConversionProblem,
+} from "@/lib/rental-conversion"
 
 export function ConvertToSaleDialog({
   open,
@@ -38,12 +46,15 @@ export function ConvertToSaleDialog({
   const { applyMovement } = useInventoryStore()
   const timeZone = useOrgTimezone()
   const [saleDate, setSaleDate] = useState(() => todayBusinessDate())
-  const [invoice, setInvoice] = useState("")
+  const [invoiceChoice, setInvoiceChoice] = useState<InvoiceChoice | "">("")
+  const [invoiceNumber, setInvoiceNumber] = useState("")
+  const [invoiceReason, setInvoiceReason] = useState("")
   const [saving, setSaving] = useState(false)
+  const invoiceProblem = requireInvoice ? invoiceChoiceProblem(invoiceChoice, invoiceNumber, invoiceReason) : null
 
   async function submit() {
-    if (requireInvoice && !invoice.trim()) {
-      toast.error("Invoice number is required for Sale and Rentals")
+    if (invoiceProblem) {
+      toast.error(invoiceProblem)
       return
     }
     setSaving(true)
@@ -52,7 +63,9 @@ export function ConvertToSaleDialog({
         type: "Sale",
         serialNumbers: [serial],
         clientDisplayOverride: "",
-        invoiceNumber: invoice.trim() || undefined,
+        invoiceNumber: invoiceNumber.trim() || undefined,
+        invoiceChoice: invoiceChoice || undefined,
+        invoiceReason: invoiceReason.trim() || undefined,
         saleTransactionDateIso: saleDate,
       })
       if (result.success.length === 0) {
@@ -96,15 +109,17 @@ export function ConvertToSaleDialog({
               onChange={(event) => setSaleDate(event.target.value)}
             />
           </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="convert-invoice">Invoice</Label>
-            <Input
-              id="convert-invoice"
-              value={invoice}
-              placeholder={requireInvoice ? "Required" : "Optional"}
-              onChange={(event) => setInvoice(event.target.value)}
+          {requireInvoice ? (
+            <InvoiceChoiceFields
+              idPrefix="convert-invoice"
+              choice={invoiceChoice}
+              invoiceNumber={invoiceNumber}
+              reason={invoiceReason}
+              onChoice={setInvoiceChoice}
+              onInvoiceNumber={setInvoiceNumber}
+              onReason={setInvoiceReason}
             />
-          </div>
+          ) : null}
         </div>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
@@ -113,7 +128,152 @@ export function ConvertToSaleDialog({
           <Button
             type="button"
             onClick={() => void submit()}
-            disabled={saving || !saleDate || (requireInvoice && !invoice.trim())}
+            disabled={saving || !saleDate || Boolean(invoiceProblem)}
+          >
+            Convert to sale
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+export function ConvertRentalToSaleDialog({
+  open,
+  serial,
+  clientName,
+  onOpenChange,
+  onCompleted,
+}: {
+  open: boolean
+  serial: string
+  clientName?: string
+  onOpenChange: (open: boolean) => void
+  onCompleted?: (sentence: string) => void
+}) {
+  const { applyMovement, transactions } = useInventoryStore()
+  const timeZone = useOrgTimezone()
+  const today = todayBusinessDate(timeZone)
+  const rentalStart = latestRentalStart(transactions, serial)
+  const [rentalEnd, setRentalEnd] = useState(today)
+  const [saleDate, setSaleDate] = useState(today)
+  const [invoiceChoice, setInvoiceChoice] = useState<InvoiceChoice | "">("")
+  const [invoiceNumber, setInvoiceNumber] = useState("")
+  const [invoiceReason, setInvoiceReason] = useState("")
+  const [saving, setSaving] = useState(false)
+  const invoiceProblem = invoiceChoiceProblem(invoiceChoice, invoiceNumber, invoiceReason)
+  const days = rentalStart ? inclusiveRentalDays(rentalStart, rentalEnd) : null
+  const problem = rentalConversionProblem({
+    rentalStart,
+    rentalEnd,
+    saleDate,
+    today,
+  })
+
+  async function submit() {
+    if (!rentalStart || problem) {
+      toast.error(problem ?? "Convert to sale needs the rental start")
+      return
+    }
+    if (invoiceProblem) {
+      toast.error(invoiceProblem)
+      return
+    }
+    setSaving(true)
+    try {
+      const result = await applyMovement({
+        type: "Sale",
+        serialNumbers: [serial],
+        clientDisplayOverride: "",
+        invoiceNumber: invoiceNumber.trim() || undefined,
+        invoiceChoice: invoiceChoice || undefined,
+        invoiceReason: invoiceReason.trim() || undefined,
+        saleTransactionDateIso: saleDate,
+        rentalStartDate: rentalStart,
+        rentalEndDate: rentalEnd,
+      })
+      if (result.success.length === 0) {
+        toast.error(result.rejected[0]?.reason ?? result.notFound[0] ?? "Could not convert this rental")
+        return
+      }
+      const sentence =
+        rentalConversionLabel(
+          { converted_from: "Rentals", rental_start: rentalStart, rental_end: rentalEnd, rental_days: days },
+          saleDate,
+        ) ?? "Converted to a sale."
+      toast.success(`${serial} converted to a sale`)
+      announceAlertsUpdated()
+      onCompleted?.(sentence)
+      onOpenChange(false)
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "Could not convert this rental")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="bg-card text-card-foreground sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Convert to sale</DialogTitle>
+        </DialogHeader>
+        <div className="grid gap-3">
+          <p className="text-sm text-muted-foreground">
+            Records one Sale for <span className="font-mono text-foreground">{serial}</span>. The kit stays with the
+            client. Timezone {timeZone}.
+          </p>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="rental-convert-client">Client</Label>
+            <Input id="rental-convert-client" value={clientName || "—"} readOnly />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="rental-convert-end">Rental end date</Label>
+            <Input
+              id="rental-convert-end"
+              type="date"
+              value={rentalEnd}
+              min={rentalStart ?? undefined}
+              max={today}
+              onChange={(event) => {
+                const next = event.target.value
+                setRentalEnd(next)
+                setSaleDate((current) => (next && current < next ? next : current))
+              }}
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="rental-convert-sale-date">Sale date</Label>
+            <Input
+              id="rental-convert-sale-date"
+              type="date"
+              value={saleDate}
+              min={rentalEnd || undefined}
+              onChange={(event) => setSaleDate(event.target.value)}
+            />
+          </div>
+          <p className="text-sm text-foreground">
+            Rental days <span className="tabular-nums">{days ?? "—"}</span>
+          </p>
+          {problem ? <p className="text-sm text-destructive">{problem}</p> : null}
+          <InvoiceChoiceFields
+            idPrefix="rental-convert-invoice"
+            choice={invoiceChoice}
+            invoiceNumber={invoiceNumber}
+            reason={invoiceReason}
+            onChoice={setInvoiceChoice}
+            onInvoiceNumber={setInvoiceNumber}
+            onReason={setInvoiceReason}
+          />
+        </div>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            onClick={() => void submit()}
+            disabled={saving || !rentalStart || Boolean(problem) || Boolean(invoiceProblem)}
           >
             Convert to sale
           </Button>

@@ -22,6 +22,7 @@ import {
   Sun,
   Clock,
   History,
+  FileText,
   Loader2,
   LogOut,
   ScrollText,
@@ -53,6 +54,7 @@ import { useAuth } from "@/lib/auth-context"
 import {
   canAccessReports,
   canAccessRequests,
+  canManageInvoices,
   canAccessSettings,
   canEditInventory,
   canManageUsers,
@@ -99,6 +101,7 @@ const allNavItems: NavItem[] = [
   { href: "/search", label: "Search", icon: Search },
   { href: "/inventory", label: "Inventory", icon: Package, children: inventoryChildren },
   { href: "/transaction-history", label: "Transaction history", icon: History },
+  { href: "/invoices", label: "Invoices", icon: FileText },
   { href: "/alerts", label: "Alerts", icon: Bell },
   { href: "/clients", label: "Clients", icon: Users },
   { href: "/requests", label: "Requests", icon: MessageSquare },
@@ -174,6 +177,7 @@ function filterNavByRole(items: NavItem[], role: string | null | undefined): Nav
   return items
     .filter((item) => {
       if (item.href === "/reports") return canAccessReports(r)
+      if (item.href === "/invoices") return canManageInvoices(r)
       if (item.href === "/requests") return canAccessRequests(r)
       return true
     })
