@@ -39,9 +39,9 @@ describe("movement matrix", () => {
     }
   })
 
-  it("records POC → Sold as the only new Sale source", () => {
+  it("records In Stock, POC, and rental conversion as Sale sources", () => {
     expect(movementResult("POC", "Sale")).toBe("Sold")
     expect(movementResult("In Stock", "Sale")).toBe("Sold")
-    expect(movementResult("Rented", "Sale")).toBeNull()
+    expect(movementResult("Rented", "Sale")).toBe("Sold")
   })
 })

@@ -1,0 +1,7 @@
+# Tracked paths that may be emptied or lose >80% of their lines.
+# Format: <git path><TAB><reason>
+# Paths are repo-relative with forward slashes.
+
+tsconfig.tsbuildinfo	Next/TypeScript incremental cache; rewritten on every build
+supabase/migrations/054_request_hygiene_and_profile_access_audit.sql	one-time restore: emptied by b7fa68b, identical to first commit 3d347ea
+supabase/migrations/061_transaction_business_dates.sql	one-time restore: emptied by b7fa68b, identical to first commit 3d347ea

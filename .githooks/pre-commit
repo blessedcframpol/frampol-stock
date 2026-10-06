@@ -1,0 +1,5 @@
+#!/bin/sh
+# Installed into .git/hooks/pre-commit by: node scripts/install-git-hooks.mjs
+root="$(git rev-parse --show-toplevel)"
+cd "$root" || exit 1
+exec node scripts/check-truncation-and-migrations.mjs

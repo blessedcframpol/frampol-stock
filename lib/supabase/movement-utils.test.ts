@@ -105,7 +105,7 @@ describe("validateMovementForItem", () => {
         it("allows Sale from POC", () => {
           expect(validateMovementForItem("Sale", item({ status: "POC" }), ctx)).toBeNull()
         })
-        it("allows Sale from a rented Starlink kit", () => {
+        it("allows Sale from a rented Starlink kit (conversion pair in the matrix)", () => {
           expect(validateMovementForItem("Sale", item({ status: "Rented", location: "Client Site" }), ctx)).toBeNull()
           expect(movementResult("Rented", "Sale")).toBe("Sold")
         })
@@ -425,6 +425,15 @@ describe("computeMovementResult", () => {
       date: `${today}T00:00:00.000Z`,
       metadata: { converted_from: "Rentals", rental_start: today, rental_end: today, rental_days: 1 },
     })
+  })
+
+  it("rejects a plain Sale from Rented without conversion dates", () => {
+    const result = computeMovementResult(
+      [item({ status: "Rented", location: "Client Site", stockPool: "rental" })],
+      { ...baseParams, type: "Sale" },
+    )
+    expect(result.success).toEqual([])
+    expect(result.rejected[0]?.reason).toMatch(/rental start/)
   })
 
   it("rejects a rental conversion whose sale date is before the rental end", () => {
