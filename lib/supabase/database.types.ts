@@ -1243,6 +1243,10 @@ export interface Database {
         Args: { p_item_id: string }
         Returns: Json
       }
+      returns_report: {
+        Args: { p_from: string; p_to: string }
+        Returns: Json
+      }
       apply_stock_movement: {
         Args: {
           p_inventory_upserts: Json

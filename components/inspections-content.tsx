@@ -23,6 +23,9 @@ import {
 } from "@/components/ui/table"
 import { clientLabel, daysWaiting, loadKitCases, type KitCaseRow } from "@/lib/kit-cases"
 import { KitSerial } from "@/components/kit-serial"
+import { ReturnsReportPanel } from "@/components/returns-report"
+import { useAuth } from "@/lib/auth-context"
+import { canAccessReports } from "@/lib/permissions"
 import { useOrgTimezone } from "@/hooks/use-org-timezone"
 
 function formatWhen(value: string | null, timeZone: string): string {
@@ -39,13 +42,16 @@ function formatWhen(value: string | null, timeZone: string): string {
 
 export function InspectionsContent() {
   const timeZone = useOrgTimezone()
-  const [tab, setTab] = useState<"open" | "closed">("open")
+  const { role } = useAuth()
+  const showReports = canAccessReports(role)
+  const [tab, setTab] = useState<"open" | "closed" | "reports">("open")
   const [typeFilter, setTypeFilter] = useState("all")
   const [rows, setRows] = useState<KitCaseRow[]>([])
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    if (tab === "reports") return
     let cancelled = false
     void loadKitCases(tab)
       .then((next) => {
@@ -74,7 +80,11 @@ export function InspectionsContent() {
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Inspections"
-        description="Kits waiting after a decommission or rental return, oldest first."
+        description={
+          tab === "reports"
+            ? "Returns waiting now, and returns and inspection outcomes in the selected dates."
+            : "Kits waiting after a decommission or rental return, oldest first."
+        }
         icon={ClipboardCheck}
       />
       <div className="flex flex-wrap items-center gap-2">
@@ -84,6 +94,12 @@ export function InspectionsContent() {
         <Button type="button" variant={tab === "closed" ? "default" : "outline"} onClick={() => { setLoading(true); setTab("closed") }}>
           Closed
         </Button>
+        {showReports ? (
+          <Button type="button" variant={tab === "reports" ? "default" : "outline"} onClick={() => setTab("reports")}>
+            Reports
+          </Button>
+        ) : null}
+        {tab === "reports" ? null : (
         <Select value={typeFilter} onValueChange={setTypeFilter}>
           <SelectTrigger className="w-[200px] bg-card">
             <SelectValue />
@@ -94,11 +110,13 @@ export function InspectionsContent() {
             <SelectItem value="Rental return">Rental return</SelectItem>
           </SelectContent>
         </Select>
+        )}
       </div>
-      {error ? <p className="text-sm text-danger">{error}</p> : null}
-      {loading ? <p className="text-sm text-muted-foreground">Loading…</p> : null}
-      {!loading && visible.length === 0 ? <EmptyState message={tab === "open" ? "No open cases." : "No closed cases."} /> : null}
-      {!loading && visible.length > 0 ? (
+      {tab === "reports" && showReports ? <ReturnsReportPanel /> : null}
+      {tab !== "reports" && error ? <p className="text-sm text-danger">{error}</p> : null}
+      {tab !== "reports" && loading ? <p className="text-sm text-muted-foreground">Loading…</p> : null}
+      {tab !== "reports" && !loading && visible.length === 0 ? <EmptyState message={tab === "open" ? "No open cases." : "No closed cases."} /> : null}
+      {tab !== "reports" && !loading && visible.length > 0 ? (
         <div className="rounded-md border border-border overflow-x-auto">
           <Table>
             <TableHeader>
