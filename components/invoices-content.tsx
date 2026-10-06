@@ -21,6 +21,7 @@ import { realInvoiceNumberProblem } from "@/lib/invoices"
 import { canManageInvoices, ADMIN } from "@/lib/permissions"
 import { loadProfileLabels } from "@/lib/profile-labels"
 import { getSupabaseClient } from "@/lib/supabase/client"
+import { KitSerialList } from "@/components/kit-serial"
 import type { Database } from "@/lib/supabase/database.types"
 import { fetchAllPages } from "@/lib/supabase/postgrest-page"
 
@@ -215,7 +216,9 @@ export function InvoicesContent() {
               ) : (
                 notInvoiced.map((row) => (
                   <TableRow key={row.batch_id}>
-                    <TableCell className="font-mono text-xs">{row.serials || row.product_name || "—"}</TableCell>
+                    <TableCell className="font-mono text-xs">
+                      {row.serials ? <KitSerialList serials={row.serials} /> : row.product_name || "—"}
+                    </TableCell>
                     <TableCell>{row.client_name || "—"}</TableCell>
                     <TableCell className="tabular-nums">{row.quantity}</TableCell>
                     <TableCell>{row.not_invoiced_reason || "—"}</TableCell>
@@ -274,7 +277,9 @@ function InvoiceTable({
               <TableCell>{row.client_name || "—"}</TableCell>
               <TableCell>
                 <div>{row.product_name || "—"}</div>
-                <div className="font-mono text-xs text-muted-foreground">{row.serials}</div>
+                <div className="font-mono text-xs text-muted-foreground">
+                  <KitSerialList serials={row.serials} />
+                </div>
               </TableCell>
               <TableCell className="tabular-nums">{row.quantity}</TableCell>
               {extraCell ? extraCell(row) : null}

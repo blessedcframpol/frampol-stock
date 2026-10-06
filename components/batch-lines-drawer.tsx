@@ -1,7 +1,6 @@
 "use client"
 
 import { useMemo, useRef, useState } from "react"
-import Link from "next/link"
 import { Copy } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -9,6 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { StatusPill } from "@/components/fs/status-pill"
 import { StockPoolChip } from "@/components/stock-pool-chip"
+import { KitSerial } from "@/components/kit-serial"
 
 /** Serial search appears once a batch is long enough that scanning the list is slower than filtering. */
 const SERIAL_SEARCH_MIN = 10
@@ -188,15 +188,12 @@ export function BatchLinesDrawer({
               {filtered.map((line, index) => (
                 <li
                   key={`${line.serialNumber}-${index}`}
-                  className={`group flex h-8 items-center gap-2 rounded px-2 hover:bg-muted/50 ${dimmed ? "text-muted-foreground" : ""}`}
+                  className={`group flex min-h-8 items-center gap-2 rounded px-2 py-1 hover:bg-muted/50 ${dimmed ? "text-muted-foreground" : ""}`}
                 >
-                  <Link
-                    href={`/inventory?serial=${encodeURIComponent(line.serialNumber)}`}
-                    title={line.serialNumber}
-                    className={`min-w-0 flex-1 truncate font-mono text-sm text-brand hover:underline ${dimmed ? "line-through" : ""}`}
-                  >
-                    {line.serialNumber}
-                  </Link>
+                  <KitSerial
+                    serial={line.serialNumber}
+                    className={`min-w-0 flex-1 ${dimmed ? "line-through" : ""}`}
+                  />
                   <StockPoolChip pool={line.stockPool} />
                   {line.status ? (
                     <>

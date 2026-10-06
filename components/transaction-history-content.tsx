@@ -16,6 +16,7 @@ import { FilterChip } from "@/components/fs/filter-chip"
 import { ListToolbar, ListToolbarSearch } from "@/components/fs/list-toolbar"
 import { Pagination } from "@/components/fs/pagination"
 import { BatchLinesDrawer, type BatchDrawerLine } from "@/components/batch-lines-drawer"
+import { KitSerial } from "@/components/kit-serial"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -788,7 +789,7 @@ export function TransactionHistoryContent() {
                       returnDate: entered.returnDate,
                     })}
                   </p>
-                  <p className="font-mono text-xs text-muted-foreground">{row.serial}</p>
+                  <KitSerial serial={row.serial} />
                   {row.needs.includes("status") ? (
                     <div className="space-y-1">
                       <Label>Status for {row.serial}</Label>
@@ -902,7 +903,9 @@ export function TransactionHistoryContent() {
                   { softDelete: false, status: row.status, client: row.client, location: row.location, returnDate: row.returnDate },
                   {}
                 )}
-                <span className="mt-1 block font-mono text-xs text-muted-foreground">{row.serial}</span>
+                <span className="mt-1 block">
+                  <KitSerial serial={row.serial} />
+                </span>
               </p>
             ))
           )}

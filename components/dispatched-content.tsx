@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/table"
 import { StatusPill } from "@/components/fs/status-pill"
 import { StockPoolChip } from "@/components/stock-pool-chip"
+import { KitSerial } from "@/components/kit-serial"
 import { EmptyState } from "@/components/fs/empty-state"
 import { FilterChip } from "@/components/fs/filter-chip"
 import { ListToolbar, ListToolbarSearch } from "@/components/fs/list-toolbar"
@@ -407,13 +408,10 @@ export function DispatchedContent() {
                     <TableCell className="text-right text-sm tabular-nums text-foreground">
                       {row.grain === "serial" && row.serialNumber ? (
                         <span className="flex w-full items-center justify-end gap-2">
-                          <Link
-                            href={`/inventory?serial=${encodeURIComponent(row.serialNumber)}`}
-                            className="font-mono text-brand hover:underline"
-                            onClick={(event) => event.stopPropagation()}
-                          >
-                            {row.serialNumber}
-                          </Link>
+                          <KitSerial
+                            serial={row.serialNumber}
+                            itemId={itemBySerial.get(row.serialNumber)?.id}
+                          />
                           <StockPoolChip pool={row.serialNumber ? poolBySerial.get(row.serialNumber) : undefined} />
                           <button
                             type="button"

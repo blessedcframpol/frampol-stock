@@ -16,6 +16,7 @@ import { EmptyState } from "@/components/fs/empty-state"
 import { ListToolbar, ListToolbarSearch } from "@/components/fs/list-toolbar"
 import { StatusPill } from "@/components/fs/status-pill"
 import { StockPoolChip } from "@/components/stock-pool-chip"
+import { KitSerial } from "@/components/kit-serial"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
@@ -354,7 +355,7 @@ export function InventorySerialsContent({ productId }: { productId: string }) {
                 ) : null}
                 <TableCell className="font-mono text-sm">
                   <span className="inline-flex items-center gap-2">
-                    {item.serialNumber}
+                    <KitSerial serial={item.serialNumber} itemId={item.id} />
                     <StockPoolChip pool={item.stockPool} />
                   </span>
                 </TableCell>

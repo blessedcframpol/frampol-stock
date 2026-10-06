@@ -22,6 +22,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { clientLabel, daysWaiting, loadKitCases, type KitCaseRow } from "@/lib/kit-cases"
+import { KitSerial } from "@/components/kit-serial"
 import { useOrgTimezone } from "@/hooks/use-org-timezone"
 
 function formatWhen(value: string | null, timeZone: string): string {
@@ -118,9 +119,12 @@ export function InspectionsContent() {
               {visible.map((row) => (
                 <TableRow key={row.id}>
                   <TableCell className="font-mono text-xs">
-                    <Link href={`/inventory/inspections/${row.id}`} className="text-info underline-offset-4 hover:underline">
-                      {row.serial_number}
-                    </Link>
+                    <span className="inline-flex flex-wrap items-center gap-2">
+                      <KitSerial serial={row.serial_number} itemId={row.inventory_item_id} />
+                      <Link href={`/inventory/inspections/${row.id}`} className="text-xs text-info underline-offset-4 hover:underline">
+                        Case
+                      </Link>
+                    </span>
                   </TableCell>
                   <TableCell>{row.product_name ?? "—"}</TableCell>
                   <TableCell>{row.source_label}</TableCell>

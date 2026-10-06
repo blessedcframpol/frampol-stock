@@ -56,6 +56,7 @@ import {
   type StockRequestWithRelations,
 } from "@/lib/supabase/stock-requests-db"
 import { SignedStorageLink } from "@/components/signed-storage-link"
+import { KitSerial } from "@/components/kit-serial"
 import { BusinessDateLabel } from "@/components/business-date-label"
 import { useOrgTimezone } from "@/hooks/use-org-timezone"
 import { compareBusinessDatesDesc, latestRecordedAt } from "@/lib/business-date.mjs"
@@ -661,7 +662,7 @@ export default function ClientDetailPage() {
                         </TableCell>
                         <TableCell className="text-right text-sm tabular-nums">1 item</TableCell>
                         <TableCell className="font-mono text-xs text-foreground hidden sm:table-cell">
-                          {t.serialNumber}
+                          <KitSerial serial={t.serialNumber} />
                         </TableCell>
                         {showFinancials && (
                           <TableCell className="font-mono text-xs text-muted-foreground hidden lg:table-cell">
@@ -827,7 +828,9 @@ export default function ClientDetailPage() {
                         <TableCell>
                           <StatusPill value={txn.type} />
                         </TableCell>
-                        <TableCell className="font-mono text-xs">{txn.serialNumber}</TableCell>
+                        <TableCell className="font-mono text-xs">
+                          <KitSerial serial={txn.serialNumber} />
+                        </TableCell>
                         <TableCell className="text-sm">{txn.itemName}</TableCell>
                       </TableRow>
                     ))}
@@ -846,7 +849,9 @@ export default function ClientDetailPage() {
                 </div>
                 <div>
                   <dt className="text-muted-foreground text-xs font-medium">Serial number</dt>
-                  <dd className="font-mono mt-0.5">{selectedTransaction.serialNumber}</dd>
+                  <dd className="font-mono mt-0.5">
+                    <KitSerial serial={selectedTransaction.serialNumber} />
+                  </dd>
                 </div>
                 <div>
                   <dt className="text-muted-foreground text-xs font-medium">Item</dt>
@@ -975,7 +980,9 @@ function HeldTable({ units, today }: { units: HeldUnit[]; today: string }) {
                 const overdue = Boolean(unit.returnDate && isOverdue(unit.returnDate, today))
                 return (
                   <TableRow key={unit.id}>
-                    <TableCell className="font-mono text-xs">{unit.serialNumber}</TableCell>
+                    <TableCell className="font-mono text-xs">
+                      <KitSerial serial={unit.serialNumber} itemId={unit.id} />
+                    </TableCell>
                     <TableCell className="text-sm">
                       <div className="flex flex-col items-start gap-1">
                         <span>{unit.product}</span>
