@@ -57,6 +57,7 @@ function MoveItemsForm({
   const [newVendorName, setNewVendorName] = useState("")
   const [submitting, setSubmitting] = useState(false)
   const [vendorEditable, setVendorEditable] = useState(false)
+  const [reason, setReason] = useState("")
 
   const vendorsFromInventory = useMemo(
     () => [...new Set(onHandInventory.map((i) => (i.vendor?.trim() ? i.vendor : "General")))].sort() as string[],
@@ -118,12 +119,17 @@ function MoveItemsForm({
       toast.error("Please select or enter a destination vendor")
       return
     }
+    if (!reason.trim()) {
+      toast.error("A reason is required")
+      return
+    }
     setSubmitting(true)
     try {
       const result = await reassignInventoryItems({
         itemIds: items.map((i) => i.id),
         targetGroupName: targetName,
         targetVendor: effectiveVendor,
+        reason,
       })
       if (!result.ok) {
         toast.error(result.error ?? "Failed to move item(s)")
@@ -203,6 +209,17 @@ function MoveItemsForm({
                   ? "Enter vendor first…"
                   : "Select a product group…"
               }
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-sm font-medium text-foreground">Reason</Label>
+            <Input
+              className="bg-card text-foreground border-border"
+              value={reason}
+              onChange={(event) => setReason(event.target.value)}
+              placeholder="Why these kits are moving"
+              disabled={submitting}
+              required
             />
           </div>
           <div className="flex justify-end">

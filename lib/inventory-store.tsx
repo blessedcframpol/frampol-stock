@@ -30,29 +30,6 @@ function generateId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 }
 
-/** Direct edits must not change status. Status moves only through apply_stock_movement. */
-function inventoryItemPatch(item: InventoryItem): Database["public"]["Tables"]["inventory_items"]["Update"] {
-  const row = inventoryItemToRow(item)
-  return {
-    id: row.id,
-    product_id: row.product_id,
-    serial_number: row.serial_number,
-    date_added: row.date_added,
-    location: row.location,
-    client: row.client,
-    notes: row.notes,
-    assigned_to: row.assigned_to,
-    purchase_date: row.purchase_date,
-    warranty_end_date: row.warranty_end_date,
-    poc_out_date: row.poc_out_date,
-    return_date: row.return_date,
-    assignment_history: row.assignment_history,
-    reserved_for_request_line_id: row.reserved_for_request_line_id,
-    cloud_key: row.cloud_key,
-    deleted_at: row.deleted_at,
-  }
-}
-
 /** Days before trashed inventory rows are eligible for permanent purge. */
 export const INVENTORY_TRASH_RETENTION_DAYS = 30
 
@@ -210,7 +187,7 @@ interface InventoryStoreValue {
     movementBatchId?: string
   }>
   refetchLedger: () => Promise<void>
-  updateItem: (id: string, updates: Partial<InventoryItem>) => Promise<void>
+  updateItem: (id: string, updates: Partial<InventoryItem>, reason: string) => Promise<void>
   softDeleteItem: (id: string) => Promise<{ ok: boolean; error?: string }>
   restoreItem: (id: string) => Promise<{ ok: boolean; error?: string }>
   permanentlyDeleteItem: (id: string) => Promise<{ ok: boolean; error?: string }>
@@ -222,12 +199,14 @@ interface InventoryStoreValue {
     itemIds: string[]
     targetGroupName: string
     targetVendor?: string
+    reason: string
   }) => Promise<{ ok: boolean; updated: number; error?: string }>
   reassignInventoryGroup: (params: {
     sourceGroupName: string
     sourceVendor?: string
     targetGroupName?: string
     targetVendor?: string
+    reason: string
   }) => Promise<{ ok: boolean; updated: number; error?: string }>
   getAlerts: () => AlertsResult
 }
@@ -679,24 +658,32 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
   )
 
   const updateItem = useCallback(
-    async (id: string, updates: Partial<InventoryItem>) => {
+    async (id: string, updates: Partial<InventoryItem>, reason: string) => {
       const item = inventory.find((i) => i.id === id)
       if (!item) return
+      const trimmedReason = reason.trim()
+      if (!trimmedReason) throw new Error("A reason is required")
       let next: InventoryItem = { ...item, ...updates }
       if (supabase && (updates.name !== undefined || updates.vendor !== undefined)) {
-        try {
-          const pid = await ensureProductLine(supabase, next.name, next.vendor ?? "General")
-          next = { ...next, productId: pid }
-        } catch (e) {
-          console.error("Supabase updateItem ensureProductLine:", e)
-          return
-        }
+        const pid = await ensureProductLine(supabase, next.name, next.vendor ?? "General")
+        next = { ...next, productId: pid }
+      }
+      if (supabase) {
+        const { error } = await supabase.rpc("apply_inventory_edit", {
+          p_id: id,
+          p_patch: {
+            product_id: next.productId,
+            location: next.location,
+            notes: next.notes ?? null,
+            purchase_date: next.purchaseDate ?? null,
+            warranty_end_date: next.warrantyEndDate ?? null,
+          },
+          p_reason: trimmedReason,
+          p_source: "edit_item",
+        })
+        if (error) throw error
       }
       setInventory((prev) => prev.map((i) => (i.id === id ? next : i)))
-      if (supabase) {
-        const { error } = await supabase.from("inventory_items").update(inventoryItemPatch(next)).eq("id", id)
-        if (error) console.error("Supabase updateItem error:", error)
-      }
     },
     [inventory, supabase]
   )
@@ -838,9 +825,12 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
       itemIds: string[]
       targetGroupName: string
       targetVendor?: string
+      reason: string
     }): Promise<{ ok: boolean; updated: number; error?: string }> => {
       const targetName = params.targetGroupName.trim()
       if (!targetName) return { ok: false, updated: 0, error: "Target group name is required" }
+      const trimmedReason = params.reason.trim()
+      if (!trimmedReason) return { ok: false, updated: 0, error: "A reason is required" }
       const targetVendor = params.targetVendor?.trim() || "General"
       const idSet = new Set(params.itemIds.filter(Boolean))
       if (idSet.size === 0) return { ok: false, updated: 0, error: "No items selected" }
@@ -862,18 +852,20 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
           return { ok: false, updated: 0, error: msg || "Failed to resolve product line" }
         }
         updatedItems = updatedItems.map((item) => ({ ...item, productId }))
-      }
-      const updatedMap = new Map(updatedItems.map((i) => [i.id, i]))
-      setInventory((prev) => prev.map((item) => updatedMap.get(item.id) ?? item))
-
-      if (supabase) {
         for (const item of updatedItems) {
-          const { error } = await supabase.from("inventory_items").update(inventoryItemPatch(item)).eq("id", item.id)
+          const { error } = await supabase.rpc("apply_inventory_edit", {
+            p_id: item.id,
+            p_patch: { product_id: item.productId },
+            p_reason: trimmedReason,
+            p_source: "move_group",
+          })
           if (error) {
             return { ok: false, updated: 0, error: error.message || "Failed to update inventory item(s)" }
           }
         }
       }
+      const updatedMap = new Map(updatedItems.map((i) => [i.id, i]))
+      setInventory((prev) => prev.map((item) => updatedMap.get(item.id) ?? item))
       return { ok: true, updated: updatedItems.length }
     },
     [inventory, supabase]
@@ -885,6 +877,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
       sourceVendor?: string
       targetGroupName?: string
       targetVendor?: string
+      reason: string
     }): Promise<{ ok: boolean; updated: number; error?: string }> => {
       const source = params.sourceGroupName.trim()
       if (!source) return { ok: false, updated: 0, error: "Source group is required" }
@@ -901,6 +894,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
         itemIds,
         targetGroupName: params.targetGroupName?.trim() || source,
         targetVendor: params.targetVendor,
+        reason: params.reason,
       })
     },
     [inventory, reassignInventoryItems]

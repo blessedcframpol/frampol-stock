@@ -87,6 +87,7 @@ function EditItemForm({ item, onClose }: { item: InventoryItem; onClose: () => v
   const [editNotes, setEditNotes] = useState(item.notes ?? "")
   const [editPurchase, setEditPurchase] = useState(() => dateToInputValue(item.purchaseDate))
   const [editWarranty, setEditWarranty] = useState(() => dateToInputValue(item.warrantyEndDate))
+  const [editReason, setEditReason] = useState("")
 
   async function handleSaveEdit() {
     const nameTrim = editName.trim()
@@ -94,15 +95,23 @@ function EditItemForm({ item, onClose }: { item: InventoryItem; onClose: () => v
       toast.error("Product name is required")
       return
     }
+    if (!editReason.trim()) {
+      toast.error("A reason is required")
+      return
+    }
     try {
-      await updateItem(item.id, {
-        name: nameTrim,
-        vendor: editVendor.trim() || "General",
-        location: editLocation,
-        notes: editNotes.trim() || undefined,
-        purchaseDate: editPurchase.trim() || undefined,
-        warrantyEndDate: editWarranty.trim() || undefined,
-      })
+      await updateItem(
+        item.id,
+        {
+          name: nameTrim,
+          vendor: editVendor.trim() || "General",
+          location: editLocation,
+          notes: editNotes.trim() || undefined,
+          purchaseDate: editPurchase.trim() || undefined,
+          warrantyEndDate: editWarranty.trim() || undefined,
+        },
+        editReason,
+      )
       toast.success("Item updated")
       onClose()
     } catch {
@@ -153,6 +162,16 @@ function EditItemForm({ item, onClose }: { item: InventoryItem; onClose: () => v
             <Label className="text-foreground">Warranty end</Label>
             <Input type="date" className="bg-card" value={editWarranty} onChange={(e) => setEditWarranty(e.target.value)} />
           </div>
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label className="text-foreground">Reason</Label>
+          <Input
+            className="bg-card"
+            value={editReason}
+            onChange={(e) => setEditReason(e.target.value)}
+            placeholder="Why this kit is changing"
+            required
+          />
         </div>
       </div>
       <DialogFooter className="gap-2 sm:gap-0">

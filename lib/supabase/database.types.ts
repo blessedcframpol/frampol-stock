@@ -1247,6 +1247,20 @@ export interface Database {
         Args: { p_from: string; p_to: string }
         Returns: Json
       }
+      apply_inventory_edit: {
+        Args: { p_id: string; p_patch: Json; p_reason: string; p_source: string }
+        Returns: undefined
+      }
+      audit_log_read: {
+        Args: {
+          p_table?: string | null
+          p_row?: string | null
+          p_user?: string | null
+          p_from?: string | null
+          p_to?: string | null
+        }
+        Returns: Json
+      }
       apply_stock_movement: {
         Args: {
           p_inventory_upserts: Json

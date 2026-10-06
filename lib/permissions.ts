@@ -16,6 +16,11 @@ export function canManageUsers(role: AppRole | null | undefined): boolean {
   return role === ADMIN
 }
 
+/** Settings → Audit. Admin only; the SQL function enforces the same gate. */
+export function canViewAuditLog(role: AppRole | null | undefined): boolean {
+  return role === ADMIN
+}
+
 /** View persisted app event / error logs (admin only). */
 export function canViewAppLogs(role: AppRole | null | undefined): boolean {
   return role === ADMIN

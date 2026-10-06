@@ -33,7 +33,8 @@ import {
   type ProductLineSetting,
 } from "@/lib/settings"
 import { useAuth } from "@/lib/auth-context"
-import { canAccessSettings, canManageUsers } from "@/lib/permissions"
+import { canAccessSettings, canManageUsers, canViewAuditLog } from "@/lib/permissions"
+import { AuditLogPanel } from "@/components/audit-log-panel"
 import { useInventoryStore } from "@/lib/inventory-store"
 import { cn } from "@/lib/utils"
 import { Mail, Plus, Trash2, Info, UsersRound, ArrowRight } from "lucide-react"
@@ -100,6 +101,7 @@ function profileInitials(display: string | null | undefined, email: string | nul
 export function SettingsContent() {
   const { role, profile, user } = useAuth()
   const isAdmin = canManageUsers(role)
+  const showAudit = canViewAuditLog(role)
   const { inventory } = useInventoryStore()
   const { products: lowStockProducts, refresh: refreshLowStock } = useLowStockProducts()
   const [settings, setSettings] = useState<AppSettings | null>(null)
@@ -332,6 +334,11 @@ export function SettingsContent() {
           <TabsTrigger value="users" className={tabPill}>
             {isAdmin ? "Users" : "Workspace"}
           </TabsTrigger>
+          {showAudit ? (
+            <TabsTrigger value="audit" className={tabPill}>
+              Audit
+            </TabsTrigger>
+          ) : null}
           <TabsTrigger value="help" className={tabPill}>
             Help
           </TabsTrigger>
@@ -639,6 +646,17 @@ export function SettingsContent() {
             </div>
           </SettingsSection>
         </TabsContent>
+
+        {showAudit ? (
+          <TabsContent value="audit" className="mt-0 rounded-2xl border border-border bg-card/30 px-4 py-2 md:px-8">
+            <SettingsSection
+              title="Audit"
+              description="Every insert, update, and delete on transactions, kits, and clients. Old value to new value. This list cannot be edited."
+            >
+              <AuditLogPanel />
+            </SettingsSection>
+          </TabsContent>
+        ) : null}
 
         <TabsContent value="users" className="mt-0 rounded-2xl border border-border bg-card/30 px-4 py-2 md:px-8">
           {isAdmin ? (
