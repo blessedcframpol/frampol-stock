@@ -1,7 +1,12 @@
 /**
  * Shared env loader and production guard for verify-*.mjs scripts.
- * Every verify script must call assertNotProduction() / prepareVerifyEnv()
- * before writing. No override flag: production ref always aborts.
+ *
+ * HTTP / Supabase-client verify scripts: call prepareVerifyEnv() with no
+ * options. Production ref always aborts — no override flag.
+ *
+ * Database writes on production are only allowed through scripts/verify-harness.mjs
+ * (BEGIN…ROLLBACK). Those call prepareVerifyEnv({ harness: true }) from the
+ * harness module, not this strict path.
  */
 "use strict"
 

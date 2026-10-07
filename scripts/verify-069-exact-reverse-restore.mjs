@@ -1,18 +1,11 @@
 /**
- * Exact reverse and restore. Fixture identities are removed in finally.
- *
+ * Exact reverse and restore — rollback harness (BEGIN…ROLLBACK, never commits).
  * Usage: node scripts/verify-069-exact-reverse-restore.mjs
  */
-import fs from "fs"
-import path from "path"
-import { createRequire } from "module"
+import { withHarness } from "./verify-harness.mjs"
 
-const require = createRequire(import.meta.url)
-const { Client } = require("pg")
-const { createClient } = require("@supabase/supabase-js")
-const { prepareVerifyEnv } = require("./verify-env.cjs")
-
-const PREFIX = "R3069"
+// Distinct from leftover R3069-* residue still in production (A1 blocked cleanup).
+const PREFIX = "H3069"
 const DATE = "2026-10-02T00:00:00.000Z"
 const REASON = "R3 verify reversal reason"
 const RESTORE_REASON = "R3 verify restore reason"
@@ -31,29 +24,18 @@ const STUCK = [
 ]
 const FIELDS = ["status", "location", "client", "assigned_to", "poc_out_date", "return_date"]
 
-function pass(results, name, reason) {
-  results[name] = { result: "PASS", reason }
-  console.log(`PASS  ${name} — ${reason}`)
-}
-
-function fail(results, name, reason) {
-  results[name] = { result: "FAIL", reason }
-  console.log(`FAIL  ${name} — ${reason}`)
-}
-
 async function raises(db, sql, params, needle) {
+  const sp = `sp_${Math.random().toString(36).slice(2, 10)}`
+  await db.query(`SAVEPOINT ${sp}`)
   try {
     await db.query(sql, params)
+    await db.query(`ROLLBACK TO SAVEPOINT ${sp}`)
     return `expected ${needle}`
   } catch (error) {
+    await db.query(`ROLLBACK TO SAVEPOINT ${sp}`)
     const message = error instanceof Error ? error.message : String(error)
     return message.includes(needle) ? null : message
   }
-}
-
-async function setUser(db, userId) {
-  await db.query(`SELECT set_config('request.jwt.claim.sub', $1, false)`, [userId])
-  await db.query(`SELECT set_config('request.jwt.claims', $1, false)`, [JSON.stringify({ sub: userId })])
 }
 
 let seq = 0
@@ -79,14 +61,56 @@ function sameFields(actual, expected) {
   return problems
 }
 
-async function main() {
-  prepareVerifyEnv()
-  const dbUrl = process.env.SUPABASE_DB_URL || process.env.DATABASE_URL
-  if (!dbUrl) throw new Error("SUPABASE_DB_URL is not set")
-  const db = new Client({ connectionString: dbUrl, ssl: { rejectUnauthorized: false } })
-  await db.connect()
-  const results = {}
-  let fixturesOk = false
+
+export const MARKERS = [
+  {
+    label: "transactions",
+    sql: `SELECT count(*)::int AS n FROM public.transactions
+          WHERE serial_number LIKE $1 OR batch_id LIKE $2
+             OR COALESCE(metadata->>'reversedBatchId', '') LIKE $2`,
+    params: [`${PREFIX}-%`, `BATCH-${PREFIX}-%`],
+  },
+  {
+    label: "items",
+    sql: `SELECT count(*)::int AS n FROM public.inventory_items WHERE serial_number LIKE $1`,
+    params: [`${PREFIX}-%`],
+  },
+  {
+    label: "batch_reversals",
+    sql: `SELECT count(*)::int AS n FROM public.batch_reversals WHERE batch_id LIKE $1`,
+    params: [`BATCH-${PREFIX}-%`],
+  },
+  {
+    label: "batch_restores",
+    sql: `SELECT count(*)::int AS n FROM public.batch_restores WHERE batch_id LIKE $1`,
+    params: [`BATCH-${PREFIX}-%`],
+  },
+  {
+    label: "holding_extensions",
+    sql: `SELECT count(*)::int AS n FROM public.holding_extensions
+          WHERE item_id LIKE $1 OR serial_number LIKE $2`,
+    params: [`ITEM-${PREFIX}-%`, `${PREFIX}-%`],
+  },
+  {
+    label: "users",
+    sql: `SELECT count(*)::int AS n FROM auth.users WHERE email LIKE 'harness-069-%@test.local'`,
+    params: [],
+  },
+]
+
+export async function runChecks(ctx) {
+  const db = ctx.db
+  const results = ctx.results
+  const pass = (name, reason) => ctx.pass(name, reason)
+  const fail = (name, reason) => ctx.fail(name, reason)
+
+  async function setUser(_db, userId) {
+    await db.query(`SELECT set_config('request.jwt.claim.sub', $1, true)`, [userId])
+    await db.query(`SELECT set_config('request.jwt.claims', $1, true)`, [
+      JSON.stringify({ sub: userId, role: "authenticated" }),
+    ])
+  }
+
   const product = await db.query(
     `SELECT id, product_name FROM public.product_lines
      WHERE is_active AND vendor = 'Starlink'
@@ -96,26 +120,12 @@ async function main() {
   if (!product.rows[0]) throw new Error("no active Starlink product for the rental fixture")
   const productId = product.rows[0].id
   const productName = product.rows[0].product_name
-  const service = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  })
-  const fixtureUsers = []
-  let adminId
-  for (const role of ["admin", "technicians", "viewer"]) {
-    const email = `verify-069-${role}@test.local`
-    const { data: created, error: createError } = await service.auth.admin.createUser({ email, email_confirm: true })
-    if (createError) throw new Error(`createUser ${role}: ${createError.message}`)
-    fixtureUsers.push(created.user.id)
-    if (role === "admin") adminId = created.user.id
-    const updated = await db.query(
-      `UPDATE public.profiles SET role = $2::public.app_role, active = true WHERE id = $1`,
-      [created.user.id, role]
-    )
-    if (updated.rowCount !== 1) throw new Error(`profile ${role} was not updated`)
-  }
-  const technicianId = fixtureUsers.find((id) => id !== adminId)
 
-  async function readItem(serial) {
+  const adminId = await ctx.createFixtureUser("admin", "harness-069-admin@test.local")
+  const technicianId = await ctx.createFixtureUser("technicians", "harness-069-technicians@test.local")
+  await ctx.createFixtureUser("viewer", "harness-069-viewer@test.local")
+
+async function readItem(serial) {
     const item = await db.query(
       `SELECT status, location, client, assigned_to, poc_out_date, return_date,
               deleted_at IS NOT NULL AS deleted
@@ -131,9 +141,47 @@ async function main() {
   async function expectItem(name, serial, expected) {
     const row = await readItem(serial)
     const problems = sameFields(row, expected)
-    if (problems.length) fail(results, name, problems.join("; "))
-    else pass(results, name, expected.deleted ? "soft-deleted" : expected.status)
+    if (problems.length) fail(name, problems.join("; "))
+    else pass(name, expected.deleted ? "soft-deleted" : expected.status)
     return problems.length === 0
+  }
+
+  // apply_stock_movement creates _movement_prev ON COMMIT DROP — it survives every
+  // call inside the harness transaction. Drop before each apply so CREATE TEMP works.
+  async function dropMovementPrev() {
+    await db.query(`DROP TABLE IF EXISTS _movement_prev`)
+  }
+
+  // now() / created_at is frozen for the outer harness transaction. reverse_restore_plan
+  // looks up prior POC Out / Rentals with a strict created_at < comparison (no id
+  // tie-break), so stamp each new movement slightly later than the last.
+  let txnTick = 0
+  async function stampTxn(...txnIds) {
+    for (const txnId of txnIds) {
+      txnTick += 1
+      const at = new Date(Date.parse(DATE) + txnTick).toISOString()
+      await db.query(`UPDATE public.transactions SET created_at = $2::timestamptz WHERE id = $1`, [
+        txnId,
+        at,
+      ])
+    }
+  }
+
+  // now() is frozen for the outer harness transaction, so reverse + restore get the
+  // same timestamp and batch_is_currently_reversed stays true (reversed_at >= restored_at).
+  // Nudge restored_at forward so the batch counts as active again inside the txn.
+  async function bumpRestoreClock(batchId) {
+    await db.query(
+      `UPDATE public.batch_restores
+       SET restored_at = restored_at + interval '1 millisecond'
+       WHERE ctid = (
+         SELECT ctid FROM public.batch_restores
+         WHERE batch_id = $1
+         ORDER BY restored_at DESC
+         LIMIT 1
+       )`,
+      [batchId]
+    )
   }
 
   async function createInbound(serial) {
@@ -149,6 +197,7 @@ async function main() {
       return_date: null,
       deleted: false,
     }
+    await dropMovementPrev()
     await db.query(`SELECT public.apply_stock_movement('[]'::jsonb, $1::jsonb, $2::jsonb)`, [
       JSON.stringify([
         {
@@ -178,6 +227,7 @@ async function main() {
         },
       ]),
     ])
+    await stampTxn(txnId)
     return { itemId, txnId, batchId, after }
   }
 
@@ -203,6 +253,7 @@ async function main() {
     }
     const txnId = nextId("TXN")
     const batchId = nextId("BATCH")
+    await dropMovementPrev()
     await db.query(`SELECT public.apply_stock_movement($1::jsonb, '[]'::jsonb, $2::jsonb)`, [
       JSON.stringify([
         {
@@ -251,6 +302,7 @@ async function main() {
         },
       ]),
     ])
+    await stampTxn(txnId)
     const keptHolder = type === "Decommissioned" || type === "Rental Return"
     return {
       txnId,
@@ -287,6 +339,7 @@ async function main() {
     )
     if (!openCase.rows[0]) throw new Error(`no open case for ${serial}`)
     await setUser(db, adminId)
+    await dropMovementPrev()
     await db.query(
       `SELECT public.complete_inspection($1, $2, $3, $4, $5, $6, NULL)`,
       [
@@ -308,6 +361,7 @@ async function main() {
     )
     const recorded = applied.rows[0]
     if (!recorded?.transaction_id || !recorded.batch_id) throw new Error(`inspection wrote no movement for ${serial}`)
+    await stampTxn(recorded.transaction_id)
     return {
       txnId: recorded.transaction_id,
       batchId: recorded.batch_id,
@@ -352,8 +406,8 @@ async function main() {
       if (blank(recordedPrevious[key]) !== blank(previous[key])) problems.push(`previous ${key}`)
       if (blank(recordedAfter[key]) !== blank(after[key])) problems.push(`after ${key}`)
     }
-    if (problems.length) fail(results, name, problems.join("; "))
-    else pass(results, name, "server image, client payload ignored")
+    if (problems.length) fail(name, problems.join("; "))
+    else pass(name, "server image, client payload ignored")
     return problems.length === 0
   }
 
@@ -369,6 +423,7 @@ async function main() {
   async function restore(batchId) {
     await setUser(db, adminId)
     await db.query(`SELECT public.restore_batch($1, $2)`, [batchId, RESTORE_REASON])
+    await bumpRestoreClock(batchId)
   }
 
   async function roundTrip(name, serial, moved) {
@@ -406,73 +461,13 @@ async function main() {
       row.restores === 1 &&
       row.active === 1
     ) {
-      pass(results, `${name}_kept`, "original and reversal kept; batch active again")
+      pass(`${name}_kept`, "original and reversal kept; batch active again")
     } else if (restored) {
-      fail(results, `${name}_kept`, JSON.stringify(row))
+      fail(`${name}_kept`, JSON.stringify(row))
     }
   }
 
-  async function cleanup() {
-    await db.query(`ALTER TABLE public.kit_case_events DISABLE TRIGGER tr_kit_case_events_append_only`)
-    try {
-      await db.query(
-        `DELETE FROM public.kit_case_events WHERE case_id IN (
-           SELECT kc.id FROM public.kit_cases kc
-           JOIN public.inventory_items item ON item.id = kc.inventory_item_id
-           WHERE item.serial_number LIKE $1
-         )`,
-        [`${PREFIX}%`],
-      )
-    } finally {
-      await db.query(`ALTER TABLE public.kit_case_events ENABLE TRIGGER tr_kit_case_events_append_only`)
-    }
-    await db.query(
-      `DELETE FROM public.kit_cases WHERE inventory_item_id IN (
-         SELECT id FROM public.inventory_items WHERE serial_number LIKE $1
-       )`,
-      [`${PREFIX}%`],
-    )
-    await db.query(
-      `DELETE FROM public.holding_extensions
-       WHERE item_id LIKE $1 OR serial_number LIKE $2`,
-      [`ITEM-${PREFIX}-%`, `${PREFIX}-%`]
-    )
-    await db.query(
-      `DELETE FROM public.batch_restores
-       WHERE batch_id LIKE $1
-          OR batch_id IN (
-            SELECT batch_id FROM public.transactions
-            WHERE serial_number LIKE $2 OR COALESCE(metadata->>'reversedBatchId', '') LIKE $1
-          )`,
-      [`BATCH-${PREFIX}-%`, `${PREFIX}-%`]
-    )
-    await db.query(
-      `DELETE FROM public.batch_reversals
-       WHERE batch_id LIKE $1
-          OR batch_id IN (
-            SELECT batch_id FROM public.transactions
-            WHERE serial_number LIKE $2 OR COALESCE(metadata->>'reversedBatchId', '') LIKE $1
-          )`,
-      [`BATCH-${PREFIX}-%`, `${PREFIX}-%`]
-    )
-    await db.query(
-      `DELETE FROM public.transactions
-       WHERE serial_number LIKE $1
-          OR batch_id LIKE $2
-          OR COALESCE(metadata->>'reversedBatchId', '') LIKE $2`,
-      [`${PREFIX}-%`, `BATCH-${PREFIX}-%`]
-    )
-    await db.query(`DELETE FROM public.inventory_items WHERE serial_number LIKE $1`, [`${PREFIX}-%`])
-  }
-
-  async function cleanupUsers() {
-    for (const id of fixtureUsers) {
-      const { error } = await service.auth.admin.deleteUser(id)
-      if (error && !/not found/i.test(error.message)) console.warn(`deleteUser ${id}: ${error.message}`)
-    }
-  }
-
-  async function snapshot() {
+      async function snapshot() {
     const counted = await db.query(
       `SELECT resolution.resolved_client_id AS client_id,
               count(DISTINCT resolution.batch_key)::int AS orders,
@@ -526,18 +521,15 @@ async function main() {
     return_date: "2026-11-01",
   }
 
+  let fixturesOk = false
   try {
     const created = await createInbound(`${PREFIX}-create`)
     await expectRecorded("create_recorded", created.txnId, stock, created.after, true)
-    await setUser(db, technicianId)
-    const forbidden = await raises(
-      db,
-      `SELECT public.reverse_quick_scan_batch($1, $2, NULL, '[]'::jsonb, '[]'::jsonb)`,
-      [created.batchId, REASON],
-      "forbidden"
+    const forbidden = await ctx.asUser(technicianId, async () =>
+      raises(db, `SELECT public.reverse_quick_scan_batch($1, $2, NULL, '[]'::jsonb, '[]'::jsonb)`, [created.batchId, REASON], "forbidden")
     )
-    if (forbidden) fail(results, "technician_forbidden", forbidden)
-    else pass(results, "technician_forbidden", "technician cannot reverse")
+    if (forbidden) fail("technician_forbidden", forbidden)
+    else pass("technician_forbidden", "technician cannot reverse")
     await reverse(created.batchId)
     await expectItem("create_reverse", `${PREFIX}-create`, { ...created.after, deleted: true })
     const reversalLeft = await db.query(
@@ -551,9 +543,9 @@ async function main() {
       [created.txnId]
     )
     if (createRestored && reversalLeft.rows[0].n === 1 && createActive.rows[0].n === 1) {
-      pass(results, "create_kept", "create reversal kept and the receipt counts again")
+      pass("create_kept", "create reversal kept and the receipt counts again")
     } else if (createRestored) {
-      fail(results, "create_kept", `reversal ${reversalLeft.rows[0].n} active ${createActive.rows[0].n}`)
+      fail("create_kept", `reversal ${reversalLeft.rows[0].n} active ${createActive.rows[0].n}`)
     }
 
     const cases = [
@@ -580,10 +572,9 @@ async function main() {
       const extended = await readItem(serial)
       const issuedTxn = await db.query(`SELECT after_return_date FROM public.transactions WHERE id = $1`, [issued.txnId])
       if (extended?.return_date === "2027-01-15" && issuedTxn.rows[0].after_return_date === "2026-11-01") {
-        pass(results, "extend_keeps_movement_date", "Extend date is on the kit; the POC Out after-image stays")
+        pass("extend_keeps_movement_date", "Extend date is on the kit; the POC Out after-image stays")
       } else {
         fail(
-          results,
           "extend_keeps_movement_date",
           `kit ${extended?.return_date} txn ${issuedTxn.rows[0].after_return_date}`
         )
@@ -595,7 +586,7 @@ async function main() {
         { txnClient: HOLDER, txnAssigned: ASSIGNEE, returnPool: "sale" }
       )
       if (returned.before.return_date !== "2027-01-15") {
-        fail(results, "poc_return_recorded", `previous return date ${returned.before.return_date}`)
+        fail("poc_return_recorded", `previous return date ${returned.before.return_date}`)
       } else {
         await roundTrip("poc_return", serial, returned)
       }
@@ -710,7 +701,7 @@ async function main() {
         "return date must be entered at reversal"
       )
       if (missing) {
-        fail(results, "legacy_return_requires_date", missing)
+        fail("legacy_return_requires_date", missing)
       } else {
         await reverse(returned.batchId, [{ transaction_id: returned.txnId, return_date: "2026-12-15" }])
         const ok = await expectItem("legacy_return", serial, {
@@ -729,9 +720,9 @@ async function main() {
         )
         const entered = label.rows[0]?.entered
         if (ok && entered?.return_date === "2026-12-15" && entered.location == null) {
-          pass(results, "legacy_return_label", "entered at reversal")
+          pass("legacy_return_label", "entered at reversal")
         } else if (ok) {
-          fail(results, "legacy_return_label", JSON.stringify(entered))
+          fail("legacy_return_label", JSON.stringify(entered))
         }
       }
     }
@@ -762,7 +753,7 @@ async function main() {
         "return date must be entered at reversal"
       )
       if (missing) {
-        fail(results, "legacy_sale_requires_date", missing)
+        fail("legacy_sale_requires_date", missing)
       } else {
         await reverse(sold.batchId, [{ transaction_id: sold.txnId, return_date: "2026-12-20" }])
         const ok = await expectItem("legacy_converted_sale", serial, {
@@ -779,8 +770,8 @@ async function main() {
            FROM public.transactions WHERE reverses_transaction_id = $1`,
           [sold.txnId]
         )
-        if (ok && label.rows[0]?.return_date === "2026-12-20") pass(results, "legacy_sale_label", "entered at reversal")
-        else if (ok) fail(results, "legacy_sale_label", JSON.stringify(label.rows[0]))
+        if (ok && label.rows[0]?.return_date === "2026-12-20") pass("legacy_sale_label", "entered at reversal")
+        else if (ok) fail("legacy_sale_label", JSON.stringify(label.rows[0]))
       }
     }
 
@@ -810,7 +801,7 @@ async function main() {
         "location must be entered at reversal"
       )
       if (missing) {
-        fail(results, "legacy_warehouse_required", missing)
+        fail("legacy_warehouse_required", missing)
       } else {
         await reverse(sold.batchId, [{ transaction_id: sold.txnId, location: "Warehouse B" }])
         await expectItem("legacy_warehouse", serial, { ...stock, location: "Warehouse B", deleted: false })
@@ -834,6 +825,7 @@ async function main() {
          ) VALUES ($1, 'Inbound', $2, $3, '', $4, $5, 'Warehouse A', 'In Stock', 'recorded')`,
         [txnId, serial, productName, DATE, batchId]
       )
+      await stampTxn(txnId)
       await setUser(db, adminId)
       await db.query(`SELECT public.void_batch($1, $2)`, [batchId, RESTORE_REASON])
       const voided = await readItem(serial)
@@ -847,45 +839,20 @@ async function main() {
         back.location === "Warehouse A" &&
         active.rows[0].n === 1
       ) {
-        pass(results, "void_restore", "void restore changes no stock and the receipt counts again")
+        pass("void_restore", "void restore changes no stock and the receipt counts again")
       } else {
-        fail(results, "void_restore", `before ${voided?.status} after ${back?.status} active ${active.rows[0].n}`)
+        fail("void_restore", `before ${voided?.status} after ${back?.status} active ${active.rows[0].n}`)
       }
     }
 
     fixturesOk = Object.values(results).every((row) => row.result === "PASS")
   } catch (error) {
-    fail(results, "fixtures", error instanceof Error ? error.message : String(error))
-  } finally {
-    await cleanup()
-    const residue = await db.query(
-      `SELECT
-         (SELECT count(*)::int FROM public.transactions
-          WHERE serial_number LIKE $1 OR batch_id LIKE $2
-             OR COALESCE(metadata->>'reversedBatchId', '') LIKE $2) AS txns,
-         (SELECT count(*)::int FROM public.inventory_items WHERE serial_number LIKE $1) AS items,
-         (SELECT count(*)::int FROM public.batch_reversals WHERE batch_id LIKE $2) AS markers,
-         (SELECT count(*)::int FROM public.batch_restores WHERE batch_id LIKE $2) AS restores,
-         (SELECT count(*)::int FROM public.holding_extensions WHERE item_id LIKE $3 OR serial_number LIKE $1) AS extensions,
-         (SELECT count(*)::int FROM auth.users WHERE email LIKE 'verify-069-%@test.local') AS users`,
-      [`${PREFIX}-%`, `BATCH-${PREFIX}-%`, `ITEM-${PREFIX}-%`]
-    )
-    const left = residue.rows[0]
-    if (
-      left.txns === 0 &&
-      left.items === 0 &&
-      left.markers === 0 &&
-      left.restores === 0 &&
-      left.extensions === 0
-    ) {
-      pass(results, "residue", "no fixture rows left")
-    } else {
-      fail(results, "residue", JSON.stringify(left))
-    }
+    fail("fixtures", error instanceof Error ? error.message : String(error))
   }
 
   try {
-    if (fixturesOk && results.residue?.result === "PASS") {
+    // Residue absence is asserted by harness markers after ROLLBACK (no in-txn cleanup).
+    if (fixturesOk) {
       await setUser(db, adminId)
       const afterShot = await snapshot()
       const before = indexSaleCounts(beforeShot)
@@ -900,11 +867,11 @@ async function main() {
       const orders = afterShot.reduce((sum, row) => sum + Number(row.orders), 0)
       const units = afterShot.reduce((sum, row) => sum + Number(row.units), 0)
       if (unexplained.length) {
-        fail(results, "snapshot", unexplained.slice(0, 5).join(", "))
+        fail("snapshot", unexplained.slice(0, 5).join(", "))
       } else if (ignored.length) {
-        pass(results, "snapshot", `${afterShot.length} clients; ignored ${ignored.join(", ")}`)
+        pass("snapshot", `${afterShot.length} clients; ignored ${ignored.join(", ")}`)
       } else {
-        pass(results, "snapshot", `${afterShot.length} / ${orders} / ${units} unchanged by this run`)
+        pass("snapshot", `${afterShot.length} / ${orders} / ${units} unchanged by this run`)
       }
       const phantoms = await db.query(
         `SELECT reversal.batch_id, reversal.kind, reversal.reversal_reason,
@@ -920,8 +887,8 @@ async function main() {
         phantoms.rows.every(
           (row) => row.kind === "void" && row.reversal_reason === VOID_REASON && row.reversed === true && row.restores === 0
         )
-      if (intact) pass(results, "phantoms", "three voided receipts stayed voided")
-      else fail(results, "phantoms", JSON.stringify(phantoms.rows))
+      if (intact) pass("phantoms", "three voided receipts stayed voided")
+      else fail("phantoms", JSON.stringify(phantoms.rows))
 
       for (const stuck of STUCK) {
         const plan = await db.query(`SELECT public.reverse_restore_plan($1) AS plan`, [stuck.batchId])
@@ -942,30 +909,33 @@ async function main() {
           needs.includes("location") &&
           !needs.includes("return_date")
         ) {
-          pass(results, `stuck_${stuck.serial}`, "In Stock, no holder, warehouse must be entered")
+          pass(`stuck_${stuck.serial}`, "In Stock, no holder, warehouse must be entered")
         } else {
-          fail(results, `stuck_${stuck.serial}`, JSON.stringify(row))
+          fail(`stuck_${stuck.serial}`, JSON.stringify(row))
         }
       }
     } else {
-      fail(results, "production_check", "skipped because fixture checks failed")
+      fail("production_check", "skipped because fixture checks failed")
     }
   } catch (error) {
-    fail(results, "production_check", error instanceof Error ? error.message : String(error))
-  } finally {
-    await cleanupUsers()
-    const users = await db.query(
-      `SELECT count(*)::int AS n FROM auth.users WHERE email LIKE 'verify-069-%@test.local'`
-    )
-    if (users.rows[0].n !== 0) fail(results, "residue", `${users.rows[0].n} test users left`)
+    fail("production_check", error instanceof Error ? error.message : String(error))
   }
 
-  await Promise.race([db.end(), new Promise((resolve) => setTimeout(resolve, 2000))])
-  const failed = Object.values(results).some((row) => row.result === "FAIL")
-  process.exit(failed ? 1 : 0)
 }
 
-main().catch((error) => {
-  console.error(error)
-  process.exit(1)
-})
+async function main() {
+  const { ok, failed, passed } = await withHarness(
+    { markers: MARKERS, timeoutMs: 300_000, label: "verify-069" },
+    runChecks,
+  )
+  console.log(ok ? `\n${passed} passed` : `\n${failed} failed`)
+  process.exitCode = ok ? 0 : 1
+}
+
+const isMain = process.argv[1] && process.argv[1].replace(/\\/g, "/").endsWith("verify-069-exact-reverse-restore.mjs")
+if (isMain) {
+  main().catch((error) => {
+    console.error(error)
+    process.exitCode = 1
+  })
+}

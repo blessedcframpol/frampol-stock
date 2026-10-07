@@ -1,0 +1,3555 @@
+{
+  "generated_at": "2026-10-07T07:39:02.118Z",
+  "production_ref": "iysjspjsuuunpjhpwlei",
+  "blessed_admin_id": "ccf0717b-0323-49c6-a6c3-59d45cc849f2",
+  "hold_hits": [],
+  "hold_count": 0,
+  "excluded": {
+    "clients": [
+      "CLT-1774007295290-1pl6z68"
+    ],
+    "note": "Reign Acre client row excluded; only fixture txns/items that reference it are listed for removal"
+  },
+  "expected_deltas": {
+    "clients_directory": {
+      "now": 1878,
+      "residue": 8,
+      "after": 1870
+    },
+    "client_sale_dispatch_counts": {
+      "now": {
+        "units": 1317,
+        "orders": 753,
+        "clients": 462
+      },
+      "note": "CSDC drops dummy fixture clients plus any Sale units on real clients from fixture txns (Reign Acre RS1074)",
+      "real_client_fixture_sale_units": 1
+    },
+    "kit_status": {
+      "now": {
+        "POC": 29,
+        "Sold": 1303,
+        "Rented": 23,
+        "Disposed": 68,
+        "In Stock": 386,
+        "RMA Hold": 6,
+        "Pending Inspection": 9
+      },
+      "residue": {
+        "POC": 12,
+        "Sold": 12,
+        "Rented": 7,
+        "Disposed": 3,
+        "In Stock": 26,
+        "RMA Hold": 5,
+        "Pending Inspection": 8
+      },
+      "after": {
+        "POC": 17,
+        "Sold": 1291,
+        "Rented": 16,
+        "Disposed": 65,
+        "In Stock": 360,
+        "RMA Hold": 1,
+        "Pending Inspection": 1
+      }
+    },
+    "available_in_stock_view": {
+      "now": 383,
+      "residue_in_stock_kits": 26,
+      "after": 357
+    },
+    "monthly_sales_since_2026_04": {
+      "now": 1210,
+      "residue": 28,
+      "after": 1182
+    },
+    "invoices_tab_fixture_batches": {
+      "residue": 3,
+      "after": 0
+    },
+    "pending_inspection": {
+      "now": 9,
+      "residue": 8,
+      "after": 1
+    },
+    "alerts": {
+      "note": "Overdue POC/Rental alerts that reference residue kits disappear with those kits (12 POC + 7 Rented residue).",
+      "residue_poc": 12,
+      "residue_rented": 7
+    }
+  },
+  "tables": {
+    "batch_invoice_events": {
+      "remove": [
+        {
+          "id": "0bb260d1-ded6-49e3-8fce-442a85f84233",
+          "script": "065",
+          "why": "event on verify-065 invoice",
+          "status": "remove",
+          "batch_id": "TXN-verify-065-ambig"
+        },
+        {
+          "id": "1cb6147f-c4c8-4708-a65f-bf637095bba6",
+          "script": "065",
+          "why": "event on verify-065 invoice",
+          "status": "remove",
+          "batch_id": "TXN-verify-065-dangle"
+        },
+        {
+          "id": "3cbbf7ed-1e7a-4e51-b8c5-833341cc48c6",
+          "script": "065",
+          "why": "event on verify-065 invoice",
+          "status": "remove",
+          "batch_id": "TXN-verify-065-substr"
+        }
+      ],
+      "hold": []
+    },
+    "batch_invoices": {
+      "remove": [
+        {
+          "id": "TXN-verify-065-ambig",
+          "script": "065",
+          "why": "verify-065 invoice fixture",
+          "status": "remove",
+          "invoice_status": "invoiced",
+          "invoice_number": "100"
+        },
+        {
+          "id": "TXN-verify-065-dangle",
+          "script": "065",
+          "why": "verify-065 invoice fixture",
+          "status": "remove",
+          "invoice_status": "invoiced",
+          "invoice_number": "100"
+        },
+        {
+          "id": "TXN-verify-065-substr",
+          "script": "065",
+          "why": "verify-065 invoice fixture",
+          "status": "remove",
+          "invoice_status": "invoiced",
+          "invoice_number": "100"
+        }
+      ],
+      "hold": []
+    },
+    "holding_extensions": {
+      "remove": [
+        {
+          "id": "5d726feb-a353-474b-bb96-40d47bc1dd67",
+          "script": "p33b",
+          "why": "VERIFY-P33B extension fixture",
+          "status": "remove",
+          "item_id": "item-VERIFY-P33B-EXT-1791295207307",
+          "serial": "VERIFY-P33B-EXT-1791295207307"
+        }
+      ],
+      "hold": []
+    },
+    "transactions": {
+      "remove": [
+        {
+          "id": "txn-verify-061-late",
+          "script": "061",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "txn-verify-061-serial-late",
+          "type": "Sale",
+          "client_id": null,
+          "batch_id": null
+        },
+        {
+          "id": "txn-verify-061-write",
+          "script": "061",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "txn-verify-061-serial-write",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": null
+        },
+        {
+          "id": "txn-verify-061-order-early",
+          "script": "061",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "txn-verify-061-serial-early",
+          "type": "Sale",
+          "client_id": null,
+          "batch_id": "verify-061-orig"
+        },
+        {
+          "id": "txn-verify-061-order-late",
+          "script": "061",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "txn-verify-061-serial-late-order",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "verify-061-later"
+        },
+        {
+          "id": "txn-verify-061-reversal",
+          "script": "061",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "(batch)",
+          "type": "Reversal",
+          "client_id": null,
+          "batch_id": "verify-061-rev"
+        },
+        {
+          "id": "TXN-verify-065-substr",
+          "script": "065",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "verify-065-substr",
+          "type": "Sale",
+          "client_id": null,
+          "batch_id": null
+        },
+        {
+          "id": "TXN-verify-065-ambig",
+          "script": "065",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "verify-065-ambig",
+          "type": "Sale",
+          "client_id": null,
+          "batch_id": null
+        },
+        {
+          "id": "TXN-verify-065-dangle",
+          "script": "065",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "verify-065-dangle",
+          "type": "Sale",
+          "client_id": "CLT-verify-065-missing",
+          "batch_id": null
+        },
+        {
+          "id": "TXN-verify-065-poc",
+          "script": "065",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "verify-065-poc",
+          "type": "POC Out",
+          "client_id": "CLT-verify-065-owner",
+          "batch_id": "verify-065-poc"
+        },
+        {
+          "id": "TXN-verify-065-return",
+          "script": "065",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "verify-065-return",
+          "type": "POC Return",
+          "client_id": "CLT-verify-065-owner",
+          "batch_id": null
+        },
+        {
+          "id": "verify-066-txn-early",
+          "script": "066",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "verify-066-guard",
+          "type": "Sale",
+          "client_id": null,
+          "batch_id": "verify-066-batch-early"
+        },
+        {
+          "id": "verify-066-txn-later",
+          "script": "066",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "verify-066-guard",
+          "type": "Sale",
+          "client_id": null,
+          "batch_id": "verify-066-batch-later"
+        },
+        {
+          "id": "verify-066-txn-move",
+          "script": "066",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "verify-066-move",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "verify-066-batch-move"
+        },
+        {
+          "id": "TXN-REV-1791294300823-1",
+          "script": "066",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "verify-066-move",
+          "type": "Reversal",
+          "client_id": null,
+          "batch_id": "BATCH-REV-1791294300822"
+        },
+        {
+          "id": "verify-067-inbound",
+          "script": "067",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "verify-067-serial",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "verify-067-batch-in"
+        },
+        {
+          "id": "verify-067-sale",
+          "script": "067",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "verify-067-serial",
+          "type": "Sale",
+          "client_id": null,
+          "batch_id": "verify-067-batch-sale"
+        },
+        {
+          "id": "TXN-I2B068-2",
+          "script": "068",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "I2B068-create",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-I2B068-3"
+        },
+        {
+          "id": "TXN-REV-1791294727403-1",
+          "script": "068",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "I2B068-create",
+          "type": "Reversal",
+          "client_id": null,
+          "batch_id": "BATCH-REV-1791294727401"
+        },
+        {
+          "id": "TXN-I2B068-5",
+          "script": "068",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "I2B068-sale",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-I2B068-6"
+        },
+        {
+          "id": "TXN-I2B068-7",
+          "script": "068",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "I2B068-sale",
+          "type": "Sale",
+          "client_id": null,
+          "batch_id": "BATCH-I2B068-8"
+        },
+        {
+          "id": "TXN-REV-1791294729882-1",
+          "script": "068",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "I2B068-sale",
+          "type": "Reversal",
+          "client_id": null,
+          "batch_id": "BATCH-REV-1791294729881"
+        },
+        {
+          "id": "TXN-I2B068-10",
+          "script": "068",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "I2B068-poc_out",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-I2B068-11"
+        },
+        {
+          "id": "TXN-I2B068-12",
+          "script": "068",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "I2B068-poc_out",
+          "type": "POC Out",
+          "client_id": null,
+          "batch_id": "BATCH-I2B068-13"
+        },
+        {
+          "id": "TXN-REV-1791294732133-1",
+          "script": "068",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "I2B068-poc_out",
+          "type": "Reversal",
+          "client_id": null,
+          "batch_id": "BATCH-REV-1791294732132"
+        },
+        {
+          "id": "TXN-I2B068-15",
+          "script": "068",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "I2B068-poc_return",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-I2B068-16"
+        },
+        {
+          "id": "TXN-I2B068-17",
+          "script": "068",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "I2B068-poc_return",
+          "type": "POC Out",
+          "client_id": null,
+          "batch_id": "BATCH-I2B068-18"
+        },
+        {
+          "id": "TXN-R3069-2",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-create",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-R3069-3"
+        },
+        {
+          "id": "TXN-REV-1791294741239-1",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-create",
+          "type": "Reversal",
+          "client_id": null,
+          "batch_id": "BATCH-REV-1791294741238"
+        },
+        {
+          "id": "TXN-R3069-5",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-sale",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-R3069-6"
+        },
+        {
+          "id": "TXN-R3069-7",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-sale",
+          "type": "Sale",
+          "client_id": null,
+          "batch_id": "BATCH-R3069-8"
+        },
+        {
+          "id": "TXN-REV-1791294744168-1",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-sale",
+          "type": "Reversal",
+          "client_id": null,
+          "batch_id": "BATCH-REV-1791294744168"
+        },
+        {
+          "id": "TXN-R3069-10",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-poc_out",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-R3069-11"
+        },
+        {
+          "id": "TXN-R3069-12",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-poc_out",
+          "type": "POC Out",
+          "client_id": null,
+          "batch_id": "BATCH-R3069-13"
+        },
+        {
+          "id": "TXN-REV-1791294747095-1",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-poc_out",
+          "type": "Reversal",
+          "client_id": null,
+          "batch_id": "BATCH-REV-1791294747094"
+        },
+        {
+          "id": "TXN-R3069-15",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-rentals",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-R3069-16"
+        },
+        {
+          "id": "TXN-R3069-17",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-rentals",
+          "type": "Rentals",
+          "client_id": null,
+          "batch_id": "BATCH-R3069-18"
+        },
+        {
+          "id": "TXN-REV-1791294750020-1",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-rentals",
+          "type": "Reversal",
+          "client_id": null,
+          "batch_id": "BATCH-REV-1791294750019"
+        },
+        {
+          "id": "TXN-R3069-20",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-dispose",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-R3069-21"
+        },
+        {
+          "id": "TXN-R3069-22",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-dispose",
+          "type": "Dispose",
+          "client_id": null,
+          "batch_id": "BATCH-R3069-23"
+        },
+        {
+          "id": "TXN-REV-1791294752950-1",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-dispose",
+          "type": "Reversal",
+          "client_id": null,
+          "batch_id": "BATCH-REV-1791294752949"
+        },
+        {
+          "id": "TXN-R3069-25",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-transfer",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-R3069-26"
+        },
+        {
+          "id": "TXN-R3069-27",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-transfer",
+          "type": "Transfer",
+          "client_id": null,
+          "batch_id": "BATCH-R3069-28"
+        },
+        {
+          "id": "TXN-REV-1791294755877-1",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-transfer",
+          "type": "Reversal",
+          "client_id": null,
+          "batch_id": "BATCH-REV-1791294755876"
+        },
+        {
+          "id": "TXN-R3069-30",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-loaner",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-R3069-31"
+        },
+        {
+          "id": "TXN-R3069-32",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-loaner",
+          "type": "Remediation Loaner Issue",
+          "client_id": null,
+          "batch_id": "BATCH-R3069-33"
+        },
+        {
+          "id": "TXN-REV-1791294758810-1",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-loaner",
+          "type": "Reversal",
+          "client_id": null,
+          "batch_id": "BATCH-REV-1791294758809"
+        },
+        {
+          "id": "TXN-R3069-35",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-poc-return",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-R3069-36"
+        },
+        {
+          "id": "TXN-R3069-37",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-poc-return",
+          "type": "POC Out",
+          "client_id": null,
+          "batch_id": "BATCH-R3069-38"
+        },
+        {
+          "id": "TXN-R3069-39",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-poc-return",
+          "type": "POC Return",
+          "client_id": null,
+          "batch_id": "BATCH-R3069-40"
+        },
+        {
+          "id": "TXN-REV-1791294763207-1",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-poc-return",
+          "type": "Reversal",
+          "client_id": null,
+          "batch_id": "BATCH-REV-1791294763206"
+        },
+        {
+          "id": "TXN-R3069-42",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-rental-return",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-R3069-43"
+        },
+        {
+          "id": "TXN-R3069-44",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-rental-return",
+          "type": "Rentals",
+          "client_id": null,
+          "batch_id": "BATCH-R3069-45"
+        },
+        {
+          "id": "TXN-R3069-46",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-rental-return",
+          "type": "Rental Return",
+          "client_id": null,
+          "batch_id": "BATCH-R3069-47"
+        },
+        {
+          "id": "TXN-REV-1791294766581-1",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-rental-return",
+          "type": "Reversal",
+          "client_id": null,
+          "batch_id": "BATCH-REV-1791294766580"
+        },
+        {
+          "id": "TXN-R3069-49",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-sale-return",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-R3069-50"
+        },
+        {
+          "id": "TXN-R3069-51",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-sale-return",
+          "type": "Sale",
+          "client_id": null,
+          "batch_id": "BATCH-R3069-52"
+        },
+        {
+          "id": "TXN-R3069-53",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-sale-return",
+          "type": "Sale Return",
+          "client_id": null,
+          "batch_id": "BATCH-R3069-54"
+        },
+        {
+          "id": "TXN-REV-1791294769926-1",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-sale-return",
+          "type": "Reversal",
+          "client_id": null,
+          "batch_id": "BATCH-REV-1791294769926"
+        },
+        {
+          "id": "TXN-R3069-56",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-decommissioned",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-R3069-57"
+        },
+        {
+          "id": "TXN-R3069-58",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-decommissioned",
+          "type": "Sale",
+          "client_id": null,
+          "batch_id": "BATCH-R3069-59"
+        },
+        {
+          "id": "TXN-R3069-60",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-decommissioned",
+          "type": "Decommissioned",
+          "client_id": null,
+          "batch_id": "BATCH-R3069-61"
+        },
+        {
+          "id": "TXN-REV-1791294773286-1",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-decommissioned",
+          "type": "Reversal",
+          "client_id": null,
+          "batch_id": "BATCH-REV-1791294773285"
+        },
+        {
+          "id": "TXN-R3069-63",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-inspection-pass",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-R3069-64"
+        },
+        {
+          "id": "TXN-R3069-65",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-inspection-pass",
+          "type": "Sale",
+          "client_id": null,
+          "batch_id": "BATCH-R3069-66"
+        },
+        {
+          "id": "TXN-R3069-67",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-inspection-pass",
+          "type": "Decommissioned",
+          "client_id": null,
+          "batch_id": "BATCH-R3069-68"
+        },
+        {
+          "id": "TXN-INSP-1791294776837",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-inspection-pass",
+          "type": "Inspection Pass",
+          "client_id": null,
+          "batch_id": "BATCH-INSP-1791294776837"
+        },
+        {
+          "id": "TXN-REV-1791294777891-1",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-inspection-pass",
+          "type": "Reversal",
+          "client_id": null,
+          "batch_id": "BATCH-REV-1791294777891"
+        },
+        {
+          "id": "TXN-R3069-70",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-inspection-fail",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-R3069-71"
+        },
+        {
+          "id": "TXN-R3069-72",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-inspection-fail",
+          "type": "Sale",
+          "client_id": null,
+          "batch_id": "BATCH-R3069-73"
+        },
+        {
+          "id": "TXN-R3069-74",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-inspection-fail",
+          "type": "Decommissioned",
+          "client_id": null,
+          "batch_id": "BATCH-R3069-75"
+        },
+        {
+          "id": "TXN-INSP-1791294781444",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-inspection-fail",
+          "type": "Inspection Fail",
+          "client_id": null,
+          "batch_id": "BATCH-INSP-1791294781444"
+        },
+        {
+          "id": "TXN-REV-1791294782497-1",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-inspection-fail",
+          "type": "Reversal",
+          "client_id": null,
+          "batch_id": "BATCH-REV-1791294782497"
+        },
+        {
+          "id": "TXN-R3069-77",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-maint-inbound",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-R3069-78"
+        },
+        {
+          "id": "TXN-REV-1791294785424-1",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-maint-inbound",
+          "type": "Reversal",
+          "client_id": null,
+          "batch_id": "BATCH-REV-1791294785423"
+        },
+        {
+          "id": "TXN-R3069-80",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-legacy-return",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-R3069-81"
+        },
+        {
+          "id": "TXN-R3069-82",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-legacy-return",
+          "type": "POC Out",
+          "client_id": null,
+          "batch_id": "BATCH-R3069-83"
+        },
+        {
+          "id": "TXN-R3069-84",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-legacy-return",
+          "type": "POC Return",
+          "client_id": null,
+          "batch_id": "BATCH-R3069-85"
+        },
+        {
+          "id": "TXN-REV-1791294788997-1",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-legacy-return",
+          "type": "Reversal",
+          "client_id": null,
+          "batch_id": "BATCH-REV-1791294788996"
+        },
+        {
+          "id": "TXN-R3069-87",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-legacy-sale",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-R3069-88"
+        },
+        {
+          "id": "TXN-R3069-89",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-legacy-sale",
+          "type": "POC Out",
+          "client_id": null,
+          "batch_id": "BATCH-R3069-90"
+        },
+        {
+          "id": "TXN-R3069-91",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-legacy-sale",
+          "type": "Sale",
+          "client_id": null,
+          "batch_id": "BATCH-R3069-92"
+        },
+        {
+          "id": "TXN-REV-1791294791523-1",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-legacy-sale",
+          "type": "Reversal",
+          "client_id": null,
+          "batch_id": "BATCH-REV-1791294791522"
+        },
+        {
+          "id": "TXN-R3069-94",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-legacy-warehouse",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-R3069-95"
+        },
+        {
+          "id": "TXN-R3069-96",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-legacy-warehouse",
+          "type": "Sale",
+          "client_id": null,
+          "batch_id": "BATCH-R3069-97"
+        },
+        {
+          "id": "TXN-REV-1791294793626-1",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-legacy-warehouse",
+          "type": "Reversal",
+          "client_id": null,
+          "batch_id": "BATCH-REV-1791294793625"
+        },
+        {
+          "id": "TXN-R3069-99",
+          "script": "069",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "R3069-void",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-R3069-100"
+        },
+        {
+          "id": "TXN-E1070-2",
+          "script": "070",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "E1070-A",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-E1070-3"
+        },
+        {
+          "id": "TXN-E1070-4",
+          "script": "070",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "E1070-A",
+          "type": "POC Out",
+          "client_id": null,
+          "batch_id": "BATCH-E1070-5"
+        },
+        {
+          "id": "TXN-E1070-7",
+          "script": "070",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "E1070-B",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-E1070-8"
+        },
+        {
+          "id": "TXN-E1070-9",
+          "script": "070",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "E1070-B",
+          "type": "POC Out",
+          "client_id": null,
+          "batch_id": "BATCH-E1070-10"
+        },
+        {
+          "id": "TXN-E1070-11",
+          "script": "070",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "E1070-B",
+          "type": "Transfer",
+          "client_id": null,
+          "batch_id": "BATCH-E1070-12"
+        },
+        {
+          "id": "TXN-P1071-2",
+          "script": "071",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "P1071-SALE",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-P1071-3"
+        },
+        {
+          "id": "TXN-P1071-5",
+          "script": "071",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "P1071-RENT",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-P1071-6"
+        },
+        {
+          "id": "TXN-P1072-2",
+          "script": "072",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "P1072-STAR",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-P1072-3"
+        },
+        {
+          "id": "TXN-P1072-5",
+          "script": "072",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "P1072-OTHER",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-P1072-6"
+        },
+        {
+          "id": "TXN-P1072-8",
+          "script": "072",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "P1072-STAR2",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-P1072-9"
+        },
+        {
+          "id": "TXN-P1072-12",
+          "script": "072",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "P1072-STAR",
+          "type": "Rentals",
+          "client_id": null,
+          "batch_id": "BATCH-P1072-13"
+        },
+        {
+          "id": "TXN-P1072-14",
+          "script": "072",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "P1072-STAR",
+          "type": "Rental Return",
+          "client_id": null,
+          "batch_id": "BATCH-P1072-15"
+        },
+        {
+          "id": "TXN-REV-1791295002941-1",
+          "script": "072",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "P1072-STAR",
+          "type": "Reversal",
+          "client_id": null,
+          "batch_id": "BATCH-REV-1791295002933"
+        },
+        {
+          "id": "TXN-K1073-2",
+          "script": "073",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "K1073-MISS",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-K1073-3"
+        },
+        {
+          "id": "TXN-K1073-4",
+          "script": "073",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "K1073-MISS",
+          "type": "Sale",
+          "client_id": null,
+          "batch_id": "BATCH-K1073-5"
+        },
+        {
+          "id": "TXN-K1073-9",
+          "script": "073",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "K1073-DEC",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-K1073-10"
+        },
+        {
+          "id": "TXN-K1073-11",
+          "script": "073",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "K1073-DEC",
+          "type": "Sale",
+          "client_id": null,
+          "batch_id": "BATCH-K1073-12"
+        },
+        {
+          "id": "TXN-K1073-13",
+          "script": "073",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "K1073-DEC",
+          "type": "Decommissioned",
+          "client_id": null,
+          "batch_id": "BATCH-K1073-14"
+        },
+        {
+          "id": "TXN-K1073-16",
+          "script": "073",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "K1073-RENT",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-K1073-17"
+        },
+        {
+          "id": "TXN-K1073-18",
+          "script": "073",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "K1073-RENT",
+          "type": "Rentals",
+          "client_id": null,
+          "batch_id": "BATCH-K1073-19"
+        },
+        {
+          "id": "TXN-K1073-20",
+          "script": "073",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "K1073-RENT",
+          "type": "Rental Return",
+          "client_id": null,
+          "batch_id": "BATCH-K1073-21"
+        },
+        {
+          "id": "TXN-K1073-23",
+          "script": "073",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "K1073-NEW",
+          "type": "Decommissioned",
+          "client_id": "CLT-1774007295290-1pl6z68",
+          "batch_id": "BATCH-K1073-24"
+        },
+        {
+          "id": "TXN-K1073-29",
+          "script": "073",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "K1073-OTHER",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-K1073-30"
+        },
+        {
+          "id": "TXN-K1073-31",
+          "script": "073",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "K1073-OTHER",
+          "type": "Sale",
+          "client_id": null,
+          "batch_id": "BATCH-K1073-32"
+        },
+        {
+          "id": "TXN-K1073-33",
+          "script": "073",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "K1073-OTHER",
+          "type": "Decommissioned",
+          "client_id": null,
+          "batch_id": "BATCH-K1073-34"
+        },
+        {
+          "id": "TXN-INSP-1791295018290",
+          "script": "073",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "K1073-DEC",
+          "type": "Inspection Pass",
+          "client_id": null,
+          "batch_id": "BATCH-INSP-1791295018290"
+        },
+        {
+          "id": "TXN-INSP-1791295018906",
+          "script": "073",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "K1073-RENT",
+          "type": "Inspection Pass",
+          "client_id": null,
+          "batch_id": "BATCH-INSP-1791295018906"
+        },
+        {
+          "id": "TXN-K1073-36",
+          "script": "073",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "K1073-RMA",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-K1073-37"
+        },
+        {
+          "id": "TXN-K1073-38",
+          "script": "073",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "K1073-RMA",
+          "type": "Sale",
+          "client_id": null,
+          "batch_id": "BATCH-K1073-39"
+        },
+        {
+          "id": "TXN-K1073-40",
+          "script": "073",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "K1073-RMA",
+          "type": "Decommissioned",
+          "client_id": null,
+          "batch_id": "BATCH-K1073-41"
+        },
+        {
+          "id": "TXN-INSP-1791295020751",
+          "script": "073",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "K1073-RMA",
+          "type": "Inspection Fail",
+          "client_id": null,
+          "batch_id": "BATCH-INSP-1791295020751"
+        },
+        {
+          "id": "TXN-K1073-43",
+          "script": "073",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "K1073-DISP",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-K1073-44"
+        },
+        {
+          "id": "TXN-K1073-45",
+          "script": "073",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "K1073-DISP",
+          "type": "Sale",
+          "client_id": null,
+          "batch_id": "BATCH-K1073-46"
+        },
+        {
+          "id": "TXN-K1073-47",
+          "script": "073",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "K1073-DISP",
+          "type": "Decommissioned",
+          "client_id": null,
+          "batch_id": "BATCH-K1073-48"
+        },
+        {
+          "id": "TXN-INSP-1791295022600",
+          "script": "073",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "K1073-DISP",
+          "type": "Dispose",
+          "client_id": null,
+          "batch_id": "BATCH-INSP-1791295022600"
+        },
+        {
+          "id": "TXN-K1073-50",
+          "script": "073",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "K1073-CYCLE",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-K1073-51"
+        },
+        {
+          "id": "TXN-K1073-52",
+          "script": "073",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "K1073-CYCLE",
+          "type": "Sale",
+          "client_id": null,
+          "batch_id": "BATCH-K1073-53"
+        },
+        {
+          "id": "TXN-K1073-54",
+          "script": "073",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "K1073-CYCLE",
+          "type": "Decommissioned",
+          "client_id": null,
+          "batch_id": "BATCH-K1073-55"
+        },
+        {
+          "id": "TXN-INSP-1791295024443",
+          "script": "073",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "K1073-CYCLE",
+          "type": "Inspection Pass",
+          "client_id": null,
+          "batch_id": "BATCH-INSP-1791295024443"
+        },
+        {
+          "id": "TXN-REV-1791295024866-1",
+          "script": "073",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "K1073-CYCLE",
+          "type": "Reversal",
+          "client_id": null,
+          "batch_id": "BATCH-REV-1791295024864"
+        },
+        {
+          "id": "TXN-RS1074-2",
+          "script": "074",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "RS1074-rent",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-RS1074-3"
+        },
+        {
+          "id": "TXN-RS1074-4",
+          "script": "074",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "RS1074-rent",
+          "type": "Rentals",
+          "client_id": "CLT-1774007295290-1pl6z68",
+          "batch_id": "BATCH-RS1074-5"
+        },
+        {
+          "id": "TXN-RS1074-12",
+          "script": "074",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "RS1074-rent",
+          "type": "Sale",
+          "client_id": "CLT-1774007295290-1pl6z68",
+          "batch_id": "BATCH-RS1074-13"
+        },
+        {
+          "id": "TXN-REV-1791295039222-1",
+          "script": "074",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "RS1074-rent",
+          "type": "Reversal",
+          "client_id": "CLT-1774007295290-1pl6z68",
+          "batch_id": "BATCH-REV-1791295039222"
+        },
+        {
+          "id": "TXN-RS1074-15",
+          "script": "074",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "RS1074-stock",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-RS1074-16"
+        },
+        {
+          "id": "TXN-INV075-2",
+          "script": "075",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "INV075-NUM",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-INV075-3"
+        },
+        {
+          "id": "TXN-INV075-5",
+          "script": "075",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "INV075-PEND",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-INV075-6"
+        },
+        {
+          "id": "TXN-INV075-8",
+          "script": "075",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "INV075-ZERO",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-INV075-9"
+        },
+        {
+          "id": "TXN-INV075-11",
+          "script": "075",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "INV075-REJ",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-INV075-12"
+        },
+        {
+          "id": "TXN-INV075-14",
+          "script": "075",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "INV075-CHG",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-INV075-15"
+        },
+        {
+          "id": "TXN-INV075-17",
+          "script": "075",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "INV075-BAD",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-INV075-18"
+        },
+        {
+          "id": "TXN-INV075-20",
+          "script": "075",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "INV075-BLANK",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-INV075-21"
+        },
+        {
+          "id": "TXN-INV075-23",
+          "script": "075",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "INV075-SHORT",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-INV075-24"
+        },
+        {
+          "id": "TXN-INV075-25",
+          "script": "075",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "INV075-NUM",
+          "type": "Sale",
+          "client_id": null,
+          "batch_id": "BATCH-INV075-26"
+        },
+        {
+          "id": "TXN-INV075-27",
+          "script": "075",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "INV075-PEND",
+          "type": "Sale",
+          "client_id": null,
+          "batch_id": "BATCH-INV075-28"
+        },
+        {
+          "id": "TXN-INV075-29",
+          "script": "075",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "INV075-ZERO",
+          "type": "Sale",
+          "client_id": null,
+          "batch_id": "BATCH-INV075-30"
+        },
+        {
+          "id": "TXN-INV075-41",
+          "script": "075",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "INV075-REJ",
+          "type": "Sale",
+          "client_id": null,
+          "batch_id": "BATCH-INV075-42"
+        },
+        {
+          "id": "TXN-OB1076-2",
+          "script": "076",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "OB1076-POC-RET",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-OB1076-3"
+        },
+        {
+          "id": "TXN-OB1076-4",
+          "script": "076",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "OB1076-POC-RET",
+          "type": "POC Out",
+          "client_id": null,
+          "batch_id": "BATCH-OB1076-5"
+        },
+        {
+          "id": "TXN-OB1076-7",
+          "script": "076",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "OB1076-POC-SOLD",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-OB1076-8"
+        },
+        {
+          "id": "TXN-OB1076-9",
+          "script": "076",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "OB1076-POC-SOLD",
+          "type": "POC Out",
+          "client_id": null,
+          "batch_id": "BATCH-OB1076-10"
+        },
+        {
+          "id": "TXN-OB1076-12",
+          "script": "076",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "OB1076-POC-ZERO",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-OB1076-13"
+        },
+        {
+          "id": "TXN-OB1076-14",
+          "script": "076",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "OB1076-POC-ZERO",
+          "type": "POC Out",
+          "client_id": null,
+          "batch_id": "BATCH-OB1076-15"
+        },
+        {
+          "id": "TXN-OB1076-17",
+          "script": "076",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "OB1076-FUTURE",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-OB1076-18"
+        },
+        {
+          "id": "TXN-OB1076-19",
+          "script": "076",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "OB1076-FUTURE",
+          "type": "POC Out",
+          "client_id": null,
+          "batch_id": "BATCH-OB1076-20"
+        },
+        {
+          "id": "TXN-OB1076-21",
+          "script": "076",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "OB1076-POC-RET",
+          "type": "Transfer",
+          "client_id": null,
+          "batch_id": "BATCH-OB1076-22"
+        },
+        {
+          "id": "TXN-OB1076-24",
+          "script": "076",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "OB1076-RENT-RET",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-OB1076-25"
+        },
+        {
+          "id": "TXN-OB1076-26",
+          "script": "076",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "OB1076-RENT-RET",
+          "type": "Rentals",
+          "client_id": null,
+          "batch_id": "BATCH-OB1076-27"
+        },
+        {
+          "id": "TXN-OB1076-29",
+          "script": "076",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "OB1076-RENT-SOLD",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-OB1076-30"
+        },
+        {
+          "id": "TXN-OB1076-31",
+          "script": "076",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "OB1076-RENT-SOLD",
+          "type": "Rentals",
+          "client_id": null,
+          "batch_id": "BATCH-OB1076-32"
+        },
+        {
+          "id": "TXN-83609796f8ad4e4399dc8b5f175cb804",
+          "script": "076",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "OB1076-POC-RET",
+          "type": "POC Return",
+          "client_id": null,
+          "batch_id": "BATCH-c71a7436d19946c4a722c1a59cd0892f"
+        },
+        {
+          "id": "TXN-b83f90e2828549b89525f242d69960a1",
+          "script": "076",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "OB1076-POC-SOLD",
+          "type": "Sale",
+          "client_id": null,
+          "batch_id": "BATCH-3ebd5b7cc64340a08c2cde34fda8e181"
+        },
+        {
+          "id": "TXN-67af294fceda499db41d5d3bcdce3670",
+          "script": "076",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "OB1076-POC-ZERO",
+          "type": "Sale",
+          "client_id": null,
+          "batch_id": "BATCH-bedb4632792a4010914d9624981a0537"
+        },
+        {
+          "id": "TXN-cc3e4be1f2c14fcfb6eaa8bcaa072289",
+          "script": "076",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "OB1076-RENT-RET",
+          "type": "Rental Return",
+          "client_id": null,
+          "batch_id": "BATCH-8ddacf67657f4c6397cfe2ec0a7c9055"
+        },
+        {
+          "id": "TXN-34db247d11bc458ea62ce5b6fd8e3185",
+          "script": "076",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "OB1076-RENT-SOLD",
+          "type": "Sale",
+          "client_id": null,
+          "batch_id": "BATCH-6f81711657f441acbbf2887935bb7f83"
+        },
+        {
+          "id": "TXN-REV-1791295080997-1",
+          "script": "076",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "OB1076-POC-RET",
+          "type": "Reversal",
+          "client_id": null,
+          "batch_id": "BATCH-REV-1791295080993"
+        },
+        {
+          "id": "TXN-REV-1791295081228-1",
+          "script": "076",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "OB1076-POC-SOLD",
+          "type": "Reversal",
+          "client_id": null,
+          "batch_id": "BATCH-REV-1791295081228"
+        },
+        {
+          "id": "TXN-REV-1791295081446-1",
+          "script": "076",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "OB1076-POC-ZERO",
+          "type": "Reversal",
+          "client_id": null,
+          "batch_id": "BATCH-REV-1791295081445"
+        },
+        {
+          "id": "TXN-REV-1791295081666-1",
+          "script": "076",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "OB1076-RENT-RET",
+          "type": "Reversal",
+          "client_id": null,
+          "batch_id": "BATCH-REV-1791295081666"
+        },
+        {
+          "id": "TXN-REV-1791295081885-1",
+          "script": "076",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "OB1076-RENT-SOLD",
+          "type": "Reversal",
+          "client_id": null,
+          "batch_id": "BATCH-REV-1791295081885"
+        },
+        {
+          "id": "TXN-H1077-2",
+          "script": "077",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "H1077-kit",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-H1077-3"
+        },
+        {
+          "id": "TXN-H1077-4",
+          "script": "077",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "H1077-kit",
+          "type": "POC Out",
+          "client_id": "CLT-H1077",
+          "batch_id": "BATCH-H1077-5"
+        },
+        {
+          "id": "TXN-REV-1791295093329-1",
+          "script": "077",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "H1077-kit",
+          "type": "Reversal",
+          "client_id": "CLT-H1077",
+          "batch_id": "BATCH-REV-1791295093328"
+        },
+        {
+          "id": "TXN-H1077-6",
+          "script": "077",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "H1077-kit",
+          "type": "POC Return",
+          "client_id": "CLT-H1077",
+          "batch_id": "BATCH-H1077-7"
+        },
+        {
+          "id": "TXN-H1077-8",
+          "script": "077",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "H1077-kit",
+          "type": "POC Out",
+          "client_id": "CLT-H1077",
+          "batch_id": "BATCH-H1077-9"
+        },
+        {
+          "id": "TXN-H1077-10",
+          "script": "077",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "H1077-kit",
+          "type": "Sale",
+          "client_id": "CLT-H1077",
+          "batch_id": "BATCH-H1077-11"
+        },
+        {
+          "id": "TXN-H1077-12",
+          "script": "077",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "H1077-kit",
+          "type": "Decommissioned",
+          "client_id": "CLT-H1077",
+          "batch_id": "BATCH-H1077-13"
+        },
+        {
+          "id": "TXN-INSP-1791295096310",
+          "script": "077",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "H1077-kit",
+          "type": "Inspection Pass",
+          "client_id": "CLT-H1077",
+          "batch_id": "BATCH-INSP-1791295096311"
+        },
+        {
+          "id": "TXN-H1077-14",
+          "script": "077",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "H1077-kit",
+          "type": "Rentals",
+          "client_id": "CLT-H1077",
+          "batch_id": "BATCH-H1077-15"
+        },
+        {
+          "id": "TXN-H1077-16",
+          "script": "077",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "H1077-kit",
+          "type": "Sale",
+          "client_id": "CLT-H1077",
+          "batch_id": "BATCH-H1077-17"
+        },
+        {
+          "id": "TXN-H1077-19",
+          "script": "077",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "H1077-unknown",
+          "type": "Decommissioned",
+          "client_id": "CLT-H1077",
+          "batch_id": "BATCH-H1077-20"
+        },
+        {
+          "id": "TXN-RR1078-2",
+          "script": "078",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "RR1078-open",
+          "type": "Decommissioned",
+          "client_id": "CLT-RR1078-SITE",
+          "batch_id": "BATCH-RR1078-3"
+        },
+        {
+          "id": "TXN-RR1078-5",
+          "script": "078",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "RR1078-resell",
+          "type": "Decommissioned",
+          "client_id": "CLT-RR1078-SITE",
+          "batch_id": "BATCH-RR1078-6"
+        },
+        {
+          "id": "TXN-INSP-1791295109861",
+          "script": "078",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "RR1078-resell",
+          "type": "Inspection Pass",
+          "client_id": "CLT-RR1078-SITE",
+          "batch_id": "BATCH-INSP-1791295109861"
+        },
+        {
+          "id": "TXN-RR1078-8",
+          "script": "078",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "RR1078-rentout",
+          "type": "Decommissioned",
+          "client_id": "CLT-RR1078-SITE",
+          "batch_id": "BATCH-RR1078-9"
+        },
+        {
+          "id": "TXN-INSP-1791295110492",
+          "script": "078",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "RR1078-rentout",
+          "type": "Inspection Pass",
+          "client_id": "CLT-RR1078-SITE",
+          "batch_id": "BATCH-INSP-1791295110492"
+        },
+        {
+          "id": "TXN-RR1078-11",
+          "script": "078",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "RR1078-dispose",
+          "type": "Decommissioned",
+          "client_id": "CLT-RR1078-NONE",
+          "batch_id": "BATCH-RR1078-12"
+        },
+        {
+          "id": "TXN-INSP-1791295111124",
+          "script": "078",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "RR1078-dispose",
+          "type": "Dispose",
+          "client_id": "CLT-RR1078-NONE",
+          "batch_id": "BATCH-INSP-1791295111124"
+        },
+        {
+          "id": "TXN-RR1078-14",
+          "script": "078",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "RR1078-fail",
+          "type": "Decommissioned",
+          "client_id": "CLT-RR1078-SITE",
+          "batch_id": "BATCH-RR1078-15"
+        },
+        {
+          "id": "TXN-INSP-1791295111753",
+          "script": "078",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "RR1078-fail",
+          "type": "Inspection Fail",
+          "client_id": "CLT-RR1078-SITE",
+          "batch_id": "BATCH-INSP-1791295111753"
+        },
+        {
+          "id": "TXN-RR1078-17",
+          "script": "078",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "RR1078-edge",
+          "type": "Decommissioned",
+          "client_id": "CLT-RR1078-SITE",
+          "batch_id": "BATCH-RR1078-18"
+        },
+        {
+          "id": "TXN-RR1078-20",
+          "script": "078",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "RR1078-out",
+          "type": "Decommissioned",
+          "client_id": "CLT-RR1078-SITE",
+          "batch_id": "BATCH-RR1078-21"
+        },
+        {
+          "id": "TXN-INSP-1791295113414",
+          "script": "078",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "RR1078-out",
+          "type": "Inspection Pass",
+          "client_id": "CLT-RR1078-SITE",
+          "batch_id": "BATCH-INSP-1791295113414"
+        },
+        {
+          "id": "TXN-RR1078-23",
+          "script": "078",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "RR1078-rented",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-RR1078-24"
+        },
+        {
+          "id": "TXN-RR1078-25",
+          "script": "078",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "RR1078-rented",
+          "type": "Rentals",
+          "client_id": "CLT-RR1078-SITE",
+          "batch_id": "BATCH-RR1078-26"
+        },
+        {
+          "id": "TXN-RR1078-28",
+          "script": "078",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "RR1078-returned",
+          "type": "Inbound",
+          "client_id": null,
+          "batch_id": "BATCH-RR1078-29"
+        },
+        {
+          "id": "TXN-RR1078-30",
+          "script": "078",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "RR1078-returned",
+          "type": "Rentals",
+          "client_id": "CLT-RR1078-SITE",
+          "batch_id": "BATCH-RR1078-31"
+        },
+        {
+          "id": "TXN-RR1078-32",
+          "script": "078",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "RR1078-returned",
+          "type": "Rental Return",
+          "client_id": "CLT-RR1078-SITE",
+          "batch_id": "BATCH-RR1078-33"
+        },
+        {
+          "id": "txn-VERIFY-P33B-SALE-1791295207307",
+          "script": "p33b",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "VERIFY-P33B-SALE-1791295207307",
+          "type": "Sale",
+          "client_id": null,
+          "batch_id": null
+        },
+        {
+          "id": "txn-Sale-VERIFY-P33B-STOCK-1791295211975",
+          "script": "p33b",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "VERIFY-P33B-STOCK-1791295211975",
+          "type": "Sale",
+          "client_id": null,
+          "batch_id": null
+        },
+        {
+          "id": "txn-Remediation Loaner Issue-VERIFY-P33B-LOAN-1791295211975",
+          "script": "p33b",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "VERIFY-P33B-LOAN-1791295211975",
+          "type": "Remediation Loaner Issue",
+          "client_id": null,
+          "batch_id": null
+        },
+        {
+          "id": "txn-Sale Return-VERIFY-P33B-LOAN-1791295211975",
+          "script": "p33b",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "VERIFY-P33B-LOAN-1791295211975",
+          "type": "Sale Return",
+          "client_id": null,
+          "batch_id": null
+        },
+        {
+          "id": "txn-Transfer-VERIFY-P33B-XFER-POC-1791295211975",
+          "script": "p33b",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "VERIFY-P33B-XFER-POC-1791295211975",
+          "type": "Transfer",
+          "client_id": null,
+          "batch_id": null
+        },
+        {
+          "id": "txn-Transfer-VERIFY-P33B-XFER-RENT-1791295211975",
+          "script": "p33b",
+          "why": "verify fixture transaction",
+          "status": "remove",
+          "serial": "VERIFY-P33B-XFER-RENT-1791295211975",
+          "type": "Transfer",
+          "client_id": null,
+          "batch_id": null
+        }
+      ],
+      "hold": []
+    },
+    "inventory_items": {
+      "remove": [
+        {
+          "id": "verify-066-item-status",
+          "script": "066",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "verify-066-status",
+          "item_status": "In Stock",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-RR1078-19",
+          "script": "078",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "RR1078-out",
+          "item_status": "In Stock",
+          "trashed": false
+        },
+        {
+          "id": "verify-066-item-move",
+          "script": "066",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "verify-066-move",
+          "item_status": "In Stock",
+          "trashed": true
+        },
+        {
+          "id": "ITEM-H1077-1",
+          "script": "077",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "H1077-kit",
+          "item_status": "Sold",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-RR1078-1",
+          "script": "078",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "RR1078-open",
+          "item_status": "Pending Inspection",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-H1077-18",
+          "script": "077",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "H1077-unknown",
+          "item_status": "Pending Inspection",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-RR1078-4",
+          "script": "078",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "RR1078-resell",
+          "item_status": "In Stock",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-RR1078-7",
+          "script": "078",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "RR1078-rentout",
+          "item_status": "In Stock",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-RR1078-10",
+          "script": "078",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "RR1078-dispose",
+          "item_status": "Disposed",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-RR1078-13",
+          "script": "078",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "RR1078-fail",
+          "item_status": "RMA Hold",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-RR1078-16",
+          "script": "078",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "RR1078-edge",
+          "item_status": "Pending Inspection",
+          "trashed": false
+        },
+        {
+          "id": "verify-067-item",
+          "script": "067",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "verify-067-serial",
+          "item_status": "Sold",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-I2B068-1",
+          "script": "068",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "I2B068-create",
+          "item_status": "In Stock",
+          "trashed": true
+        },
+        {
+          "id": "ITEM-I2B068-4",
+          "script": "068",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "I2B068-sale",
+          "item_status": "In Stock",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-I2B068-9",
+          "script": "068",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "I2B068-poc_out",
+          "item_status": "In Stock",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-I2B068-14",
+          "script": "068",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "I2B068-poc_return",
+          "item_status": "POC",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-R3069-1",
+          "script": "069",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "R3069-create",
+          "item_status": "In Stock",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-R3069-4",
+          "script": "069",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "R3069-sale",
+          "item_status": "Sold",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-R3069-9",
+          "script": "069",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "R3069-poc_out",
+          "item_status": "POC",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-R3069-14",
+          "script": "069",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "R3069-rentals",
+          "item_status": "Rented",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-R3069-19",
+          "script": "069",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "R3069-dispose",
+          "item_status": "Disposed",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-R3069-24",
+          "script": "069",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "R3069-transfer",
+          "item_status": "In Stock",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-R3069-29",
+          "script": "069",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "R3069-loaner",
+          "item_status": "Sold",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-R3069-34",
+          "script": "069",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "R3069-poc-return",
+          "item_status": "In Stock",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-R3069-55",
+          "script": "069",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "R3069-decommissioned",
+          "item_status": "Pending Inspection",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-R3069-41",
+          "script": "069",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "R3069-rental-return",
+          "item_status": "Pending Inspection",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-R3069-48",
+          "script": "069",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "R3069-sale-return",
+          "item_status": "RMA Hold",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-R3069-62",
+          "script": "069",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "R3069-inspection-pass",
+          "item_status": "In Stock",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-R3069-69",
+          "script": "069",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "R3069-inspection-fail",
+          "item_status": "RMA Hold",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-R3069-76",
+          "script": "069",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "R3069-maint-inbound",
+          "item_status": "In Stock",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-R3069-79",
+          "script": "069",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "R3069-legacy-return",
+          "item_status": "POC",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-R3069-86",
+          "script": "069",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "R3069-legacy-sale",
+          "item_status": "POC",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-R3069-93",
+          "script": "069",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "R3069-legacy-warehouse",
+          "item_status": "In Stock",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-R3069-98",
+          "script": "069",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "R3069-void",
+          "item_status": "In Stock",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-P1071-4",
+          "script": "071",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "P1071-RENT",
+          "item_status": "In Stock",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-E1070-6",
+          "script": "070",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "E1070-B",
+          "item_status": "POC",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-P1071-1",
+          "script": "071",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "P1071-SALE",
+          "item_status": "In Stock",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-E1070-1",
+          "script": "070",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "E1070-A",
+          "item_status": "POC",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-P1072-4",
+          "script": "072",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "P1072-OTHER",
+          "item_status": "In Stock",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-P1072-7",
+          "script": "072",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "P1072-STAR2",
+          "item_status": "In Stock",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-P1072-1",
+          "script": "072",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "P1072-STAR",
+          "item_status": "Rented",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-K1073-1",
+          "script": "073",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "K1073-MISS",
+          "item_status": "Sold",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-K1073-22",
+          "script": "073",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "K1073-NEW",
+          "item_status": "Pending Inspection",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-K1073-28",
+          "script": "073",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "K1073-OTHER",
+          "item_status": "Pending Inspection",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-K1073-8",
+          "script": "073",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "K1073-DEC",
+          "item_status": "In Stock",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-K1073-15",
+          "script": "073",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "K1073-RENT",
+          "item_status": "In Stock",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-K1073-35",
+          "script": "073",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "K1073-RMA",
+          "item_status": "RMA Hold",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-K1073-42",
+          "script": "073",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "K1073-DISP",
+          "item_status": "Disposed",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-INV075-13",
+          "script": "075",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "INV075-CHG",
+          "item_status": "In Stock",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-INV075-16",
+          "script": "075",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "INV075-BAD",
+          "item_status": "In Stock",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-K1073-49",
+          "script": "073",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "K1073-CYCLE",
+          "item_status": "In Stock",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-INV075-19",
+          "script": "075",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "INV075-BLANK",
+          "item_status": "In Stock",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-INV075-22",
+          "script": "075",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "INV075-SHORT",
+          "item_status": "In Stock",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-RS1074-1",
+          "script": "074",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "RS1074-rent",
+          "item_status": "Sold",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-RS1074-14",
+          "script": "074",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "RS1074-stock",
+          "item_status": "In Stock",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-RS1074-19",
+          "script": "074",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "RS1074-other",
+          "item_status": "Rented",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-INV075-1",
+          "script": "075",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "INV075-NUM",
+          "item_status": "Sold",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-INV075-4",
+          "script": "075",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "INV075-PEND",
+          "item_status": "Sold",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-INV075-7",
+          "script": "075",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "INV075-ZERO",
+          "item_status": "Sold",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-INV075-10",
+          "script": "075",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "INV075-REJ",
+          "item_status": "Sold",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-OB1076-16",
+          "script": "076",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "OB1076-FUTURE",
+          "item_status": "POC",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-OB1076-1",
+          "script": "076",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "OB1076-POC-RET",
+          "item_status": "POC",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-OB1076-6",
+          "script": "076",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "OB1076-POC-SOLD",
+          "item_status": "POC",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-OB1076-11",
+          "script": "076",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "OB1076-POC-ZERO",
+          "item_status": "POC",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-OB1076-23",
+          "script": "076",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "OB1076-RENT-RET",
+          "item_status": "Rented",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-OB1076-28",
+          "script": "076",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "OB1076-RENT-SOLD",
+          "item_status": "Rented",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-RR1078-22",
+          "script": "078",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "RR1078-rented",
+          "item_status": "Rented",
+          "trashed": false
+        },
+        {
+          "id": "ITEM-RR1078-27",
+          "script": "078",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "RR1078-returned",
+          "item_status": "Pending Inspection",
+          "trashed": false
+        },
+        {
+          "id": "item-VERIFY-P33B-SALE-1791295207307",
+          "script": "p33b",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "VERIFY-P33B-SALE-1791295207307",
+          "item_status": "Sold",
+          "trashed": false
+        },
+        {
+          "id": "item-VERIFY-P33B-EXT-1791295207307",
+          "script": "p33b",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "VERIFY-P33B-EXT-1791295207307",
+          "item_status": "POC",
+          "trashed": false
+        },
+        {
+          "id": "item-VERIFY-P33B-MAINT-1791295211975",
+          "script": "p33b",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "VERIFY-P33B-MAINT-1791295211975",
+          "item_status": "In Stock",
+          "trashed": false
+        },
+        {
+          "id": "item-VERIFY-P33B-STOCK-1791295211975",
+          "script": "p33b",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "VERIFY-P33B-STOCK-1791295211975",
+          "item_status": "Sold",
+          "trashed": false
+        },
+        {
+          "id": "item-VERIFY-P33B-LOAN-1791295211975",
+          "script": "p33b",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "VERIFY-P33B-LOAN-1791295211975",
+          "item_status": "RMA Hold",
+          "trashed": false
+        },
+        {
+          "id": "item-VERIFY-P33B-XFER-POC-1791295211975",
+          "script": "p33b",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "VERIFY-P33B-XFER-POC-1791295211975",
+          "item_status": "POC",
+          "trashed": false
+        },
+        {
+          "id": "item-VERIFY-P33B-XFER-RENT-1791295211975",
+          "script": "p33b",
+          "why": "verify fixture kit serial/id prefix",
+          "status": "remove",
+          "serial": "VERIFY-P33B-XFER-RENT-1791295211975",
+          "item_status": "Rented",
+          "trashed": false
+        }
+      ],
+      "hold": []
+    },
+    "clients": {
+      "remove": [
+        {
+          "id": "CLT-H1077",
+          "script": "077",
+          "why": "fixture client id/email",
+          "status": "remove",
+          "name": "H1077 Holder",
+          "email": "h1077@test.local"
+        },
+        {
+          "id": "CLT-RR1078-NONE",
+          "script": "078",
+          "why": "fixture client id/email",
+          "status": "remove",
+          "name": "RR1 Nowhere",
+          "email": "rr1078-none@test.local"
+        },
+        {
+          "id": "CLT-RR1078-SITE",
+          "script": "078",
+          "why": "fixture client id/email",
+          "status": "remove",
+          "name": "RR1 Borrowdale",
+          "email": "rr1078-site@test.local"
+        },
+        {
+          "id": "CLT-verify-065-acme",
+          "script": "065",
+          "why": "fixture client id/email",
+          "status": "remove",
+          "name": "Buyer",
+          "email": "verify-065-acme@test.local"
+        },
+        {
+          "id": "CLT-verify-065-owner",
+          "script": "065",
+          "why": "fixture client id/email",
+          "status": "remove",
+          "name": "Owner",
+          "email": "verify-065-owner@test.local"
+        },
+        {
+          "id": "CLT-verify-065-text",
+          "script": "065",
+          "why": "fixture client id/email",
+          "status": "remove",
+          "name": "Text Target",
+          "email": "verify-065-text@test.local"
+        },
+        {
+          "id": "CLT-verify-065-twin-a",
+          "script": "065",
+          "why": "fixture client id/email",
+          "status": "remove",
+          "name": "Twin A",
+          "email": "verify-065-twin-a@test.local"
+        },
+        {
+          "id": "CLT-verify-065-twin-b",
+          "script": "065",
+          "why": "fixture client id/email",
+          "status": "remove",
+          "name": "Twin B",
+          "email": "verify-065-twin-b@test.local"
+        }
+      ],
+      "hold": []
+    },
+    "profiles": {
+      "remove": [
+        {
+          "id": "40166109-6f51-45e1-a93c-77c3e8d8efa7",
+          "script": "061",
+          "why": "verify fixture profile",
+          "status": "remove",
+          "email": "verify-061-admin@test.local",
+          "role": "admin",
+          "active": false
+        },
+        {
+          "id": "79aba17d-b257-4d93-b4eb-b5078b596972",
+          "script": "065",
+          "why": "verify fixture profile",
+          "status": "remove",
+          "email": "verify-065-sales@test.local",
+          "role": "sales",
+          "active": false
+        },
+        {
+          "id": "8777dcbf-81d0-4a7b-9e9f-83c5767375d2",
+          "script": "065",
+          "why": "verify fixture profile",
+          "status": "remove",
+          "email": "verify-065-viewer@test.local",
+          "role": "viewer",
+          "active": false
+        },
+        {
+          "id": "43e2d787-357f-4a54-b852-07a0708e0c2a",
+          "script": "066",
+          "why": "verify fixture profile",
+          "status": "remove",
+          "email": "verify-066-admin@test.local",
+          "role": "admin",
+          "active": false
+        },
+        {
+          "id": "a9eebe1c-e094-4d94-a239-13a3a5a3f83a",
+          "script": "unknown",
+          "why": "verify fixture profile",
+          "status": "remove",
+          "email": "verify-068-admin@test.local",
+          "role": "admin",
+          "active": false
+        },
+        {
+          "id": "ad4cf7d9-8c8c-4506-9d6b-e6ff99c0ebb9",
+          "script": "unknown",
+          "why": "verify fixture profile",
+          "status": "remove",
+          "email": "verify-068-sales@test.local",
+          "role": "sales",
+          "active": false
+        },
+        {
+          "id": "5be29eb5-e557-41ba-8464-9097989c5804",
+          "script": "unknown",
+          "why": "verify fixture profile",
+          "status": "remove",
+          "email": "verify-068-technicians@test.local",
+          "role": "technicians",
+          "active": false
+        },
+        {
+          "id": "77d80b07-d4a0-4776-a730-9094eb56bc20",
+          "script": "unknown",
+          "why": "verify fixture profile",
+          "status": "remove",
+          "email": "verify-068-viewer@test.local",
+          "role": "viewer",
+          "active": false
+        },
+        {
+          "id": "638f3cda-cd9a-4fc0-b636-d9b1160f144e",
+          "script": "unknown",
+          "why": "verify fixture profile",
+          "status": "remove",
+          "email": "verify-069-admin@test.local",
+          "role": "admin",
+          "active": false
+        },
+        {
+          "id": "c270ccc8-a250-4c2b-ba26-d19cee8097bc",
+          "script": "unknown",
+          "why": "verify fixture profile",
+          "status": "remove",
+          "email": "verify-069-technicians@test.local",
+          "role": "technicians",
+          "active": false
+        },
+        {
+          "id": "e72385a4-07cc-4752-aa2d-328a45dc3dd6",
+          "script": "unknown",
+          "why": "verify fixture profile",
+          "status": "remove",
+          "email": "verify-069-viewer@test.local",
+          "role": "viewer",
+          "active": false
+        },
+        {
+          "id": "221c472f-7e02-4808-8640-1f96954b4a99",
+          "script": "unknown",
+          "why": "verify fixture profile",
+          "status": "remove",
+          "email": "verify-070-admin@test.local",
+          "role": "admin",
+          "active": false
+        },
+        {
+          "id": "9c04072f-2cae-4632-98e3-13dce2934f16",
+          "script": "unknown",
+          "why": "verify fixture profile",
+          "status": "remove",
+          "email": "verify-070-technicians@test.local",
+          "role": "technicians",
+          "active": false
+        },
+        {
+          "id": "ff57eebc-1bff-4e07-bdeb-903ed31de63a",
+          "script": "unknown",
+          "why": "verify fixture profile",
+          "status": "remove",
+          "email": "verify-071-admin@test.local",
+          "role": "admin",
+          "active": false
+        },
+        {
+          "id": "b3986e93-c004-4df4-af9a-3a2c99e38ec2",
+          "script": "unknown",
+          "why": "verify fixture profile",
+          "status": "remove",
+          "email": "verify-071-technicians@test.local",
+          "role": "technicians",
+          "active": false
+        },
+        {
+          "id": "25fa6f29-5dc7-4b8a-afd2-c3aad9d61863",
+          "script": "unknown",
+          "why": "verify fixture profile",
+          "status": "remove",
+          "email": "verify-072-admin@test.local",
+          "role": "admin",
+          "active": false
+        },
+        {
+          "id": "f46ae76b-c834-47e5-95e1-dd0c74b20643",
+          "script": "unknown",
+          "why": "verify fixture profile",
+          "status": "remove",
+          "email": "verify-072-technicians@test.local",
+          "role": "technicians",
+          "active": false
+        },
+        {
+          "id": "38bfb3a7-fe3e-40e6-8c69-b282cb2622ab",
+          "script": "unknown",
+          "why": "verify fixture profile",
+          "status": "remove",
+          "email": "verify-073-admin@test.local",
+          "role": "admin",
+          "active": false
+        },
+        {
+          "id": "6213b633-10ca-48ef-9368-791d1984d389",
+          "script": "unknown",
+          "why": "verify fixture profile",
+          "status": "remove",
+          "email": "verify-073-technicians@test.local",
+          "role": "technicians",
+          "active": false
+        },
+        {
+          "id": "251275cc-891b-4e04-b532-2dd43164b91b",
+          "script": "unknown",
+          "why": "verify fixture profile",
+          "status": "remove",
+          "email": "verify-074-admin@test.local",
+          "role": "admin",
+          "active": false
+        },
+        {
+          "id": "53fe9692-0676-4c2c-a504-f4989dd8b36f",
+          "script": "unknown",
+          "why": "verify fixture profile",
+          "status": "remove",
+          "email": "verify-075-accounts@test.local",
+          "role": "accounts",
+          "active": false
+        },
+        {
+          "id": "da6947f5-688a-47d3-875c-de5031f6caa8",
+          "script": "unknown",
+          "why": "verify fixture profile",
+          "status": "remove",
+          "email": "verify-075-admin-a@test.local",
+          "role": "admin",
+          "active": false
+        },
+        {
+          "id": "beb9ffb4-1251-4914-9503-c1394bed5f56",
+          "script": "unknown",
+          "why": "verify fixture profile",
+          "status": "remove",
+          "email": "verify-075-admin-b@test.local",
+          "role": "admin",
+          "active": false
+        },
+        {
+          "id": "f5a02394-5392-4d6a-83a4-fd281b3a7ae0",
+          "script": "unknown",
+          "why": "verify fixture profile",
+          "status": "remove",
+          "email": "verify-075-tech@test.local",
+          "role": "technicians",
+          "active": false
+        },
+        {
+          "id": "d985b328-c07a-467a-a968-1f540e7f56f0",
+          "script": "unknown",
+          "why": "verify fixture profile",
+          "status": "remove",
+          "email": "verify-076-admin@test.local",
+          "role": "admin",
+          "active": false
+        },
+        {
+          "id": "ee45f869-7427-4573-8403-4b06d92d06ba",
+          "script": "unknown",
+          "why": "verify fixture profile",
+          "status": "remove",
+          "email": "verify-076-sales@test.local",
+          "role": "sales",
+          "active": false
+        },
+        {
+          "id": "1eca71e8-77a9-4407-ab7e-989df11b7102",
+          "script": "unknown",
+          "why": "verify fixture profile",
+          "status": "remove",
+          "email": "verify-076-tech@test.local",
+          "role": "technicians",
+          "active": false
+        },
+        {
+          "id": "5449b6ce-1dda-49fa-8bb8-b9bcd1b7d819",
+          "script": "unknown",
+          "why": "verify fixture profile",
+          "status": "remove",
+          "email": "verify-077-admin@test.local",
+          "role": "admin",
+          "active": false
+        },
+        {
+          "id": "76ef1ebc-f541-4289-9d1f-e88a63c13c6e",
+          "script": "unknown",
+          "why": "verify fixture profile",
+          "status": "remove",
+          "email": "verify-077-viewer@test.local",
+          "role": "viewer",
+          "active": false
+        },
+        {
+          "id": "973a130d-f262-412f-8cd6-c260481e4508",
+          "script": "unknown",
+          "why": "verify fixture profile",
+          "status": "remove",
+          "email": "verify-078-admin@test.local",
+          "role": "admin",
+          "active": false
+        },
+        {
+          "id": "e834b596-327e-4a7e-bb68-53e61e473c4a",
+          "script": "unknown",
+          "why": "verify fixture profile",
+          "status": "remove",
+          "email": "verify-078-sales@test.local",
+          "role": "sales",
+          "active": false
+        },
+        {
+          "id": "2a43ebff-a27c-4ccb-8e17-2d6fa4f7938b",
+          "script": "unknown",
+          "why": "verify fixture profile",
+          "status": "remove",
+          "email": "verify-078-viewer@test.local",
+          "role": "viewer",
+          "active": false
+        },
+        {
+          "id": "b65e9f22-7436-4d12-82a2-a3fde5fe87a4",
+          "script": "p33b",
+          "why": "verify fixture profile",
+          "status": "remove",
+          "email": "verify-p33b-accounts@test.local",
+          "role": "accounts",
+          "active": false
+        },
+        {
+          "id": "52a6bfe1-fe8a-416d-a4d8-afc94418e18d",
+          "script": "p33b",
+          "why": "verify fixture profile",
+          "status": "remove",
+          "email": "verify-p33b-admin@test.local",
+          "role": "admin",
+          "active": false
+        },
+        {
+          "id": "17572a3c-eabf-48e3-b722-8099c89a425d",
+          "script": "p33b",
+          "why": "verify fixture profile",
+          "status": "remove",
+          "email": "verify-p33b-sales@test.local",
+          "role": "sales",
+          "active": false
+        },
+        {
+          "id": "9ef3adbb-eee4-42f4-acfe-e8501e604cfd",
+          "script": "p33b",
+          "why": "verify fixture profile",
+          "status": "remove",
+          "email": "verify-p33b-technicians@test.local",
+          "role": "technicians",
+          "active": false
+        },
+        {
+          "id": "18156b75-3c17-4ed7-911d-a4ed928d4543",
+          "script": "p33b",
+          "why": "verify fixture profile",
+          "status": "remove",
+          "email": "verify-p33b-viewer@test.local",
+          "role": "viewer",
+          "active": false
+        }
+      ],
+      "hold": []
+    },
+    "auth.users": {
+      "remove": [
+        {
+          "id": "40166109-6f51-45e1-a93c-77c3e8d8efa7",
+          "script": "061",
+          "why": "verify fixture auth user",
+          "status": "remove",
+          "email": "verify-061-admin@test.local",
+          "banned_until": "2099-12-31T23:59:59.000Z"
+        },
+        {
+          "id": "79aba17d-b257-4d93-b4eb-b5078b596972",
+          "script": "065",
+          "why": "verify fixture auth user",
+          "status": "remove",
+          "email": "verify-065-sales@test.local",
+          "banned_until": "2099-12-31T23:59:59.000Z"
+        },
+        {
+          "id": "8777dcbf-81d0-4a7b-9e9f-83c5767375d2",
+          "script": "065",
+          "why": "verify fixture auth user",
+          "status": "remove",
+          "email": "verify-065-viewer@test.local",
+          "banned_until": "2099-12-31T23:59:59.000Z"
+        },
+        {
+          "id": "43e2d787-357f-4a54-b852-07a0708e0c2a",
+          "script": "066",
+          "why": "verify fixture auth user",
+          "status": "remove",
+          "email": "verify-066-admin@test.local",
+          "banned_until": "2099-12-31T23:59:59.000Z"
+        },
+        {
+          "id": "a9eebe1c-e094-4d94-a239-13a3a5a3f83a",
+          "script": "unknown",
+          "why": "verify fixture auth user",
+          "status": "remove",
+          "email": "verify-068-admin@test.local",
+          "banned_until": "2099-12-31T23:59:59.000Z"
+        },
+        {
+          "id": "ad4cf7d9-8c8c-4506-9d6b-e6ff99c0ebb9",
+          "script": "unknown",
+          "why": "verify fixture auth user",
+          "status": "remove",
+          "email": "verify-068-sales@test.local",
+          "banned_until": "2099-12-31T23:59:59.000Z"
+        },
+        {
+          "id": "5be29eb5-e557-41ba-8464-9097989c5804",
+          "script": "unknown",
+          "why": "verify fixture auth user",
+          "status": "remove",
+          "email": "verify-068-technicians@test.local",
+          "banned_until": "2099-12-31T23:59:59.000Z"
+        },
+        {
+          "id": "77d80b07-d4a0-4776-a730-9094eb56bc20",
+          "script": "unknown",
+          "why": "verify fixture auth user",
+          "status": "remove",
+          "email": "verify-068-viewer@test.local",
+          "banned_until": "2099-12-31T23:59:59.000Z"
+        },
+        {
+          "id": "638f3cda-cd9a-4fc0-b636-d9b1160f144e",
+          "script": "unknown",
+          "why": "verify fixture auth user",
+          "status": "remove",
+          "email": "verify-069-admin@test.local",
+          "banned_until": "2099-12-31T23:59:59.000Z"
+        },
+        {
+          "id": "c270ccc8-a250-4c2b-ba26-d19cee8097bc",
+          "script": "unknown",
+          "why": "verify fixture auth user",
+          "status": "remove",
+          "email": "verify-069-technicians@test.local",
+          "banned_until": "2099-12-31T23:59:59.000Z"
+        },
+        {
+          "id": "e72385a4-07cc-4752-aa2d-328a45dc3dd6",
+          "script": "unknown",
+          "why": "verify fixture auth user",
+          "status": "remove",
+          "email": "verify-069-viewer@test.local",
+          "banned_until": "2099-12-31T23:59:59.000Z"
+        },
+        {
+          "id": "221c472f-7e02-4808-8640-1f96954b4a99",
+          "script": "unknown",
+          "why": "verify fixture auth user",
+          "status": "remove",
+          "email": "verify-070-admin@test.local",
+          "banned_until": "2099-12-31T23:59:59.000Z"
+        },
+        {
+          "id": "9c04072f-2cae-4632-98e3-13dce2934f16",
+          "script": "unknown",
+          "why": "verify fixture auth user",
+          "status": "remove",
+          "email": "verify-070-technicians@test.local",
+          "banned_until": "2099-12-31T23:59:59.000Z"
+        },
+        {
+          "id": "ff57eebc-1bff-4e07-bdeb-903ed31de63a",
+          "script": "unknown",
+          "why": "verify fixture auth user",
+          "status": "remove",
+          "email": "verify-071-admin@test.local",
+          "banned_until": "2099-12-31T23:59:59.000Z"
+        },
+        {
+          "id": "b3986e93-c004-4df4-af9a-3a2c99e38ec2",
+          "script": "unknown",
+          "why": "verify fixture auth user",
+          "status": "remove",
+          "email": "verify-071-technicians@test.local",
+          "banned_until": "2099-12-31T23:59:59.000Z"
+        },
+        {
+          "id": "25fa6f29-5dc7-4b8a-afd2-c3aad9d61863",
+          "script": "unknown",
+          "why": "verify fixture auth user",
+          "status": "remove",
+          "email": "verify-072-admin@test.local",
+          "banned_until": "2099-12-31T23:59:59.000Z"
+        },
+        {
+          "id": "f46ae76b-c834-47e5-95e1-dd0c74b20643",
+          "script": "unknown",
+          "why": "verify fixture auth user",
+          "status": "remove",
+          "email": "verify-072-technicians@test.local",
+          "banned_until": "2099-12-31T23:59:59.000Z"
+        },
+        {
+          "id": "38bfb3a7-fe3e-40e6-8c69-b282cb2622ab",
+          "script": "unknown",
+          "why": "verify fixture auth user",
+          "status": "remove",
+          "email": "verify-073-admin@test.local",
+          "banned_until": "2099-12-31T23:59:59.000Z"
+        },
+        {
+          "id": "6213b633-10ca-48ef-9368-791d1984d389",
+          "script": "unknown",
+          "why": "verify fixture auth user",
+          "status": "remove",
+          "email": "verify-073-technicians@test.local",
+          "banned_until": "2099-12-31T23:59:59.000Z"
+        },
+        {
+          "id": "251275cc-891b-4e04-b532-2dd43164b91b",
+          "script": "unknown",
+          "why": "verify fixture auth user",
+          "status": "remove",
+          "email": "verify-074-admin@test.local",
+          "banned_until": "2099-12-31T23:59:59.000Z"
+        },
+        {
+          "id": "53fe9692-0676-4c2c-a504-f4989dd8b36f",
+          "script": "unknown",
+          "why": "verify fixture auth user",
+          "status": "remove",
+          "email": "verify-075-accounts@test.local",
+          "banned_until": "2099-12-31T23:59:59.000Z"
+        },
+        {
+          "id": "da6947f5-688a-47d3-875c-de5031f6caa8",
+          "script": "unknown",
+          "why": "verify fixture auth user",
+          "status": "remove",
+          "email": "verify-075-admin-a@test.local",
+          "banned_until": "2099-12-31T23:59:59.000Z"
+        },
+        {
+          "id": "beb9ffb4-1251-4914-9503-c1394bed5f56",
+          "script": "unknown",
+          "why": "verify fixture auth user",
+          "status": "remove",
+          "email": "verify-075-admin-b@test.local",
+          "banned_until": "2099-12-31T23:59:59.000Z"
+        },
+        {
+          "id": "f5a02394-5392-4d6a-83a4-fd281b3a7ae0",
+          "script": "unknown",
+          "why": "verify fixture auth user",
+          "status": "remove",
+          "email": "verify-075-tech@test.local",
+          "banned_until": "2099-12-31T23:59:59.000Z"
+        },
+        {
+          "id": "d985b328-c07a-467a-a968-1f540e7f56f0",
+          "script": "unknown",
+          "why": "verify fixture auth user",
+          "status": "remove",
+          "email": "verify-076-admin@test.local",
+          "banned_until": "2099-12-31T23:59:59.000Z"
+        },
+        {
+          "id": "ee45f869-7427-4573-8403-4b06d92d06ba",
+          "script": "unknown",
+          "why": "verify fixture auth user",
+          "status": "remove",
+          "email": "verify-076-sales@test.local",
+          "banned_until": "2099-12-31T23:59:59.000Z"
+        },
+        {
+          "id": "1eca71e8-77a9-4407-ab7e-989df11b7102",
+          "script": "unknown",
+          "why": "verify fixture auth user",
+          "status": "remove",
+          "email": "verify-076-tech@test.local",
+          "banned_until": "2099-12-31T23:59:59.000Z"
+        },
+        {
+          "id": "5449b6ce-1dda-49fa-8bb8-b9bcd1b7d819",
+          "script": "unknown",
+          "why": "verify fixture auth user",
+          "status": "remove",
+          "email": "verify-077-admin@test.local",
+          "banned_until": "2099-12-31T23:59:59.000Z"
+        },
+        {
+          "id": "76ef1ebc-f541-4289-9d1f-e88a63c13c6e",
+          "script": "unknown",
+          "why": "verify fixture auth user",
+          "status": "remove",
+          "email": "verify-077-viewer@test.local",
+          "banned_until": "2099-12-31T23:59:59.000Z"
+        },
+        {
+          "id": "973a130d-f262-412f-8cd6-c260481e4508",
+          "script": "unknown",
+          "why": "verify fixture auth user",
+          "status": "remove",
+          "email": "verify-078-admin@test.local",
+          "banned_until": "2099-12-31T23:59:59.000Z"
+        },
+        {
+          "id": "e834b596-327e-4a7e-bb68-53e61e473c4a",
+          "script": "unknown",
+          "why": "verify fixture auth user",
+          "status": "remove",
+          "email": "verify-078-sales@test.local",
+          "banned_until": "2099-12-31T23:59:59.000Z"
+        },
+        {
+          "id": "2a43ebff-a27c-4ccb-8e17-2d6fa4f7938b",
+          "script": "unknown",
+          "why": "verify fixture auth user",
+          "status": "remove",
+          "email": "verify-078-viewer@test.local",
+          "banned_until": "2099-12-31T23:59:59.000Z"
+        },
+        {
+          "id": "b65e9f22-7436-4d12-82a2-a3fde5fe87a4",
+          "script": "p33b",
+          "why": "verify fixture auth user",
+          "status": "remove",
+          "email": "verify-p33b-accounts@test.local",
+          "banned_until": "2099-12-31T23:59:59.000Z"
+        },
+        {
+          "id": "52a6bfe1-fe8a-416d-a4d8-afc94418e18d",
+          "script": "p33b",
+          "why": "verify fixture auth user",
+          "status": "remove",
+          "email": "verify-p33b-admin@test.local",
+          "banned_until": "2099-12-31T23:59:59.000Z"
+        },
+        {
+          "id": "17572a3c-eabf-48e3-b722-8099c89a425d",
+          "script": "p33b",
+          "why": "verify fixture auth user",
+          "status": "remove",
+          "email": "verify-p33b-sales@test.local",
+          "banned_until": "2099-12-31T23:59:59.000Z"
+        },
+        {
+          "id": "9ef3adbb-eee4-42f4-acfe-e8501e604cfd",
+          "script": "p33b",
+          "why": "verify fixture auth user",
+          "status": "remove",
+          "email": "verify-p33b-technicians@test.local",
+          "banned_until": "2099-12-31T23:59:59.000Z"
+        },
+        {
+          "id": "18156b75-3c17-4ed7-911d-a4ed928d4543",
+          "script": "p33b",
+          "why": "verify fixture auth user",
+          "status": "remove",
+          "email": "verify-p33b-viewer@test.local",
+          "banned_until": "2099-12-31T23:59:59.000Z"
+        }
+      ],
+      "hold": []
+    }
+  },
+  "counts": {
+    "batch_invoice_events": 3,
+    "batch_invoices": 3,
+    "holding_extensions": 1,
+    "transactions": 200,
+    "inventory_items": 75,
+    "clients": 8,
+    "profiles": 37,
+    "auth_users": 37
+  }
+}
