@@ -28,6 +28,7 @@ import { execSync } from "child_process"
 import { createClient } from "@supabase/supabase-js"
 
 const require = createRequire(import.meta.url)
+const { prepareVerifyEnv } = require("./verify-env.cjs")
 
 const FIXTURE_PASSWORD = "Verify049!Lifecycle-Temp"
 const EMAIL = {
@@ -35,21 +36,6 @@ const EMAIL = {
   salesB: "verify-049-sales-b@example.com",
   accounts: "verify-049-accounts@example.com",
   tech: "verify-049-tech@example.com",
-}
-
-function loadEnvLocal() {
-  const p = path.join(process.cwd(), ".env.local")
-  if (!fs.existsSync(p)) return
-  for (const line of fs.readFileSync(p, "utf8").split(/\r?\n/)) {
-    const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/)
-    if (!m) continue
-    const key = m[1]
-    let val = m[2].trim()
-    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-      val = val.slice(1, -1)
-    }
-    if (process.env[key] === undefined) process.env[key] = val
-  }
 }
 
 function assert(cond, msg) {
@@ -120,7 +106,7 @@ function sleep(ms) {
 }
 
 async function main() {
-  loadEnvLocal()
+  prepareVerifyEnv()
 
   if (process.env.VERIFY_049_I_KNOW_THIS_IS_NOT_PROD !== "1") {
     console.error(

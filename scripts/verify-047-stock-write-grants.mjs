@@ -19,6 +19,7 @@ import { execSync } from "child_process"
 import { createClient } from "@supabase/supabase-js"
 
 const require = createRequire(import.meta.url)
+const { prepareVerifyEnv } = require("./verify-env.cjs")
 
 const FIXTURE_PASSWORD = "Verify047!StockWrite-Temp"
 const EMAIL = {
@@ -30,21 +31,6 @@ const EMAIL = {
   techB: "verify-047-tech-b@example.com",
   norole: "verify-047-norole@example.com",
   inactiveSales: "verify-047-inactive-sales@example.com",
-}
-
-function loadEnvLocal() {
-  const p = path.join(process.cwd(), ".env.local")
-  if (!fs.existsSync(p)) return
-  for (const line of fs.readFileSync(p, "utf8").split(/\r?\n/)) {
-    const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/)
-    if (!m) continue
-    const key = m[1]
-    let val = m[2].trim()
-    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-      val = val.slice(1, -1)
-    }
-    if (process.env[key] === undefined) process.env[key] = val
-  }
 }
 
 function assert(cond, msg) {
@@ -102,7 +88,7 @@ async function require047Schema(admin) {
 }
 
 async function main() {
-  loadEnvLocal()
+  prepareVerifyEnv()
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
   const dbUrl = process.env.SUPABASE_DB_URL || process.env.DATABASE_URL

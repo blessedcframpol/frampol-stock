@@ -19,6 +19,7 @@ import { createRequire } from "module"
 import { createClient } from "@supabase/supabase-js"
 
 const require = createRequire(import.meta.url)
+const { prepareVerifyEnv } = require("./verify-env.cjs")
 const EMAIL_PREFIX = "verify-events-"
 const EMAIL = {
   admin: "verify-events-admin@test.local",
@@ -27,24 +28,6 @@ const EMAIL = {
   accounts: "verify-events-accounts@test.local",
 }
 const FIXTURE_PASSWORD = "VerifyEvents!Temporary"
-
-function loadEnvLocal() {
-  const p = path.join(process.cwd(), ".env.local")
-  if (!fs.existsSync(p)) return
-  for (const line of fs.readFileSync(p, "utf8").split(/\r?\n/)) {
-    const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/)
-    if (!m) continue
-    const key = m[1]
-    let value = m[2].trim()
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1)
-    }
-    if (process.env[key] === undefined) process.env[key] = value
-  }
-}
 
 function assert(condition, message) {
   if (!condition) throw new Error(message)
@@ -55,7 +38,7 @@ function stamp() {
 }
 
 async function main() {
-  loadEnvLocal()
+  prepareVerifyEnv()
   if (process.env.VERIFY_EVENTS_I_KNOW_THIS_IS_NOT_PROD !== "1") {
     console.error(
       "Refusing to apply migration 046 without VERIFY_EVENTS_I_KNOW_THIS_IS_NOT_PROD=1"

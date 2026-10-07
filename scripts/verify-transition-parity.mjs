@@ -25,6 +25,7 @@ import { createRequire } from "module"
 import { createClient } from "@supabase/supabase-js"
 
 const require = createRequire(import.meta.url)
+const { prepareVerifyEnv } = require("./verify-env.cjs")
 
 const FIXTURE_PASSWORD = "VerifyParity!Transition-Temp"
 const ID_PREFIX_INV = "inv-vparity-"
@@ -49,24 +50,6 @@ const EMAIL = {
   tech: "verify-parity-tech@example.com",
 }
 
-function loadEnvLocal() {
-  const p = path.join(process.cwd(), ".env.local")
-  if (!fs.existsSync(p)) return
-  for (const line of fs.readFileSync(p, "utf8").split(/\r?\n/)) {
-    const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/)
-    if (!m) continue
-    const key = m[1]
-    let val = m[2].trim()
-    if (
-      (val.startsWith('"') && val.endsWith('"')) ||
-      (val.startsWith("'") && val.endsWith("'"))
-    ) {
-      val = val.slice(1, -1)
-    }
-    if (process.env[key] === undefined) process.env[key] = val
-  }
-}
-
 function assert(cond, msg) {
   if (!cond) throw new Error(msg)
 }
@@ -76,7 +59,7 @@ function stamp() {
 }
 
 async function main() {
-  loadEnvLocal()
+  prepareVerifyEnv()
 
   // tsx loads the .ts module as CJS when imported from this .mjs, so the ESM
   // namespace only exposes `default` / `module.exports`. Named bindings like

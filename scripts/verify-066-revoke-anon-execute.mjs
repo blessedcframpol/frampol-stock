@@ -15,27 +15,11 @@ import { createRequire } from "module"
 import { createClient } from "@supabase/supabase-js"
 
 const require = createRequire(import.meta.url)
+const { prepareVerifyEnv } = require("./verify-env.cjs")
 const PREFIX = "verify-066-"
 const EMAIL_PREFIX = "verify-066-"
 const DATE = "2026-01-15T00:00:00.000Z"
 const LATER = "2026-01-16T00:00:00.000Z"
-
-function loadEnvLocal() {
-  const envPath = path.join(process.cwd(), ".env.local")
-  if (!fs.existsSync(envPath)) return
-  for (const line of fs.readFileSync(envPath, "utf8").split(/\r?\n/)) {
-    const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/)
-    if (!match) continue
-    let value = match[2].trim()
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1)
-    }
-    if (process.env[match[1]] === undefined) process.env[match[1]] = value
-  }
-}
 
 function pass(results, name, reason) {
   results[name] = { result: "PASS", reason }
@@ -57,7 +41,7 @@ async function expectError(fn) {
 }
 
 async function main() {
-  loadEnvLocal()
+  prepareVerifyEnv()
   const dbUrl = process.env.SUPABASE_DB_URL || process.env.DATABASE_URL
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY

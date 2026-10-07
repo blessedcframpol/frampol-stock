@@ -26,6 +26,9 @@
 import fs from "fs"
 import path from "path"
 import { createClient } from "@supabase/supabase-js"
+import { createRequire } from "module"
+const require = createRequire(import.meta.url)
+const { prepareVerifyEnv } = require("./verify-env.cjs")
 
 const EMAIL_PREFIX = "verify-050-"
 const EMAIL = {
@@ -40,21 +43,6 @@ const EMAIL = {
 const MAX_COOKIE_CHUNK = 3180
 const APP_PROBE_MS = 4000
 const REQUEST_MS = 20000
-
-function loadEnvLocal() {
-  const p = path.join(process.cwd(), ".env.local")
-  if (!fs.existsSync(p)) return
-  for (const line of fs.readFileSync(p, "utf8").split(/\r?\n/)) {
-    const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/)
-    if (!m) continue
-    const key = m[1]
-    let val = m[2].trim()
-    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-      val = val.slice(1, -1)
-    }
-    if (process.env[key] === undefined) process.env[key] = val
-  }
-}
 
 function assert(cond, msg) {
   if (!cond) throw new Error(msg)
@@ -96,7 +84,7 @@ async function fetchWithTimeout(url, options, timeoutMs) {
 }
 
 async function main() {
-  loadEnvLocal()
+  prepareVerifyEnv()
 
   if (process.env.VERIFY_050_I_KNOW_THIS_IS_NOT_PROD !== "1") {
     console.error(

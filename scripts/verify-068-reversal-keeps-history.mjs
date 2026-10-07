@@ -12,6 +12,7 @@ import { createRequire } from "module"
 const require = createRequire(import.meta.url)
 const { Client } = require("pg")
 const { createClient } = require("@supabase/supabase-js")
+const { prepareVerifyEnv } = require("./verify-env.cjs")
 
 const PREFIX = "I2B068"
 const DATE = "2026-10-02T00:00:00.000Z"
@@ -22,23 +23,6 @@ const PHANTOMS = [
   "BATCH-1780037465930-s2vyu5z",
   "BATCH-1780386463378-6pqs19s",
 ]
-
-function loadEnvLocal() {
-  const envPath = path.join(process.cwd(), ".env.local")
-  if (!fs.existsSync(envPath)) return
-  for (const line of fs.readFileSync(envPath, "utf8").split(/\r?\n/)) {
-    const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/)
-    if (!match) continue
-    let value = match[2].trim()
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1)
-    }
-    if (process.env[match[1]] === undefined) process.env[match[1]] = value
-  }
-}
 
 function pass(results, name, reason) {
   results[name] = { result: "PASS", reason }
@@ -72,7 +56,7 @@ function nextId(kind) {
 }
 
 async function main() {
-  loadEnvLocal()
+  prepareVerifyEnv()
   const dbUrl = process.env.SUPABASE_DB_URL || process.env.DATABASE_URL
   if (!dbUrl) throw new Error("SUPABASE_DB_URL is not set")
   const db = new Client({ connectionString: dbUrl, ssl: { rejectUnauthorized: false } })

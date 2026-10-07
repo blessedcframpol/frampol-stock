@@ -16,6 +16,7 @@ import { createRequire } from "module"
 import { createClient } from "@supabase/supabase-js"
 
 const require = createRequire(import.meta.url)
+const { prepareVerifyEnv } = require("./verify-env.cjs")
 const FIXTURE_REQUEST_ID = "a95a25eb-2edb-4baa-a1f6-1449a2bf316a"
 const FIXTURE_PRODUCT = "__audit_verify_product__"
 const REIGN_ACRE_CLIENT_ID = "CLT-1774007295290-1pl6z68"
@@ -27,24 +28,6 @@ const EMAIL = {
 }
 const FIXTURE_PASSWORD = "Verify054!RequestHygiene"
 
-function loadEnvLocal() {
-  const p = path.join(process.cwd(), ".env.local")
-  if (!fs.existsSync(p)) return
-  for (const line of fs.readFileSync(p, "utf8").split(/\r?\n/)) {
-    const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/)
-    if (!m) continue
-    const key = m[1]
-    let value = m[2].trim()
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1)
-    }
-    if (process.env[key] === undefined) process.env[key] = value
-  }
-}
-
 function assert(condition, message) {
   if (!condition) throw new Error(message)
 }
@@ -54,7 +37,7 @@ function stamp() {
 }
 
 async function main() {
-  loadEnvLocal()
+  prepareVerifyEnv()
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
   const dbUrl = process.env.SUPABASE_DB_URL || process.env.DATABASE_URL

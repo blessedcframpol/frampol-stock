@@ -10,6 +10,7 @@ import { createRequire } from "module"
 const require = createRequire(import.meta.url)
 const { Client } = require("pg")
 const { createClient } = require("@supabase/supabase-js")
+const { prepareVerifyEnv } = require("./verify-env.cjs")
 
 const PREFIX = "H1077"
 const HOLDER = "H1077 Holder - H1077 Co"
@@ -18,20 +19,6 @@ const RESTORE_REASON = "H1077 restore of the first POC out"
 const EXTEND_REASON = "H1077 extend the return date"
 const CANCEL_REASON = "H1077 cancel that extension"
 const DECOM_REASON = "H1077 client ended the service"
-
-function loadEnvLocal() {
-  const envPath = path.join(process.cwd(), ".env.local")
-  if (!fs.existsSync(envPath)) return
-  for (const line of fs.readFileSync(envPath, "utf8").split(/\r?\n/)) {
-    const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/)
-    if (!match) continue
-    let value = match[2].trim()
-    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-      value = value.slice(1, -1)
-    }
-    if (process.env[match[1]] === undefined) process.env[match[1]] = value
-  }
-}
 
 const results = {}
 function pass(name, reason) {
@@ -98,7 +85,7 @@ async function snapshot(db) {
 }
 
 async function main() {
-  loadEnvLocal()
+  prepareVerifyEnv()
   const db = new Client({
     connectionString: process.env.SUPABASE_DB_URL || process.env.DATABASE_URL,
     ssl: { rejectUnauthorized: false },

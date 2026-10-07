@@ -13,30 +13,13 @@ import { createClient } from "@supabase/supabase-js"
 import { getLowStockAlerts } from "../lib/low-stock-helper.mjs"
 
 const require = createRequire(import.meta.url)
+const { prepareVerifyEnv } = require("./verify-env.cjs")
 const EMAIL_PREFIX = "verify-060b-"
 const DATA_PREFIX = "__verify_060b__"
 const PRODUCT_IDS = {
   neverStocked: `${DATA_PREFIX}never`,
   soldOut: `${DATA_PREFIX}soldout`,
   guarded: `${DATA_PREFIX}guarded`,
-}
-
-function loadEnvLocal() {
-  const envPath = path.join(process.cwd(), ".env.local")
-  if (!fs.existsSync(envPath)) return
-  for (const line of fs.readFileSync(envPath, "utf8").split(/\r?\n/)) {
-    const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/)
-    if (!match) continue
-    const key = match[1]
-    let value = match[2].trim()
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1)
-    }
-    if (process.env[key] === undefined) process.env[key] = value
-  }
 }
 
 function assert(condition, message) {
@@ -56,7 +39,7 @@ function businessSettings(row) {
 }
 
 async function main() {
-  loadEnvLocal()
+  prepareVerifyEnv()
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
   const dbUrl = process.env.SUPABASE_DB_URL || process.env.DATABASE_URL
