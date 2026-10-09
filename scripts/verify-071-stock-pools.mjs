@@ -165,7 +165,9 @@ export async function runChecks(ctx) {
           metadata:
             type === "Rental Return" || type === "Decommissioned"
               ? { reason_category: "Client cancelled", reason_text: "Recorded reason for the return" }
-              : null,
+              : type === "Sale" || type === "Rentals"
+                ? { invoice_choice: "pending" }
+                : null,
         },
       ]),
     ])
@@ -247,6 +249,7 @@ export async function runChecks(ctx) {
           date: DATE,
           client: "Internal",
           batch_id: nextId("BATCH"),
+          metadata: { invoice_choice: "pending" },
         },
       ]),
     ],
@@ -280,6 +283,7 @@ export async function runChecks(ctx) {
           date: DATE,
           client: "Internal",
           batch_id: nextId("BATCH"),
+          metadata: { invoice_choice: "pending" },
         },
       ]),
     ],
@@ -445,6 +449,7 @@ export async function runChecks(ctx) {
           date: DATE,
           client: "P1 Holder",
           batch_id: nextId("BATCH"),
+          metadata: { invoice_choice: "pending" },
         },
       ]),
     ],

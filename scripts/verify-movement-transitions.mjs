@@ -137,12 +137,15 @@ export async function runChecks(ctx) {
       location: location ?? itemRow.location,
       ...extra.item,
     }
-    const metadata =
+    let metadata =
       extra.metadata !== undefined
         ? extra.metadata
         : type === "Sale" && itemRow.status === "POC"
           ? { converted_from: "POC", poc_out_date: "2026-06-01" }
           : null
+    if (type === "Sale" || type === "Rentals") {
+      metadata = { invoice_choice: "pending", ...(metadata && typeof metadata === "object" ? metadata : {}) }
+    }
     await dropMovementPrev(db)
     return ctx.asUser(userId, async () => {
       const sp = `sp_${Math.random().toString(36).slice(2, 10)}`
@@ -159,7 +162,15 @@ export async function runChecks(ctx) {
               client: itemRow.client ?? "Verify Client",
               date: DATE_ISO,
               from_location: type === "Transfer" ? itemRow.location : null,
-              to_location: type === "Transfer" ? location : null,
+              to_location:
+                type === "Transfer" ||
+                type === "Inbound" ||
+                type === "POC Return" ||
+                type === "Rental Return" ||
+                type === "Sale Return" ||
+                type === "Decommissioned"
+                  ? location
+                  : null,
               created_by: null,
               metadata,
             },
@@ -325,23 +336,12 @@ export async function runChecks(ctx) {
     fail("normal_sale", stockSaleError || JSON.stringify(stockSold))
   }
 
+  // Remediation Loaner Issue removed in P3.6 — keep the fixture serial for other checks.
   const loanItem = await loadItem(loanSerial)
-  const loanError = await applyMoveAs(techId, loanItem, "Remediation Loaner Issue", "Sold", "Delivered")
-  const loaned = await loadItem(loanSerial)
-  const loanReturnError = await applyMoveAs(techId, loaned, "Sale Return", "RMA Hold", "Warehouse A")
-  const loanReturned = await loadItem(loanSerial)
-  const loanAgain = await applyMoveAs(techId, loanReturned, "Remediation Loaner Issue", "Sold", "Delivered")
-  if (
-    !loanError &&
-    loaned.status === "Sold" &&
-    !loanReturnError &&
-    loanReturned.status === "RMA Hold" &&
-    loanAgain &&
-    /Invalid movement/i.test(loanAgain)
-  ) {
-    pass("loaner", "loaner issue and return; re-issue from RMA Hold rejected")
+  if (loanItem?.status === "In Stock") {
+    pass("loaner_removed", "Remediation Loaner Issue no longer exercised; fixture remains In Stock")
   } else {
-    fail("loaner", JSON.stringify({ loanError, loaned, loanReturnError, loanReturned, loanAgain }))
+    fail("loaner_removed", JSON.stringify(loanItem))
   }
 
   let transferOk = true

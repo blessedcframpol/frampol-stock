@@ -150,7 +150,19 @@ export async function runChecks(ctx) {
           invoice_number: extra.invoice_number ?? null,
           batch_id: batchId,
           to_location: location,
-          metadata: extra.metadata ?? null,
+          metadata: (() => {
+            const base = extra.metadata ? { ...extra.metadata } : {}
+            if (
+              (type === "Sale" || type === "Rentals") &&
+              !base.invoice_choice
+            ) {
+              base.invoice_choice =
+                extra.invoice_number && String(extra.invoice_number).trim()
+                  ? "number"
+                  : "pending"
+            }
+            return Object.keys(base).length ? base : null
+          })(),
           created_by: extra.created_by ?? null,
           return_pool: extra.return_pool ?? null,
         },

@@ -129,6 +129,10 @@ export async function runChecks(ctx) {
           client: extra.txnClient ?? extra.client ?? "Internal",
           batch_id: nextId("BATCH"),
           to_location: location,
+          metadata:
+            type === "Sale" || type === "Rentals"
+              ? { invoice_choice: "pending", ...(extra.metadata ?? {}) }
+              : (extra.metadata ?? null),
         },
       ]),
     ])

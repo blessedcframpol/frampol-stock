@@ -289,11 +289,26 @@ async function readItem(serial) {
           to_location: after.location,
           client: extra.txnClient ?? after.client ?? "",
           assigned_to: extra.txnAssigned ?? after.assigned_to,
-          metadata:
-            extra.metadata ??
-            (type === "Rental Return" || type === "Decommissioned"
-              ? { reason_category: "Client cancelled", reason_text: "Recorded reason for the return" }
-              : null),
+          disposal_reason: type === "Dispose" ? "Beyond economical repair for fixture" : null,
+          authorised_by: type === "Dispose" ? adminId : null,
+          metadata: (() => {
+            const base =
+              extra.metadata
+                ? { ...extra.metadata }
+                : type === "Rental Return" || type === "Decommissioned"
+                  ? {
+                      reason_category: "Client cancelled",
+                      reason_text: "Recorded reason for the return",
+                    }
+                  : {}
+            if (
+              (type === "Sale" || type === "Rentals") &&
+              !base.invoice_choice
+            ) {
+              base.invoice_choice = "pending"
+            }
+            return Object.keys(base).length ? base : null
+          })(),
           return_pool: extra.returnPool,
           previous_location: "CLIENT LIE",
           previous_client: "CLIENT LIE",
@@ -554,7 +569,7 @@ async function readItem(serial) {
       { name: "rentals", type: "Rentals", after: { ...stock, status: "Rented", location: "Client Site", ...held } },
       { name: "dispose", type: "Dispose", after: { ...stock, status: "Disposed" } },
       { name: "transfer", type: "Transfer", after: { ...stock, location: "Warehouse B" } },
-      { name: "loaner", type: "Remediation Loaner Issue", after: { ...stock, status: "Sold", location: "Delivered", client: HOLDER, assigned_to: ASSIGNEE } },
+      // Remediation Loaner Issue removed in P3.6.
     ]
     for (const entry of cases) {
       const serial = `${PREFIX}-${entry.name}`

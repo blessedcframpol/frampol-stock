@@ -127,7 +127,19 @@ export async function runChecks(ctx) {
           invoice_number: extra.invoice_number ?? null,
           batch_id: batchId,
           to_location: location,
-          metadata: extra.metadata ?? null,
+          metadata: (() => {
+            const base = extra.metadata ? { ...extra.metadata } : {}
+            if (
+              (type === "Sale" || type === "Rentals") &&
+              !base.invoice_choice
+            ) {
+              base.invoice_choice =
+                extra.invoice_number && String(extra.invoice_number).trim()
+                  ? "number"
+                  : "pending"
+            }
+            return Object.keys(base).length ? base : null
+          })(),
         },
       ]),
     ])
@@ -212,7 +224,11 @@ export async function runChecks(ctx) {
           client_id: clientId,
           invoice_number: INVOICE,
           batch_id: nextId("BATCH"),
-          metadata: { converted_from: "Rentals", rental_end: start < ending ? "2020-01-01" : start },
+          metadata: {
+            converted_from: "Rentals",
+            rental_end: start < ending ? "2020-01-01" : start,
+            invoice_choice: "number",
+          },
         },
       ]),
     ],
@@ -246,7 +262,11 @@ export async function runChecks(ctx) {
           client: HOLDER,
           invoice_number: INVOICE,
           batch_id: nextId("BATCH"),
-          metadata: { converted_from: "Rentals", rental_end: tomorrow },
+          metadata: {
+            converted_from: "Rentals",
+            rental_end: tomorrow,
+            invoice_choice: "number",
+          },
         },
       ]),
     ],
@@ -280,7 +300,11 @@ export async function runChecks(ctx) {
           client: HOLDER,
           invoice_number: INVOICE,
           batch_id: nextId("BATCH"),
-          metadata: { converted_from: "Rentals", rental_end: ending },
+          metadata: {
+            converted_from: "Rentals",
+            rental_end: ending,
+            invoice_choice: "number",
+          },
         },
       ]),
     ],
@@ -297,7 +321,11 @@ export async function runChecks(ctx) {
     txnClient: HOLDER,
     client_id: clientId,
     invoice_number: INVOICE,
-    metadata: { converted_from: "Rentals", rental_end: ending },
+    metadata: {
+      converted_from: "Rentals",
+      rental_end: ending,
+      invoice_choice: "number",
+    },
   })
 
   const item = await db.query(
@@ -403,7 +431,11 @@ export async function runChecks(ctx) {
           client: HOLDER,
           invoice_number: INVOICE,
           batch_id: nextId("BATCH"),
-          metadata: { converted_from: "Rentals", rental_end: today },
+          metadata: {
+            converted_from: "Rentals",
+            rental_end: today,
+            invoice_choice: "number",
+          },
         },
       ]),
     ],
@@ -444,7 +476,11 @@ export async function runChecks(ctx) {
           client: HOLDER,
           invoice_number: INVOICE,
           batch_id: nextId("BATCH"),
-          metadata: { converted_from: "Rentals", rental_end: today },
+          metadata: {
+            converted_from: "Rentals",
+            rental_end: today,
+            invoice_choice: "number",
+          },
         },
       ]),
     ],

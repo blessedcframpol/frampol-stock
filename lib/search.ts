@@ -48,6 +48,13 @@ export function filterClientsForPicker(clients: Client[], query: string): Client
   return searchClients(clients, q)
 }
 
+/** Closest directory matches before allowing “create new” (name / company contains query). */
+export function closestClientsForCreate(clients: Client[], query: string, limit = 5): Client[] {
+  const q = query.trim()
+  if (!q) return []
+  return searchClients(clients, q).slice(0, limit)
+}
+
 /** cmdk matches against `value`; include searchable fields, not id alone. */
 export function clientCommandItemValue(client: Client): string {
   return [client.name, client.company, client.email, client.phone, client.id].filter(Boolean).join(" ")

@@ -461,6 +461,7 @@ export async function runChecks(ctx) {
         client_id: siteClientId,
         batch_id: nextId("BATCH"),
         to_location: "Client Site",
+        metadata: { invoice_choice: "pending" },
       },
     ]),
   ])
@@ -519,6 +520,7 @@ export async function runChecks(ctx) {
         client_id: siteClientId,
         batch_id: nextId("BATCH"),
         to_location: "Client Site",
+        metadata: { invoice_choice: "pending" },
       },
     ]),
   ])

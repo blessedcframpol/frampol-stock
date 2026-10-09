@@ -266,6 +266,7 @@ export async function runChecks(ctx) {
         client_id: clientId,
         batch_id: saleBatch,
         to_location: "Client Site",
+        metadata: { invoice_choice: "pending" },
       },
     ]),
   ])

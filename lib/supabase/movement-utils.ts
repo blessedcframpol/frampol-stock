@@ -283,7 +283,8 @@ export function computeMovementResult(
   } = params
   const businessToday = businessDateToIso(todayBusinessDate(orgTimeZone?.trim() || DEFAULT_ORG_TIMEZONE))
   let date = businessToday
-  if (type === "Sale") {
+  {
+    // Optional business-date override from the movement form (any type; not future — UI + parse).
     const raw = saleTransactionDateIso?.trim()
     if (raw) {
       const parsed = parseSaleDateOverride(raw)
@@ -362,7 +363,7 @@ export function computeMovementResult(
           notes,
           assignedTo: undefined,
           fromLocation: undefined,
-          toLocation: undefined,
+          toLocation: d.location,
           disposalReason: undefined,
           authorisedBy: undefined,
           batchId: batchId ?? undefined,
@@ -644,6 +645,7 @@ export function computeMovementResult(
       fromLocation: type === "Transfer" ? fromLocation : undefined,
       toLocation:
         type === "Transfer" ||
+        type === "Inbound" ||
         type === "POC Return" ||
         type === "Rental Return" ||
         type === "Sale Return" ||
@@ -655,7 +657,7 @@ export function computeMovementResult(
       disposalReason: type === "Dispose" ? disposalReason : undefined,
       authorisedBy: type === "Dispose" ? authorisedBy : undefined,
       batchId: batchId ?? undefined,
-      deliveryNoteUrl: type === "Inbound" ? deliveryNoteUrl : undefined,
+      deliveryNoteUrl: type === "Inbound" || type === "Sale" ? deliveryNoteUrl : undefined,
       invoiceNumber: storedInvoice,
       metadata: storedMetadata,
     })

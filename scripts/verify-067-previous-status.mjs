@@ -95,36 +95,43 @@ export async function runChecks(ctx) {
 
   await dropMovementPrev(db)
   let createError = null
-  try {
-    await db.query(`SELECT public.apply_stock_movement($1::jsonb, $2::jsonb, $3::jsonb)`, [
-      "[]",
-      JSON.stringify([
-        {
-          id: `${PREFIX}item`,
-          product_id: productId,
-          serial_number: serial,
-          status: "In Stock",
-          date_added: "2026-10-01T00:00:00.000Z",
-          location: "Warehouse A",
-          previous_status: "Disposed",
-        },
-      ]),
-      JSON.stringify([
-        {
-          id: `${PREFIX}inbound`,
-          type: "Inbound",
-          serial_number: serial,
-          item_name: "Verify kit",
-          client: "Internal",
-          date: "2026-10-01T00:00:00.000Z",
-          batch_id: `${PREFIX}batch-in`,
-          previous_status: "Disposed",
-          previous_status_source: "derived",
-        },
-      ]),
-    ])
-  } catch (error) {
-    createError = error instanceof Error ? error : new Error(String(error))
+  {
+    const sp = `sp_create_${Math.random().toString(36).slice(2, 10)}`
+    await db.query(`SAVEPOINT ${sp}`)
+    try {
+      await db.query(`SELECT public.apply_stock_movement($1::jsonb, $2::jsonb, $3::jsonb)`, [
+        "[]",
+        JSON.stringify([
+          {
+            id: `${PREFIX}item`,
+            product_id: productId,
+            serial_number: serial,
+            status: "In Stock",
+            date_added: "2026-10-01T00:00:00.000Z",
+            location: "Warehouse A",
+            previous_status: "Disposed",
+          },
+        ]),
+        JSON.stringify([
+          {
+            id: `${PREFIX}inbound`,
+            type: "Inbound",
+            serial_number: serial,
+            item_name: "Verify kit",
+            client: "Internal",
+            date: "2026-10-01T00:00:00.000Z",
+            batch_id: `${PREFIX}batch-in`,
+            to_location: "Warehouse A",
+            previous_status: "Disposed",
+            previous_status_source: "derived",
+          },
+        ]),
+      ])
+      await db.query(`RELEASE SAVEPOINT ${sp}`)
+    } catch (error) {
+      await db.query(`ROLLBACK TO SAVEPOINT ${sp}`)
+      createError = error instanceof Error ? error : new Error(String(error))
+    }
   }
   const inbound = await db.query(
     `SELECT type, previous_status, previous_status_source FROM public.transactions WHERE id = $1`,
@@ -174,6 +181,7 @@ export async function runChecks(ctx) {
           client: "Internal",
           date: "2026-10-01T00:00:00.000Z",
           batch_id: `${PREFIX}batch-again`,
+          to_location: "Warehouse A",
         },
       ]),
     ],
@@ -225,6 +233,7 @@ export async function runChecks(ctx) {
           client: "Internal",
           date: "2026-10-01T00:00:00.000Z",
           batch_id: `${PREFIX}batch-skip`,
+          to_location: "Warehouse A",
         },
         {
           id: `${PREFIX}skip-txn-b`,
@@ -234,6 +243,7 @@ export async function runChecks(ctx) {
           client: "Internal",
           date: "2026-10-01T00:00:00.000Z",
           batch_id: `${PREFIX}batch-skip`,
+          to_location: "Warehouse A",
         },
       ]),
     ],
@@ -277,6 +287,7 @@ export async function runChecks(ctx) {
           batch_id: `${PREFIX}batch-sale`,
           previous_status: "Disposed",
           previous_status_source: "unknown",
+          metadata: { invoice_choice: "pending" },
         },
       ]),
     ])

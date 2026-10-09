@@ -112,6 +112,7 @@ export async function runChecks(ctx) {
           date: DATE,
           client: "Internal",
           batch_id: batchId,
+          to_location: "Warehouse A",
         },
       ]),
     ])
@@ -151,7 +152,16 @@ export async function runChecks(ctx) {
           client: extra.client ?? current.rows[0].client ?? "Internal",
           batch_id: batchId,
           to_location: location,
-          metadata: extra.metadata ?? null,
+          metadata: (() => {
+            const base = extra.metadata ? { ...extra.metadata } : {}
+            if (
+              (type === "Sale" || type === "Rentals") &&
+              !base.invoice_choice
+            ) {
+              base.invoice_choice = "pending"
+            }
+            return Object.keys(base).length ? base : null
+          })(),
         },
       ]),
     ])
@@ -211,6 +221,7 @@ export async function runChecks(ctx) {
           date: DATE,
           client: HOLDER,
           batch_id: nextId("BATCH"),
+          to_location: "Warehouse A",
         },
       ]),
     ],
@@ -294,6 +305,7 @@ export async function runChecks(ctx) {
         client: HOLDER,
         client_id: clientId,
         batch_id: nextId("BATCH"),
+        to_location: "Warehouse A",
         metadata: intakeMeta(),
       },
     ]),
@@ -333,6 +345,7 @@ export async function runChecks(ctx) {
           item_name: starProduct.product_name,
           date: DATE,
           batch_id: nextId("BATCH"),
+          to_location: "Warehouse A",
           metadata: intakeMeta(),
         },
       ]),

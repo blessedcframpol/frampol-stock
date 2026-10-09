@@ -151,10 +151,14 @@ export async function runChecks(ctx) {
           to_location: extra.location ?? row.location,
           client: extra.client ?? "",
           return_pool: extra.return_pool ?? null,
+          disposal_reason: type === "Dispose" ? "Beyond economical repair for fixture" : null,
+          authorised_by: type === "Dispose" ? adminId : null,
           metadata:
             type === "Rental Return" || type === "Decommissioned"
               ? { reason_category: "Client cancelled", reason_text: "Recorded reason for the return" }
-              : null,
+              : type === "Sale" || type === "Rentals"
+                ? { invoice_choice: "pending" }
+                : null,
         },
       ]),
     ])
@@ -336,7 +340,7 @@ export async function runChecks(ctx) {
           restore: "Sold",
         },
         // Inspection Pass/Fail must go through complete_inspection (069/073 cover that).
-        { name: "loaner", steps: [{ type: "Remediation Loaner Issue", status: "Sold" }], restore: "In Stock" },
+        // Remediation Loaner Issue removed in P3.6.
       ]
       for (const entry of cases) {
         const serial = `${PREFIX}-${entry.name}`

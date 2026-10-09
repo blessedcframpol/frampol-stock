@@ -161,6 +161,10 @@ export async function runChecks(ctx) {
           to_location: after.location,
           client: after.client ?? "",
           assigned_to: after.assigned_to,
+          metadata:
+            type === "Sale" || type === "Rentals"
+              ? { invoice_choice: "pending" }
+              : null,
         },
       ]),
     ])
