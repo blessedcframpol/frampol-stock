@@ -11,7 +11,8 @@
     "test:watch": "vitest",
     "prepare": "node scripts/install-git-hooks.mjs",
     "guard:truncation": "node scripts/check-truncation-and-migrations.mjs",
-    "verify:parity": "tsx scripts/verify-transition-parity.mjs",
+    "verify:parity": "node scripts/verify-transition-parity.mjs",
+    "verify:all": "node scripts/verify-all.mjs",
     "migrate:quick-scans": "tsx --env-file=.env.local scripts/migrate-quick-scans.ts"
   },
   "dependencies": {

@@ -473,29 +473,23 @@ async function main() {
     try {
       await cleanupFixtures()
       if (originalSettings) {
-        await db.query("SET session_replication_role = replica")
-        try {
-          await db.query(
-            `UPDATE public.app_settings
-             SET default_reorder_level = $1,
-                 low_stock_emails_enabled = $2,
-                 low_stock_recipients = $3,
-                 timezone = $4,
-                 updated_at = $5,
-                 updated_by = $6
-             WHERE id`,
-            [
-              originalSettings.default_reorder_level,
-              originalSettings.low_stock_emails_enabled,
-              originalSettings.low_stock_recipients,
-              originalSettings.timezone,
-              originalSettings.updated_at,
-              originalSettings.updated_by,
-            ]
-          )
-        } finally {
-          await db.query("SET session_replication_role = origin")
-        }
+        // Normal UPDATE path. updated_at may bump; business fields restored.
+        await db.query(
+          `UPDATE public.app_settings
+           SET default_reorder_level = $1,
+               low_stock_emails_enabled = $2,
+               low_stock_recipients = $3,
+               timezone = $4,
+               updated_by = $5
+           WHERE id = true`,
+          [
+            originalSettings.default_reorder_level,
+            originalSettings.low_stock_emails_enabled,
+            originalSettings.low_stock_recipients,
+            originalSettings.timezone,
+            originalSettings.updated_by,
+          ],
+        )
       }
       await deleteIdentities()
 
@@ -508,11 +502,18 @@ async function main() {
         [`${EMAIL_PREFIX}%`, `${DATA_PREFIX}%`]
       )
       const restored = originalSettings
-        ? businessSettings((await db.query(`SELECT * FROM public.app_settings WHERE id`)).rows[0])
+        ? businessSettings((await db.query(`SELECT * FROM public.app_settings WHERE id = true`)).rows[0])
         : null
+      const settingsMatch =
+        !originalSettings ||
+        (restored &&
+          restored.default_reorder_level === originalSettings.default_reorder_level &&
+          restored.low_stock_emails_enabled === originalSettings.low_stock_emails_enabled &&
+          JSON.stringify(restored.low_stock_recipients) ===
+            JSON.stringify(originalSettings.low_stock_recipients) &&
+          restored.timezone === originalSettings.timezone)
       const zeroResidue =
-        Object.values(residue.rows[0]).every((value) => Number(value) === 0) &&
-        (!originalSettings || JSON.stringify(restored) === JSON.stringify(originalSettings))
+        Object.values(residue.rows[0]).every((value) => Number(value) === 0) && settingsMatch
       if (zeroResidue) {
         pass("zero_residue", JSON.stringify({ ...residue.rows[0], settingsRestored: true }))
       } else {

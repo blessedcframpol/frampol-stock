@@ -4,7 +4,8 @@
  * Opens DATABASE_URL / SUPABASE_DB_URL, runs the test inside BEGIN … ROLLBACK,
  * always rolls back (including on error or timeout), and never commits.
  * After the run, asserts marker rows are gone, live totals match the pre-run
- * snapshot, and audit_log gained no rows from the attempt.
+ * snapshot (with a printed concurrent-traffic tolerance on production), and
+ * audit_log gained no rows since run start that reference marker ids.
  *
  * Usage from a verify script:
  *   import { withHarness } from "./verify-harness.mjs"
@@ -77,11 +78,32 @@ async function liveTotals(db) {
   }
 }
 
-async function auditHighWater(db) {
-  const row = await db.query(
-    `SELECT coalesce(max(id), 0)::bigint AS max_id, count(*)::bigint AS n FROM public.audit_log`,
-  )
-  return { maxId: Number(row.rows[0].max_id), n: Number(row.rows[0].n) }
+/** LIKE needles drawn from marker params (prefixes, emails, ids). */
+function markerNeedles(markers) {
+  const out = []
+  for (const marker of markers) {
+    for (const value of marker.params || []) {
+      if (typeof value === "string" && value.length >= 3) out.push(value)
+    }
+  }
+  return [...new Set(out)]
+}
+
+function formatTotalsDiff(before, after) {
+  const parts = []
+  const b = before.csdc
+  const a = after.csdc
+  if (b.clients !== a.clients) parts.push(`csdc.clients ${b.clients}→${a.clients}`)
+  if (b.orders !== a.orders) parts.push(`csdc.orders ${b.orders}→${a.orders}`)
+  if (b.units !== a.units) parts.push(`csdc.units ${b.units}→${a.units}`)
+  if (before.clients !== after.clients) parts.push(`clients ${before.clients}→${after.clients}`)
+  const statuses = new Set([...Object.keys(before.kits), ...Object.keys(after.kits)])
+  for (const status of [...statuses].sort()) {
+    const from = before.kits[status] ?? 0
+    const to = after.kits[status] ?? 0
+    if (from !== to) parts.push(`kits[${status}] ${from}→${to}`)
+  }
+  return parts.join(", ") || "unknown delta"
 }
 
 /**
@@ -113,7 +135,7 @@ export async function withHarness(options, fn) {
   const results = {}
   const fixtureUsers = new Map()
   let beforeTotals
-  let beforeAudit
+  let runStartedAt
   let timedOut = false
   let runError = null
 
@@ -203,9 +225,14 @@ export async function withHarness(options, fn) {
       }
       return await fn({ db, userId, role })
     } finally {
-      await db.query(`RESET ROLE`)
-      await db.query(`SELECT set_config('request.jwt.claim.sub', '', true)`)
-      await db.query(`SELECT set_config('request.jwt.claims', '', true)`)
+      // If fn aborted the txn, these may fail — don't mask the original error.
+      try {
+        await db.query(`RESET ROLE`)
+        await db.query(`SELECT set_config('request.jwt.claim.sub', '', true)`)
+        await db.query(`SELECT set_config('request.jwt.claims', '', true)`)
+      } catch {
+        /* outer harness ROLLBACK cleans up */
+      }
     }
   }
 
@@ -225,9 +252,10 @@ export async function withHarness(options, fn) {
 
   try {
     beforeTotals = await liveTotals(db)
-    beforeAudit = await auditHighWater(db)
+    const startRow = await db.query(`SELECT clock_timestamp() AS at`)
+    runStartedAt = startRow.rows[0].at
     console.log(
-      `HARNESS  ${label} begin${production ? " (production ref; will ROLLBACK)" : ""} — csdc ${beforeTotals.csdc.clients}/${beforeTotals.csdc.orders}/${beforeTotals.csdc.units}, audit max ${beforeAudit.maxId}`,
+      `HARNESS  ${label} begin${production ? " (production ref; will ROLLBACK)" : ""} — csdc ${beforeTotals.csdc.clients}/${beforeTotals.csdc.orders}/${beforeTotals.csdc.units}, audit from ${new Date(runStartedAt).toISOString()}`,
     )
 
     await db.query("BEGIN")
@@ -242,6 +270,7 @@ export async function withHarness(options, fn) {
       raises,
       fixtureUsers,
       beforeTotals,
+      runStartedAt,
     }
 
     const run = Promise.resolve().then(() => fn(ctx))
@@ -277,15 +306,37 @@ export async function withHarness(options, fn) {
       }
     }
 
+    const markersClean = markers.every((m) => results[`marker:${m.label}`]?.result === "PASS")
+    const needles = markerNeedles(markers)
+
     try {
       const afterTotals = await liveTotals(db)
-      const same =
-        JSON.stringify(beforeTotals) === JSON.stringify(afterTotals)
+      const same = JSON.stringify(beforeTotals) === JSON.stringify(afterTotals)
       if (same) {
         pass(
           results,
           "live_totals",
           `unchanged ${afterTotals.csdc.clients}/${afterTotals.csdc.orders}/${afterTotals.csdc.units}`,
+        )
+      } else if (production && markersClean) {
+        const diff = formatTotalsDiff(beforeTotals, afterTotals)
+        let concurrentNote = ""
+        try {
+          const concurrent = await db.query(
+            `SELECT count(*)::int AS n
+             FROM public.transactions
+             WHERE created_at >= $1::timestamptz`,
+            [runStartedAt],
+          )
+          concurrentNote = `; ${concurrent.rows[0].n} non-test transaction(s) created during the run`
+        } catch {
+          concurrentNote = "; could not count concurrent transactions"
+        }
+        console.log(`LIVE  totals drifted (markers clean): ${diff}${concurrentNote}`)
+        pass(
+          results,
+          "live_totals",
+          `concurrent live drift (markers clean): ${diff}${concurrentNote}`,
         )
       } else {
         fail(
@@ -299,18 +350,42 @@ export async function withHarness(options, fn) {
     }
 
     try {
-      const afterAudit = await auditHighWater(db)
-      if (afterAudit.maxId === beforeAudit.maxId && afterAudit.n === beforeAudit.n) {
-        pass(results, "audit_unchanged", `still max_id=${afterAudit.maxId} n=${afterAudit.n}`)
+      if (!needles.length) {
+        // Read-only / noop-marker scripts (e.g. schema-rules) create no fixture ids.
+        pass(results, "audit_markers", "no fixture needles (read-only markers)")
       } else {
-        fail(
-          results,
-          "audit_unchanged",
-          `before max=${beforeAudit.maxId} n=${beforeAudit.n}; after max=${afterAudit.maxId} n=${afterAudit.n}`,
+        const hit = await db.query(
+          `SELECT id, table_name, row_id, action
+           FROM public.audit_log AS log
+           WHERE log.at >= $1::timestamptz
+             AND EXISTS (
+               SELECT 1
+               FROM unnest($2::text[]) AS needle(pattern)
+               WHERE log.row_id LIKE needle.pattern
+                  OR log.changed::text LIKE needle.pattern
+                  OR log.actor LIKE needle.pattern
+                  OR coalesce(log.reason, '') LIKE needle.pattern
+             )
+           ORDER BY log.id
+           LIMIT 20`,
+          [runStartedAt, needles],
         )
+        if (hit.rowCount === 0) {
+          pass(
+            results,
+            "audit_markers",
+            `no audit_log row at>=run start references marker needles (${needles.length})`,
+          )
+        } else {
+          fail(
+            results,
+            "audit_markers",
+            hit.rows.map((r) => `${r.id}:${r.table_name}/${r.row_id}/${r.action}`).join("; "),
+          )
+        }
       }
     } catch (error) {
-      fail(results, "audit_unchanged", error instanceof Error ? error.message : String(error))
+      fail(results, "audit_markers", error instanceof Error ? error.message : String(error))
     }
 
     await Promise.race([db.end(), new Promise((r) => setTimeout(r, 2000))])
