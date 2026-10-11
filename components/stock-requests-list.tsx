@@ -21,7 +21,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { Plus, MessageSquare } from "lucide-react"
+import { Plus, MessageSquare, Search } from "lucide-react"
+import { Input } from "@/components/ui/input"
+import { matchesRequestNumber } from "@/lib/request-number"
 import { useAuth } from "@/lib/auth-context"
 import { ADMIN, canCreateStockRequest } from "@/lib/permissions"
 import { getSupabaseClient } from "@/lib/supabase/client"
@@ -66,6 +68,7 @@ export function StockRequestsList({ requests }: { requests: StockRequestWithRela
 
   const [statusFilter, setStatusFilter] = useState<string>(ALL)
   const [userFilter, setUserFilter] = useState<string>(ALL)
+  const [numberQuery, setNumberQuery] = useState("")
   const [sort, setSort] = useState<SortKey>("newest")
   const [names, setNames] = useState<Map<string, string>>(new Map())
 
@@ -108,6 +111,7 @@ export function StockRequestsList({ requests }: { requests: StockRequestWithRela
     const rows = requests.filter((r) => {
       if (statusFilter !== ALL && displayStatuses[r.id] !== statusFilter) return false
       if (isAdmin && userFilter !== ALL && r.created_by !== userFilter) return false
+      if (numberQuery.trim() && !matchesRequestNumber(r.request_number, numberQuery)) return false
       return true
     })
     const statusRank = (r: StockRequestWithRelations) =>
@@ -120,7 +124,7 @@ export function StockRequestsList({ requests }: { requests: StockRequestWithRela
       }
       return b.created_at.localeCompare(a.created_at)
     })
-  }, [requests, displayStatuses, statusFilter, userFilter, sort, isAdmin])
+  }, [requests, displayStatuses, statusFilter, userFilter, numberQuery, sort, isAdmin])
 
   /** Admin: requests still waiting on an invoice number, grouped by requester. */
   const pendingByRequester = useMemo(() => {
@@ -204,6 +208,16 @@ export function StockRequestsList({ requests }: { requests: StockRequestWithRela
       ) : (
         <>
           <div className="flex flex-wrap items-center gap-2">
+            <div className="relative w-full sm:w-[14rem]">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={numberQuery}
+                onChange={(e) => setNumberQuery(e.target.value)}
+                placeholder="Request # (e.g. 42)"
+                className="h-9 rounded-lg bg-background pl-8"
+                aria-label="Search by request number"
+              />
+            </div>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
               <SelectTrigger className="h-9 w-full sm:w-[12rem] rounded-lg bg-background" aria-label="Filter by status">
                 <SelectValue placeholder="Status" />

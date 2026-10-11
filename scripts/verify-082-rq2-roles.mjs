@@ -1,11 +1,16 @@
 /**
- * RQ2 roles, Fortinet mix, internal client, awaiting-invoice reminders.
+ * RQ2 roles, Fortinet mix, internal client, awaiting-invoice reminders,
+ * yearly REQ-YY-NNNN numbers.
  * Rollback harness — never commits.
  *
  * Usage: node scripts/verify-082-rq2-roles.mjs
  */
-import { withHarness } from "./verify-harness.mjs"
+import { createRequire } from "module"
+import { withHarness, prepareVerifyEnv } from "./verify-harness.mjs"
 import { dropMovementPrev } from "./verify-harness-fixtures.mjs"
+
+const require = createRequire(import.meta.url)
+const { Client } = require("pg")
 
 const NOTES = "harness-082"
 const EMAIL = "harness-082-"
@@ -466,7 +471,7 @@ export async function runChecks(ctx) {
         `SELECT request_number FROM public.stock_requests WHERE id = $1`,
         [pendingId],
       )
-      if (numbered.rows[0]?.request_number?.startsWith("REQ-")) {
+      if (/^REQ-\d{2}-\d{4,}$/.test(numbered.rows[0]?.request_number ?? "")) {
         pass("request_number_assigned", numbered.rows[0].request_number)
       } else {
         fail("request_number_assigned", JSON.stringify(numbered.rows[0]))
@@ -552,6 +557,87 @@ export async function runChecks(ctx) {
     )
     if (!acc.ok && ok.ok) pass("accounts_cannot_approve_zero", "admin B approved")
     else fail("accounts_cannot_approve_zero", `${acc.error} | ok=${ok.ok}`)
+  }
+
+  // --- Yearly request numbers (RQ2c) ---
+  {
+    const live = await db.query(
+      `SELECT request_number FROM public.stock_requests
+       WHERE request_number IN ('REQ-26-0001', 'REQ-26-0002', 'REQ-26-0003')
+       ORDER BY request_number`,
+    )
+    if (
+      live.rows.length === 3 &&
+      live.rows[0].request_number === "REQ-26-0001" &&
+      live.rows[2].request_number === "REQ-26-0003"
+    ) {
+      pass("request_numbers_renumbered", "REQ-26-0001…0003")
+    } else {
+      fail("request_numbers_renumbered", JSON.stringify(live.rows))
+    }
+
+    const match = await db.query(
+      `SELECT public.request_number_matches('REQ-26-0042', '42') AS a,
+              public.request_number_matches('REQ-26-0042', 'REQ-26-0042') AS b,
+              public.request_number_matches('REQ-26-0042', '99') AS c`,
+    )
+    if (match.rows[0]?.a === true && match.rows[0]?.b === true && match.rows[0]?.c === false) {
+      pass("request_number_search", "full number and trailing digits")
+    } else {
+      fail("request_number_search", JSON.stringify(match.rows[0]))
+    }
+
+    // Direct insert with a 2027 submit date → first number of that year.
+    const y27 = await db.query(
+      `INSERT INTO public.stock_requests (
+         client_id, created_by, review_state, type, atlas_task_url, notes,
+         invoice_status, invoice_entered_by, invoice_entered_at, submitted_at, created_at
+       ) VALUES (
+         $1, $2, 'cancelled', 'Sale', $3, $4,
+         'pending', $2, timestamptz '2027-06-01 10:00:00+00',
+         timestamptz '2027-06-01 10:00:00+00', timestamptz '2027-06-01 10:00:00+00'
+       ) RETURNING request_number`,
+      [clientId, adminId, ATLAS("66666666-6666-6666-6666-666666666666"), `${NOTES} y27`],
+    )
+    if (y27.rows[0]?.request_number === "REQ-27-0001") {
+      pass("request_number_new_year", "REQ-27-0001")
+    } else {
+      fail("request_number_new_year", JSON.stringify(y27.rows[0]))
+    }
+
+    // Two sessions contend on the same year row; the waiter gets the next number.
+    // A must COMMIT (not ROLLBACK) so B observes the incremented counter; clean up year 2028 after.
+    const { dbUrl } = prepareVerifyEnv({ harness: true })
+    const a = new Client({ connectionString: dbUrl, ssl: { rejectUnauthorized: false } })
+    const b = new Client({ connectionString: dbUrl, ssl: { rejectUnauthorized: false } })
+    const cleaner = new Client({ connectionString: dbUrl, ssl: { rejectUnauthorized: false } })
+    await a.connect()
+    await b.connect()
+    await cleaner.connect()
+    try {
+      await a.query("BEGIN")
+      await b.query("BEGIN")
+      const ra = await a.query(
+        `SELECT public.allocate_stock_request_number(timestamptz '2028-01-15 08:00:00+00') AS n`,
+      )
+      const bWait = b.query(
+        `SELECT public.allocate_stock_request_number(timestamptz '2028-01-15 08:00:00+00') AS n`,
+      )
+      await new Promise((r) => setTimeout(r, 200))
+      const na = ra.rows[0]?.n
+      await a.query("COMMIT")
+      const rb = await bWait
+      await b.query("ROLLBACK")
+      const nb = rb.rows[0]?.n
+      await cleaner.query(`DELETE FROM public.stock_request_number_years WHERE year = 2028`)
+      if (na && nb && na !== nb && /^REQ-28-\d{4,}$/.test(na) && /^REQ-28-\d{4,}$/.test(nb)) {
+        pass("request_number_concurrent", `${na} ≠ ${nb}`)
+      } else {
+        fail("request_number_concurrent", JSON.stringify({ na, nb }))
+      }
+    } finally {
+      await Promise.allSettled([a.end(), b.end(), cleaner.end()])
+    }
   }
 
   void starlinkId
