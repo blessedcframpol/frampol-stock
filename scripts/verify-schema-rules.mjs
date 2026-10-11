@@ -32,8 +32,9 @@ export const REPLACES = {
   "(no prior verify) unique live serial": "index uniq_inventory_items_serial_live",
   "(no prior verify) one open case": "index kit_cases_one_open_per_item",
   "(no prior verify) DEFINER search_path": "security_definer_search_path",
-  "verify-079-audit-log.mjs (catalog half)": "posted_lock_trigger; audit_triggers; audit_log_append_only",
+  "verify-079-audit-log.mjs (catalog half)": "posted_lock_trigger; audit_coverage; audit_log_append_only",
   "verify-075-batch-invoices.mjs (placeholder half)": "invoice_placeholder_function",
+  "verify-084-au1-audit-trail.mjs (catalog half)": "audit_coverage; verify_audit_chain",
 }
 
 export async function runChecks(ctx) {
@@ -149,13 +150,10 @@ export async function runChecks(ctx) {
     }
   }
 
-  // --- Posted-transaction lock + audit triggers ---
+  // --- Posted-transaction lock + named append-only / lock triggers ---
   {
     const need = [
       ["transactions", "tr_transactions_lock_posted"],
-      ["transactions", "tr_transactions_audit"],
-      ["inventory_items", "tr_inventory_items_audit"],
-      ["clients", "tr_clients_audit"],
       ["audit_log", "tr_audit_log_append_only"],
       ["kit_case_events", "tr_kit_case_events_append_only"],
       ["stock_pool_changes", "tr_stock_pool_changes_append_only"],
@@ -178,6 +176,44 @@ export async function runChecks(ctx) {
     )
     if (fn.rows[0]?.ok) pass("posted_lock_function", "transactions_reject_posted_change")
     else fail("posted_lock_function", "missing")
+  }
+
+  // --- AU1: every public table has audit_capture or is on the exclusion list ---
+  {
+    const registry = await db.query(
+      `SELECT to_regclass('public.audit_trigger_exclusions') IS NOT NULL AS ok`
+    )
+    if (!registry.rows[0]?.ok) {
+      fail("audit_coverage", "audit_trigger_exclusions missing — apply AU1 migration")
+    } else {
+      const missing = await db.query(`
+        SELECT c.relname
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public' AND c.relkind = 'r'
+          AND NOT EXISTS (
+            SELECT 1 FROM public.audit_trigger_exclusions e WHERE e.table_name = c.relname
+          )
+          AND NOT EXISTS (
+            SELECT 1
+            FROM pg_trigger t
+            JOIN pg_proc p ON p.oid = t.tgfoid
+            WHERE t.tgrelid = c.oid AND NOT t.tgisinternal AND p.proname = 'audit_capture'
+          )
+        ORDER BY 1
+      `)
+      if (missing.rowCount === 0) {
+        pass("audit_coverage", "every public table audited or excluded")
+      } else {
+        fail("audit_coverage", missing.rows.map((r) => r.relname).join(", "))
+      }
+    }
+
+    const chainFn = await db.query(
+      `SELECT to_regprocedure('public.verify_audit_chain(bigint,bigint)') IS NOT NULL AS ok`
+    )
+    if (chainFn.rows[0]?.ok) pass("verify_audit_chain", "function present")
+    else fail("verify_audit_chain", "missing")
   }
 
   // --- Viewer: SELECT policies exist; no permissive INSERT/UPDATE/DELETE for non-admin staff pattern ---

@@ -59,6 +59,7 @@ function AuthCallbackContent() {
           return
         }
 
+        let established = false
         if (code) {
           const result = await exchangeAuthCodeOnce(supabase, code, { sessionPollAttempts: 40 })
           if (!result.ok) {
@@ -67,6 +68,7 @@ function AuthCallbackContent() {
             }
             return
           }
+          established = true
         } else {
           const ok = await waitForSession(supabase, 48)
           if (!ok) {
@@ -76,6 +78,29 @@ function AuthCallbackContent() {
               )
             }
             return
+          }
+          established = true
+        }
+
+        // One audit row per successful OAuth completion (not when a session already existed).
+        if (established) {
+          try {
+            const res = await fetch("/api/audit/sign-in", { method: "POST", credentials: "same-origin" })
+            if (!res.ok) {
+              await supabase.rpc("record_sign_in", {
+                p_ip: null,
+                p_user_agent: typeof navigator !== "undefined" ? navigator.userAgent : null,
+              })
+            }
+          } catch {
+            try {
+              await supabase.rpc("record_sign_in", {
+                p_ip: null,
+                p_user_agent: typeof navigator !== "undefined" ? navigator.userAgent : null,
+              })
+            } catch {
+              /* non-blocking — sign-in itself already succeeded */
+            }
           }
         }
 

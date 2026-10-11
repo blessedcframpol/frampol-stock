@@ -9,6 +9,7 @@ export interface Database {
           default_reorder_level: number
           low_stock_emails_enabled: boolean
           low_stock_recipients: string[]
+          audit_report_recipients: string[]
           timezone: string
           internal_client_id: string | null
           updated_at: string
@@ -19,6 +20,7 @@ export interface Database {
           default_reorder_level?: number
           low_stock_emails_enabled?: boolean
           low_stock_recipients?: string[]
+          audit_report_recipients?: string[]
           timezone?: string
           internal_client_id?: string | null
           updated_at?: string
@@ -29,6 +31,7 @@ export interface Database {
           default_reorder_level?: number
           low_stock_emails_enabled?: boolean
           low_stock_recipients?: string[]
+          audit_report_recipients?: string[]
           timezone?: string
           internal_client_id?: string | null
           updated_at?: string
@@ -1330,8 +1333,38 @@ export interface Database {
           p_user?: string | null
           p_from?: string | null
           p_to?: string | null
+          p_action?: string | null
         }
         Returns: Json
+      }
+      auth_sign_ins_read: {
+        Args: {
+          p_user?: string | null
+          p_from?: string | null
+          p_to?: string | null
+        }
+        Returns: Json
+      }
+      record_sign_in: {
+        Args: {
+          p_ip?: string | null
+          p_user_agent?: string | null
+        }
+        Returns: number
+      }
+      audit_exceptions_read: {
+        Args: {
+          p_from?: string | null
+          p_to?: string | null
+        }
+        Returns: Json
+      }
+      verify_audit_chain: {
+        Args: {
+          p_from_seq?: number | null
+          p_to_seq?: number | null
+        }
+        Returns: { broken_seq: number; detail: string }[]
       }
       apply_stock_movement: {
         Args: {
