@@ -42,6 +42,7 @@ import {
 import { formatDateDDMMYYYY } from "@/lib/utils"
 import { formatClientLabel } from "@/lib/client-label"
 import { PageHeader } from "@/components/page-nav"
+import { ToIssueQueue } from "@/components/to-issue-queue"
 
 type SortKey = "newest" | "oldest" | "status" | "client"
 
@@ -58,7 +59,13 @@ function clientLabel(r: StockRequestWithRelations): string {
   return r.client ? formatClientLabel(r.client) : r.client_id
 }
 
-export function StockRequestsList({ requests }: { requests: StockRequestWithRelations[] }) {
+export function StockRequestsList({
+  requests,
+  onRequestsChanged,
+}: {
+  requests: StockRequestWithRelations[]
+  onRequestsChanged?: () => void
+}) {
   const { role, user } = useAuth()
   const canCreate = canCreateStockRequest(role)
   const isAdmin = role === ADMIN
@@ -162,6 +169,14 @@ export function StockRequestsList({ requests }: { requests: StockRequestWithRela
           ) : undefined
         }
       />
+
+      {isAdmin ? (
+        <ToIssueQueue
+          requests={requests}
+          requesterName={requesterName}
+          onChanged={onRequestsChanged}
+        />
+      ) : null}
 
       {isAdmin && pendingByRequester.length > 0 ? (
         <Card>

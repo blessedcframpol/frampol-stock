@@ -1398,6 +1398,15 @@ export interface Database {
         Args: { p_request_id: string; p_reason?: string | null }
         Returns: undefined
       }
+      preview_issue_scan: {
+        Args: {
+          p_request_id: string
+          p_serial: string
+          p_already_scanned?: string[]
+          p_cloud_key?: string | null
+        }
+        Returns: Json
+      }
       issue_units: {
         Args: { p_request_id: string; p_scans: Json }
         Returns: Json

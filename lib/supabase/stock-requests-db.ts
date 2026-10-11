@@ -352,6 +352,58 @@ export type IssueUnitsResult = {
   serials: string[]
 }
 
+export type PreviewIssueScanResult =
+  | {
+      ok: true
+      serial: string
+      line_id: string
+      product_id: string
+      product_name: string
+      needs_cloud_key: boolean
+      cloud_key?: string | null
+      cloud_key_prompt?: string
+    }
+  | {
+      ok: false
+      serial: string
+      reason: string
+    }
+
+/** Validate one scan without writing. Plain-language reason when invalid. */
+export async function previewIssueScan(
+  sb: SB,
+  requestId: string,
+  serial: string,
+  alreadyScanned: string[] = [],
+  cloudKey?: string | null
+): Promise<PreviewIssueScanResult> {
+  const { data, error } = await sb.rpc("preview_issue_scan", {
+    p_request_id: requestId,
+    p_serial: serial,
+    p_already_scanned: alreadyScanned,
+    p_cloud_key: cloudKey ?? null,
+  })
+  if (error) throw error
+  const raw = (data ?? {}) as Partial<PreviewIssueScanResult> & { ok?: boolean; reason?: string }
+  if (raw.ok) {
+    return {
+      ok: true,
+      serial: String(raw.serial ?? serial),
+      line_id: String((raw as { line_id?: string }).line_id ?? ""),
+      product_id: String((raw as { product_id?: string }).product_id ?? ""),
+      product_name: String((raw as { product_name?: string }).product_name ?? ""),
+      needs_cloud_key: Boolean((raw as { needs_cloud_key?: boolean }).needs_cloud_key),
+      cloud_key: (raw as { cloud_key?: string | null }).cloud_key ?? null,
+      cloud_key_prompt: (raw as { cloud_key_prompt?: string }).cloud_key_prompt,
+    }
+  }
+  return {
+    ok: false,
+    serial: String(raw.serial ?? serial),
+    reason: String(raw.reason ?? "Scan was rejected"),
+  }
+}
+
 /** All-or-nothing: any failing serial writes nothing and is listed in `failures`. */
 export async function issueUnits(sb: SB, requestId: string, scans: IssueUnitScan[]): Promise<IssueUnitsResult> {
   const p_scans = scans.map((s) => {

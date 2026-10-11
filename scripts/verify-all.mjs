@@ -32,6 +32,7 @@ const SUITE = [
   { id: "080", file: "scripts/verify-080-p36-movement-payload.mjs" },
   { id: "081", file: "scripts/verify-081-rq1-requests.mjs" },
   { id: "082", file: "scripts/verify-082-rq2-roles.mjs" },
+  { id: "083", file: "scripts/verify-083-rq3-preview-scan.mjs" },
   { id: "movement", file: "scripts/verify-movement-transitions.mjs" },
 ]
 

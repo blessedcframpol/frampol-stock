@@ -6,7 +6,7 @@ import { useStockRequests } from "@/lib/supabase/stock-requests-db"
 import { AlertCircle, Loader2 } from "lucide-react"
 
 export default function RequestsPage() {
-  const { list, loading, error } = useStockRequests()
+  const { list, loading, error, refetch } = useStockRequests()
 
   return (
     <DashboardShell>
@@ -21,7 +21,7 @@ export default function RequestsPage() {
           <p>{error.message}</p>
         </div>
       ) : (
-        <StockRequestsList requests={list} />
+        <StockRequestsList requests={list} onRequestsChanged={() => void refetch()} />
       )}
     </DashboardShell>
   )
