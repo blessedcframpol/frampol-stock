@@ -73,12 +73,11 @@ export function fetchKitHistory(itemId: string): Promise<KitHistory | null> {
   if (cached) return Promise.resolve(cached)
   const pending = inflight.get(itemId)
   if (pending) return pending
-  const request = getSupabaseClient()
-    .rpc("kit_history", { p_item_id: itemId })
-    .then(({ data, error }: { data: KitHistory | null; error: { message: string } | null }) => {
+  const request = Promise.resolve(getSupabaseClient().rpc("kit_history", { p_item_id: itemId }))
+    .then(({ data, error }) => {
       inflight.delete(itemId)
       if (error) throw error
-      const history = (data ?? { found: false }) as KitHistory
+      const history = (data ?? { found: false }) as unknown as KitHistory
       if (history.found) historyCache.set(itemId, history)
       return history
     })

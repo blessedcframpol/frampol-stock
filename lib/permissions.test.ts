@@ -2,13 +2,20 @@ import { describe, expect, it } from "vitest"
 import {
   canAccessReports,
   canAccessRequests,
+  canAccessSettings,
   canAmendTransaction,
   canCreateStockRequest,
   canChangeStockPool,
   canCompleteInspection,
   canEditInventory,
+  canFulfillStockRequests,
+  canManageInvoices,
   canManageUsers,
+  canPrivilegedAdminOps,
   canRecordStockMovement,
+  canViewAuditLog,
+  canViewInvoices,
+  canViewUsers,
   type AppRole,
 } from "@/lib/permissions"
 
@@ -17,7 +24,7 @@ const ROLES: Array<AppRole | null> = ["admin", "sales", "accounts", "technicians
 describe("canRecordStockMovement", () => {
   it.each([
     ["admin", true],
-    ["technicians", true],
+    ["technicians", false],
     ["sales", false],
     ["accounts", false],
     ["viewer", false],
@@ -65,17 +72,12 @@ describe("canAmendTransaction", () => {
   })
 
   it("technician is true only when createdBy === currentUserId", () => {
-    expect(canAmendTransaction("technicians", uid, uid)).toBe(true)
+    expect(canAmendTransaction("technicians", uid, uid)).toBe(false)
     expect(canAmendTransaction("technicians", other, uid)).toBe(false)
   })
 
-  it("technician is false when createdBy is null", () => {
-    expect(canAmendTransaction("technicians", null, uid)).toBe(false)
-    expect(canAmendTransaction("technicians", undefined, uid)).toBe(false)
-  })
-
-  it("sales, accounts, and viewer are false regardless of createdBy", () => {
-    for (const role of ["sales", "accounts", "viewer"] as const) {
+  it("non-admin roles are false regardless of createdBy", () => {
+    for (const role of ["sales", "accounts", "technicians", "viewer"] as const) {
       expect(canAmendTransaction(role, uid, uid)).toBe(false)
       expect(canAmendTransaction(role, other, uid)).toBe(false)
       expect(canAmendTransaction(role, null, uid)).toBe(false)
@@ -97,7 +99,7 @@ describe("canAmendTransaction", () => {
       { role: "admin", own: true, other: true, nullCreator: true },
       { role: "sales", own: false, other: false, nullCreator: false },
       { role: "accounts", own: false, other: false, nullCreator: false },
-      { role: "technicians", own: true, other: false, nullCreator: false },
+      { role: "technicians", own: false, other: false, nullCreator: false },
       { role: "viewer", own: false, other: false, nullCreator: false },
       { role: null, own: false, other: false, nullCreator: false },
     ])
@@ -117,13 +119,20 @@ describe("canCompleteInspection", () => {
   })
 })
 
-describe("viewer permissions", () => {
-  it("can read requests and reports but cannot use write capabilities", () => {
+describe("Admin viewer permissions", () => {
+  it("reads across departments but never writes", () => {
     expect(canAccessRequests("viewer")).toBe(true)
     expect(canAccessReports("viewer")).toBe(true)
+    expect(canViewInvoices("viewer")).toBe(true)
+    expect(canViewAuditLog("viewer")).toBe(true)
+    expect(canViewUsers("viewer")).toBe(true)
+    expect(canAccessSettings("viewer")).toBe(true)
     expect(canCreateStockRequest("viewer")).toBe(false)
     expect(canRecordStockMovement("viewer")).toBe(false)
     expect(canEditInventory("viewer")).toBe(false)
     expect(canManageUsers("viewer")).toBe(false)
+    expect(canManageInvoices("viewer")).toBe(false)
+    expect(canFulfillStockRequests("viewer")).toBe(false)
+    expect(canPrivilegedAdminOps("viewer")).toBe(false)
   })
 })

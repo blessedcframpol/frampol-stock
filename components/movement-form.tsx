@@ -62,7 +62,8 @@ import { uploadDocument, type UploadDocumentKind } from "@/lib/upload-documents"
 import { parseSaleDateOverride, type InboundCreateDefaults } from "@/lib/supabase/movement-utils"
 import { DEFAULT_ORG_TIMEZONE, todayBusinessDate } from "@/lib/business-date.mjs"
 import { fetchAppSettings } from "@/lib/settings"
-import { isFortigateProductName, splitDelimitedValues, cloudKeysMapForSerials } from "@/lib/fortigate"
+import { productRequiresCloudKey, splitDelimitedValues, cloudKeysMapForSerials } from "@/lib/fortigate"
+import type { NotInvoicedKind } from "@/lib/invoices"
 import { useAuth } from "@/lib/auth-context"
 import { prefillMovementType } from "@/lib/alerts"
 import { canRecordStockMovement } from "@/lib/permissions"
@@ -174,6 +175,7 @@ export function MovementForm({
   const [invoiceNumber, setInvoiceNumber] = useState("")
   const [invoiceChoice, setInvoiceChoice] = useState<InvoiceChoice | "">("")
   const [invoiceReason, setInvoiceReason] = useState("")
+  const [notInvoicedKind, setNotInvoicedKind] = useState<NotInvoicedKind | "">("")
   const [notes, setNotes] = useState("")
   const [toLocation, setToLocation] = useState("Warehouse A")
   const [returnPool, setReturnPool] = useState<"" | "sale" | "demo">("")
@@ -306,6 +308,7 @@ export function MovementForm({
     invoiceChoice,
     invoiceNumber,
     invoiceReason,
+    notInvoicedKind,
     returnDate,
     returnPool,
     intakeCategory,
@@ -355,9 +358,19 @@ export function MovementForm({
   const showWarehouse = requiresWarehouseLocation(selectedType)
   const showDeliveryNote = selectedType === "Sale" || selectedType === "Inbound"
   const showDecommissionDoc = selectedType === "Decommissioned"
+  const selectedRequiresCloudKey = useMemo(() => {
+    const name = productName.trim()
+    if (!name) return false
+    const match = inventory.find(
+      (item) =>
+        item.name.trim().toLowerCase() === name.toLowerCase() &&
+        normalizeInventoryVendor(item.vendor) === normalizeInventoryVendor(vendor)
+    )
+    return productRequiresCloudKey(match)
+  }, [inventory, productName, vendor])
+
   const showCloudKeys =
-    OUTBOUND_LIKE_MOVEMENTS.includes(selectedType as TransactionType) &&
-    isFortigateProductName(productName.trim())
+    OUTBOUND_LIKE_MOVEMENTS.includes(selectedType as TransactionType) && selectedRequiresCloudKey
 
   function selectType(value: string) {
     if (!isSelectableMovementType(value)) return
@@ -406,6 +419,7 @@ export function MovementForm({
     setInvoiceNumber("")
     setInvoiceChoice("")
     setInvoiceReason("")
+    setNotInvoicedKind("")
     setNotes("")
     setDisposalReason("")
     setAuthorisedBy("")
@@ -575,6 +589,10 @@ export function MovementForm({
         invoiceNumber: invoiceNumber.trim() || undefined,
         invoiceChoice: showInvoice ? invoiceChoice || undefined : undefined,
         invoiceReason: invoiceReason.trim() || undefined,
+        notInvoicedKind:
+          showInvoice && invoiceChoice === "not_invoiced" && notInvoicedKind
+            ? notInvoicedKind
+            : undefined,
         notes: notes.trim() || undefined,
         returnPool:
           showReturnPool && (returnPool === "sale" || returnPool === "demo") ? returnPool : undefined,
@@ -1141,9 +1159,11 @@ export function MovementForm({
           choice={invoiceChoice}
           invoiceNumber={invoiceNumber}
           reason={invoiceReason}
+          kind={notInvoicedKind}
           onChoice={setInvoiceChoice}
           onInvoiceNumber={setInvoiceNumber}
           onReason={setInvoiceReason}
+          onKind={setNotInvoicedKind}
         />
       )}
 

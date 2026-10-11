@@ -27,6 +27,8 @@ import {
   LogOut,
   ScrollText,
   UsersRound,
+  Volume2,
+  VolumeX,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Input } from "@/components/ui/input"
@@ -54,12 +56,14 @@ import { useAuth } from "@/lib/auth-context"
 import {
   canAccessReports,
   canAccessRequests,
-  canManageInvoices,
+  canViewInvoices,
   canAccessSettings,
   canEditInventory,
-  canManageUsers,
+  canRecordStockMovement,
+  canViewUsers,
   canViewAppLogs,
-  VIEWER,
+  isValidRole,
+  ROLE_LABELS,
   type AppRole,
 } from "@/lib/permissions"
 import { useInboxNotifications } from "@/hooks/use-inbox-notifications"
@@ -76,7 +80,7 @@ import { useOrgTimezone } from "@/hooks/use-org-timezone"
 const inventoryChildren = [
   { href: "/inventory/dispatched", label: "Dispatched" },
   { href: "/inventory/inspections", label: "Inspections" },
-  { href: "/inventory/movement", label: "Inventory movement", viewerHidden: true as const },
+  { href: "/inventory/movement", label: "Inventory movement", movementOnly: true as const },
   { href: "/inventory/remediation", label: "Remediation" },
   { href: "/inventory/stock-take", label: "Stock take", adminOnly: true as const },
   { href: "/inventory/trash", label: "Trash", adminOnly: true as const },
@@ -86,7 +90,8 @@ type NavChild = {
   href: string
   label: string
   adminOnly?: boolean
-  viewerHidden?: boolean
+  /** Shown only to roles that can record stock movements (admin). */
+  movementOnly?: boolean
 }
 type NavItem = {
   href: string
@@ -126,7 +131,7 @@ function filterBottomNavForRole(role: string | null | undefined): BottomNavEntry
   return bottomNavItems.filter((item) => {
     if (item.href === "/settings") return canAccessSettings(r)
     if (!item.adminOnly) return true
-    if (item.href === "/users") return canManageUsers(r)
+    if (item.href === "/users") return canViewUsers(r)
     return canViewAppLogs(r)
   })
 }
@@ -177,7 +182,7 @@ function filterNavByRole(items: NavItem[], role: string | null | undefined): Nav
   return items
     .filter((item) => {
       if (item.href === "/reports") return canAccessReports(r)
-      if (item.href === "/invoices") return canManageInvoices(r)
+      if (item.href === "/invoices") return canViewInvoices(r)
       if (item.href === "/requests") return canAccessRequests(r)
       return true
     })
@@ -188,7 +193,7 @@ function filterNavByRole(items: NavItem[], role: string | null | undefined): Nav
           children: item.children.filter(
             (c) =>
               (!c.adminOnly || canEditInventory(r)) &&
-              (!c.viewerHidden || r !== VIEWER)
+              (!c.movementOnly || canRecordStockMovement(r))
           ),
         }
       }
@@ -498,13 +503,19 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
     () => filterNavByRole(allNavItems, role),
     [role]
   )
-  const { unread: inboxUnread, count: inboxCount, markRead: markInboxRead } = useInboxNotifications()
+  const {
+    unread: inboxUnread,
+    count: inboxCount,
+    markRead: markInboxRead,
+    muted: notificationsMuted,
+    setMuted: setNotificationsMuted,
+  } = useInboxNotifications()
   const bottomNavFiltered = useMemo(() => filterBottomNavForRole(role), [role])
   const timeZone = useOrgTimezone()
   const headerToday = mounted ? formatHeaderToday(timeZone) : "Today"
   const displayName = profile?.display_name || user?.email?.split("@")[0] || "User"
   const initials = initialsFromDisplayName(displayName)
-  const roleLabel = role ? role.charAt(0).toUpperCase() + role.slice(1) : ""
+  const roleLabel = role ? (isValidRole(role) ? ROLE_LABELS[role] : role) : ""
 
   const searchSuggestions = useMemo(
     () =>
@@ -799,13 +810,27 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                 <div className="flex flex-col max-h-[min(400px,80vh)] min-w-0">
                   <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
                     <h3 className="text-sm font-semibold text-foreground">Notifications</h3>
-                    {(alertCount > 0 || inboxCount > 0) && (
-                      <span className="text-xs text-muted-foreground">
-                        {inboxCount > 0 && `${inboxCount} message${inboxCount !== 1 ? "s" : ""}`}
-                        {inboxCount > 0 && alertCount > 0 && " · "}
-                        {alertCount > 0 && `${alertCount} alert${alertCount !== 1 ? "s" : ""}`}
-                      </span>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {(alertCount > 0 || inboxCount > 0) && (
+                        <span className="text-xs text-muted-foreground">
+                          {inboxCount > 0 && `${inboxCount} message${inboxCount !== 1 ? "s" : ""}`}
+                          {inboxCount > 0 && alertCount > 0 && " · "}
+                          {alertCount > 0 && `${alertCount} alert${alertCount !== 1 ? "s" : ""}`}
+                        </span>
+                      )}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="size-7 text-muted-foreground hover:text-foreground"
+                        aria-pressed={notificationsMuted}
+                        aria-label={notificationsMuted ? "Unmute notification sound" : "Mute notification sound"}
+                        title={notificationsMuted ? "Notification sound is off" : "Notification sound is on"}
+                        onClick={() => setNotificationsMuted(!notificationsMuted)}
+                      >
+                        {notificationsMuted ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
+                      </Button>
+                    </div>
                   </div>
                   {inboxUnread.length > 0 && (
                     <div className="border-b border-border px-2 py-2 space-y-1 shrink-0 max-h-[140px] overflow-y-auto">

@@ -211,6 +211,8 @@ export function computeMovementResult(
     invoiceChoice?: "number" | "pending" | "not_invoiced"
     /** Required when invoiceChoice is not_invoiced. */
     invoiceReason?: string
+    /** Required when invoiceChoice is not_invoiced. */
+    notInvoicedKind?: "internal" | "complimentary"
     notes?: string
     /** For Rentals: due date (ISO date). Defaults to DEFAULT_RENTAL_DAYS from today. */
     returnDate?: string
@@ -263,6 +265,7 @@ export function computeMovementResult(
     invoiceNumber: invoiceNumberArg,
     invoiceChoice,
     invoiceReason,
+    notInvoicedKind,
     notes,
     returnDate,
     disposalReason,
@@ -624,7 +627,12 @@ export function computeMovementResult(
       invoiceApplies && invoiceChoice
         ? mergeRecordMeta(txnMetadata, {
             invoice_choice: invoiceChoice,
-            ...(invoiceChoice === "not_invoiced" ? { invoice_reason: (invoiceReason ?? "").trim() } : {}),
+            ...(invoiceChoice === "not_invoiced"
+              ? {
+                  invoice_reason: (invoiceReason ?? "").trim(),
+                  not_invoiced_kind: notInvoicedKind,
+                }
+              : {}),
           })
         : txnMetadata
     newTransactions.push({

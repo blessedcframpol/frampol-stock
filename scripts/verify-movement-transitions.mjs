@@ -54,7 +54,7 @@ export async function runChecks(ctx) {
   const pass = (name, reason) => ctx.pass(name, reason)
   const fail = (name, reason) => ctx.fail(name, reason)
 
-  await ctx.createFixtureUser("admin", "harness-move-admin@test.local")
+  const adminId = await ctx.createFixtureUser("admin", "harness-move-admin@test.local")
   const techId = await ctx.createFixtureUser("technicians", "harness-move-technicians@test.local")
   const viewerId = await ctx.createFixtureUser("viewer", "harness-move-viewer@test.local")
   const salesId = await ctx.createFixtureUser("sales", "harness-move-sales@test.local")
@@ -186,7 +186,16 @@ export async function runChecks(ctx) {
   }
 
   const saleItem = await loadItem(saleSerial)
-  const badSale = await applyMoveAs(techId, saleItem, "Rentals", "Sold", saleItem.location)
+  const techBlocked = await applyMoveAs(techId, saleItem, "Sale", "Sold", "Client Site", {
+    item: { client: "Acme Holder", assigned_to: null, return_date: null, poc_out_date: null },
+  })
+  if (techBlocked && /Only an admin can record stock movements/i.test(techBlocked)) {
+    pass("tech_movement_refused", "technicians cannot apply_stock_movement after RQ2")
+  } else {
+    fail("tech_movement_refused", techBlocked ?? "expected admin-only gate")
+  }
+
+  const badSale = await applyMoveAs(adminId, saleItem, "Rentals", "Sold", saleItem.location)
   if (badSale && /Invalid movement/i.test(badSale)) {
     pass("invalid_transition", "Rentals from POC raises via apply_stock_movement")
   } else {
@@ -196,7 +205,7 @@ export async function runChecks(ctx) {
   const beforeSale = await db.query(
     `SELECT count(*)::int AS n FROM public.inventory_items WHERE deleted_at IS NULL AND status = 'POC'`,
   )
-  const saleError = await applyMoveAs(techId, saleItem, "Sale", "Sold", "Client Site", {
+  const saleError = await applyMoveAs(adminId, saleItem, "Sale", "Sold", "Client Site", {
     item: { return_date: null, client: "Acme Holder", poc_out_date: "2026-06-01" },
   })
   if (saleError) {
@@ -328,7 +337,7 @@ export async function runChecks(ctx) {
   )
 
   const stockItem = await loadItem(stockSerial)
-  const stockSaleError = await applyMoveAs(techId, stockItem, "Sale", "Sold", "Delivered")
+  const stockSaleError = await applyMoveAs(adminId, stockItem, "Sale", "Sold", "Delivered")
   const stockSold = await loadItem(stockSerial)
   if (!stockSaleError && stockSold.status === "Sold" && stockSold.location === "Delivered") {
     pass("normal_sale", "normal Sale location Delivered")
@@ -350,7 +359,7 @@ export async function runChecks(ctx) {
     [rentTransferSerial, "Rentals"],
   ]) {
     const before = await loadItem(serial)
-    const error = await applyMoveAs(techId, before, "Transfer", before.status, "Warehouse B")
+    const error = await applyMoveAs(adminId, before, "Transfer", before.status, "Warehouse B")
     const after = await loadItem(serial)
     const page = await ctx.asUser(techId, async () => {
       const row = await db.query(
@@ -381,14 +390,14 @@ export async function runChecks(ctx) {
 
   // Transfer keeps status — it cannot enter Maintenance from In Stock (matrix already encodes this).
   const maintItem = await loadItem(maintSerial)
-  const blocked = await applyMoveAs(techId, maintItem, "Transfer", "Maintenance", "Service Center")
+  const blocked = await applyMoveAs(adminId, maintItem, "Transfer", "Maintenance", "Service Center")
   if (blocked && /Invalid movement/i.test(blocked)) {
     pass("maint_ungated", "Transfer cannot enter Maintenance")
   } else {
     fail("maint_ungated", blocked ?? "expected Invalid movement")
   }
 
-  const fakeMaint = await applyMoveAs(techId, maintItem, "Sale", "Maintenance", "Service Center")
+  const fakeMaint = await applyMoveAs(adminId, maintItem, "Sale", "Maintenance", "Service Center")
   if (fakeMaint && /Invalid movement/i.test(fakeMaint)) {
     pass("maint_via_sale", "Sale cannot enter Maintenance")
   } else {
@@ -404,7 +413,7 @@ export async function runChecks(ctx) {
   await db.query(`SELECT set_config('app.movement_type', '', true)`)
   await db.query(`SELECT set_config('app.reversal_original_type', '', true)`)
   const inMaintenance = await loadItem(maintSerial)
-  const backError = await applyMoveAs(techId, inMaintenance, "Inbound", "In Stock", "Warehouse A")
+  const backError = await applyMoveAs(adminId, inMaintenance, "Inbound", "In Stock", "Warehouse A")
   const repaired = await loadItem(maintSerial)
   if (!backError && inMaintenance.status === "Maintenance" && repaired.status === "In Stock") {
     pass("maint_reversal_path", "Maintenance via Inbound reversal, then Inbound back to stock")

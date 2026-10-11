@@ -24,12 +24,9 @@ export type ReturnsReport = {
   sites: ReturnsSite[]
 }
 
-export function fetchReturnsReport(from: string, to: string): Promise<ReturnsReport> {
-  return getSupabaseClient()
-    .rpc("returns_report", { p_from: from, p_to: to })
-    .then(({ data, error }: { data: ReturnsReport | null; error: { message: string } | null }) => {
-      if (error) throw error
-      if (!data) throw new Error("The returns report was empty")
-      return data
-    })
+export async function fetchReturnsReport(from: string, to: string): Promise<ReturnsReport> {
+  const { data, error } = await getSupabaseClient().rpc("returns_report", { p_from: from, p_to: to })
+  if (error) throw error
+  if (!data) throw new Error("The returns report was empty")
+  return data as unknown as ReturnsReport
 }

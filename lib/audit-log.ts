@@ -24,19 +24,16 @@ export type AuditLogFilters = {
   to: string
 }
 
-export function fetchAuditLog(filters: AuditLogFilters): Promise<AuditLogRow[]> {
-  return getSupabaseClient()
-    .rpc("audit_log_read", {
-      p_table: filters.table || null,
-      p_row: filters.row || null,
-      p_user: filters.user || null,
-      p_from: filters.from || null,
-      p_to: filters.to || null,
-    })
-    .then(({ data, error }: { data: AuditLogRow[] | null; error: { message: string } | null }) => {
-      if (error) throw new Error(error.message)
-      return data ?? []
-    })
+export async function fetchAuditLog(filters: AuditLogFilters): Promise<AuditLogRow[]> {
+  const { data, error } = await getSupabaseClient().rpc("audit_log_read", {
+    p_table: filters.table || null,
+    p_row: filters.row || null,
+    p_user: filters.user || null,
+    p_from: filters.from || null,
+    p_to: filters.to || null,
+  })
+  if (error) throw new Error(error.message)
+  return (data ?? []) as unknown as AuditLogRow[]
 }
 
 export function formatAuditValue(value: unknown): string {

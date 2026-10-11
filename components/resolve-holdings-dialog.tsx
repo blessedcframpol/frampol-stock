@@ -324,9 +324,11 @@ function ResolveRow({
                     choice={draft.invoiceChoice}
                     invoiceNumber={draft.invoiceNumber}
                     reason={draft.invoiceReason}
+                    kind={draft.notInvoicedKind}
                     onChoice={(choice: InvoiceChoice) => onPatch({ invoiceChoice: choice })}
                     onInvoiceNumber={(value) => onPatch({ invoiceNumber: value })}
                     onReason={(value) => onPatch({ invoiceReason: value })}
+                    onKind={(value) => onPatch({ notInvoicedKind: value })}
                   />
                 </div>
               ) : null}

@@ -5,7 +5,7 @@ import { useParams } from "next/navigation"
 import { DashboardShell } from "@/components/dashboard-shell"
 import { StockRequestForm } from "@/components/stock-request-form"
 import { useAuth } from "@/lib/auth-context"
-import { ADMIN, canCreateStockRequest } from "@/lib/permissions"
+import { canCreateStockRequest } from "@/lib/permissions"
 import { getSupabaseClient } from "@/lib/supabase/client"
 import { fetchStockRequestById, type StockRequestWithRelations } from "@/lib/supabase/stock-requests-db"
 import { Loader2 } from "lucide-react"
@@ -69,7 +69,7 @@ export default function EditStockRequestPage() {
   }, [id])
 
   const isOwner = Boolean(user?.id && row?.created_by === user.id)
-  const canEdit = row?.status === "draft" && (isOwner || role === ADMIN) && canCreateStockRequest(role)
+  const canEdit = row?.review_state === "rejected" && isOwner && canCreateStockRequest(role)
 
   if (!id) {
     return (
@@ -124,7 +124,7 @@ export default function EditStockRequestPage() {
           <p className="text-sm text-muted-foreground">
             {!row
               ? "Request not found or you don’t have access."
-              : "Only draft requests from the owner can be edited here."}
+              : "Only the requester can edit and resubmit a rejected request."}
           </p>
         </div>
       </DashboardShell>
@@ -135,7 +135,7 @@ export default function EditStockRequestPage() {
     <DashboardShell>
       <StockRequestForm
         key={row.id}
-        mode="edit"
+        mode="resubmit"
         initialRequest={row}
         onCancelHref={`/requests/${row.id}`}
       />

@@ -1,6 +1,10 @@
 import type { InventoryItem, TransactionType } from "@/lib/data"
 import { INTERNAL_LOCATIONS, isInternalLocation } from "@/lib/data"
-import { invoiceChoiceProblem, type InvoiceChoice } from "@/lib/invoices"
+import {
+  invoiceChoiceProblem,
+  type InvoiceChoice,
+  type NotInvoicedKind,
+} from "@/lib/invoices"
 import { validateMovementForItem } from "@/lib/supabase/movement-utils"
 import type { LucideIcon } from "lucide-react"
 import {
@@ -143,6 +147,7 @@ export type MovementFormFields = {
   invoiceChoice: InvoiceChoice | ""
   invoiceNumber: string
   invoiceReason: string
+  notInvoicedKind: NotInvoicedKind | ""
   returnDate: string
   returnPool: "" | "sale" | "demo"
   intakeCategory: string
@@ -328,7 +333,12 @@ export function submitBlockMessage(
   }
 
   if (requiresInvoice(fields.type)) {
-    const inv = invoiceChoiceProblem(fields.invoiceChoice, fields.invoiceNumber, fields.invoiceReason)
+    const inv = invoiceChoiceProblem(
+      fields.invoiceChoice,
+      fields.invoiceNumber,
+      fields.invoiceReason,
+      fields.notInvoicedKind
+    )
     if (inv) return inv
   }
 

@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { useEffect, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { StatusPill } from "@/components/fs/status-pill"
+import { RequestStatusPill } from "@/components/request-status-pill"
 import { Button } from "@/components/ui/button"
 import { MessageSquare, Clock, ChevronRight } from "lucide-react"
 import { getSupabaseClient } from "@/lib/supabase/client"
@@ -16,6 +16,8 @@ import { formatClientLabel } from "@/lib/client-label"
 import { todayBusinessDate } from "@/lib/business-date.mjs"
 import { useOrgTimezone } from "@/hooks/use-org-timezone"
 import { ageInDays, formatAgeDays } from "@/lib/format-display"
+import { useRequestDisplayStatuses } from "@/hooks/use-request-display-statuses"
+import { displayStatusLabel } from "@/lib/stock-request-statuses"
 
 const PREVIEW_COUNT = 6
 
@@ -43,6 +45,8 @@ export function LatestRequests() {
       cancelled = true
     }
   }, [])
+
+  const displayStatuses = useRequestDisplayStatuses(latest)
 
   return (
     <Card className="flex h-full min-h-[300px] flex-col sm:min-h-[340px]">
@@ -72,7 +76,8 @@ export function LatestRequests() {
                 const first = req.stock_request_lines?.[0]?.product_name
                 subtitleParts.push(first ? `${first}${lineCount > 1 ? ` +${lineCount - 1}` : ""}` : `${lineCount} lines`)
               }
-              const subtitle = subtitleParts.join(" · ") || req.status
+              const displayStatus = displayStatuses[req.id]
+              const subtitle = subtitleParts.join(" · ") || displayStatusLabel(displayStatus)
               const days = ageInDays(req.created_at, today)
               const fullDate = formatDateDDMMYYYY(req.created_at)
 
@@ -93,11 +98,13 @@ export function LatestRequests() {
                       <MessageSquare className="h-4 w-4 text-brand" />
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-foreground">{title}</p>
+                      <p className="truncate text-sm font-medium text-foreground">
+                        {req.request_number} · {title}
+                      </p>
                       <p className="truncate text-xs text-muted-foreground">{subtitle}</p>
                     </div>
                     <div className="shrink-0 text-right">
-                      <StatusPill value={req.status} />
+                      <RequestStatusPill status={displayStatus} />
                       <div className="mt-1 flex items-center justify-end gap-1 text-[10px] text-muted-foreground">
                         <Clock className="size-3 shrink-0 opacity-80" aria-hidden />
                         <span title={fullDate}>{days == null ? fullDate : formatAgeDays(days)}</span>

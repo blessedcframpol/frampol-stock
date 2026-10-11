@@ -1,6 +1,10 @@
 import { isOverdue, returnAgeDays } from "@/lib/alerts"
 import { INTERNAL_LOCATIONS, type InventoryItem } from "@/lib/data"
-import { invoiceChoiceProblem, type InvoiceChoice } from "@/lib/invoices"
+import {
+  invoiceChoiceProblem,
+  type InvoiceChoice,
+  type NotInvoicedKind,
+} from "@/lib/invoices"
 import { latestRentalStart } from "@/lib/rental-conversion"
 
 /** Messages match public.bulk_resolve_holdings. */
@@ -47,6 +51,7 @@ export type ResolveDraft = {
   invoiceChoice: InvoiceChoice | ""
   invoiceNumber: string
   invoiceReason: string
+  notInvoicedKind: NotInvoicedKind | ""
   rentalEnd: string
   rentalEndTouched: boolean
   serverErrors: string[]
@@ -120,6 +125,7 @@ export function resolveDraftFromItem(
     invoiceChoice: "",
     invoiceNumber: "",
     invoiceReason: "",
+    notInvoicedKind: "",
     rentalEnd: today.slice(0, 10),
     rentalEndTouched: false,
     serverErrors: [],
@@ -151,7 +157,12 @@ export function resolveRowProblems(draft: ResolveDraft, today: string): string[]
     return messages
   }
 
-  const choiceProblem = invoiceChoiceProblem(draft.invoiceChoice, draft.invoiceNumber, draft.invoiceReason)
+  const choiceProblem = invoiceChoiceProblem(
+    draft.invoiceChoice,
+    draft.invoiceNumber,
+    draft.invoiceReason,
+    draft.notInvoicedKind
+  )
   if (choiceProblem) messages.push(choiceProblem)
   if (draft.kind === "Rental") {
     if (!draft.starlink) messages.push(RESOLVE_STARLINK)
@@ -182,7 +193,10 @@ export function resolveHoldingRow(draft: ResolveDraft): Record<string, string> {
   }
   if (draft.invoiceChoice) row.invoice_choice = draft.invoiceChoice
   if (draft.invoiceChoice === "number") row.invoice_number = draft.invoiceNumber.trim()
-  if (draft.invoiceChoice === "not_invoiced") row.invoice_reason = draft.invoiceReason.trim()
+  if (draft.invoiceChoice === "not_invoiced") {
+    row.invoice_reason = draft.invoiceReason.trim()
+    if (draft.notInvoicedKind) row.not_invoiced_kind = draft.notInvoicedKind
+  }
   if (draft.kind === "Rental") row.rental_end = (draft.rentalEnd || draft.actionDate).slice(0, 10)
   return row
 }

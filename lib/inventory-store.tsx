@@ -63,6 +63,8 @@ export interface MovementParams {
   invoiceChoice?: "number" | "pending" | "not_invoiced"
   /** Required when invoiceChoice is not_invoiced. */
   invoiceReason?: string
+  /** Required when invoiceChoice is not_invoiced. */
+  notInvoicedKind?: "internal" | "complimentary"
   notes?: string
   /** For Rentals: when the kit is due to be returned (ISO date). Defaults to 30 days from today if omitted. */
   returnDate?: string
@@ -306,6 +308,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
         invoiceNumber,
         invoiceChoice,
         invoiceReason,
+        notInvoicedKind,
         notes,
         returnDate,
         disposalReason,
@@ -369,6 +372,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
         invoiceNumber,
         invoiceChoice,
         invoiceReason,
+        notInvoicedKind,
         notes,
         returnDate,
         disposalReason,

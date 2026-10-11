@@ -88,8 +88,10 @@ export interface InventoryItem {
   dateAdded: string
   location: string
   client?: string
-  /** FortiGate / vendor cloud key; set on outbound scan, optional on inbound */
+  /** Vendor cloud key; set on outbound scan when product_lines.requires_cloud_key */
   cloudKey?: string
+  /** From product_lines.requires_cloud_key via inventory join. */
+  requiresCloudKey?: boolean
   notes?: string
   /** Person, client, or project this item is assigned to */
   assignedTo?: string
@@ -102,8 +104,6 @@ export interface InventoryItem {
   /** When this item is due to be returned (for rental alerts; past = overdue) */
   returnDate?: string
   assignmentHistory?: AssignmentEntry[]
-  /** Set when allocated to a stock request line (Supabase). */
-  reservedForRequestLineId?: string
   /** When set (ISO), item is in trash; omitted from normal inventory lists. */
   deletedAt?: string
 }

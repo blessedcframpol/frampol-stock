@@ -274,8 +274,9 @@ export async function withHarness(options, fn) {
     }
 
     const run = Promise.resolve().then(() => fn(ctx))
+    let timeoutId
     const timeout = new Promise((_, reject) => {
-      setTimeout(() => {
+      timeoutId = setTimeout(() => {
         timedOut = true
         reject(new Error(`withHarness: timed out after ${timeoutMs}ms`))
       }, timeoutMs)
@@ -286,6 +287,8 @@ export async function withHarness(options, fn) {
     } catch (error) {
       runError = error
       fail(results, "harness_run", error instanceof Error ? error.message : String(error))
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId)
     }
   } finally {
     try {

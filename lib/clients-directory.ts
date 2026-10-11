@@ -27,7 +27,8 @@ export type HeldUnit = {
   returnDate: string | null
 }
 
-export const OPEN_REQUEST_STATUSES = new Set(["draft", "submitted", "in_progress", "serviced"])
+/** Request review_state values that still need somebody to act. */
+export const OPEN_REQUEST_STATUSES = new Set(["submitted", "awaiting_approval"])
 
 export function isPlaceholder(value: string | null | undefined): boolean {
   return PLACEHOLDERS.has((value ?? "").trim().toLowerCase())
