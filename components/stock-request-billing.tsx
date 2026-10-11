@@ -1,11 +1,12 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 import {
   Table,
   TableBody,
@@ -14,18 +15,20 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { InvoiceChoiceFields } from "@/components/invoice-choice-fields"
+import { RequestStatusPill } from "@/components/request-status-pill"
 import { useAuth } from "@/lib/auth-context"
 import { getSupabaseClient } from "@/lib/supabase/client"
 import { formatClientLabel } from "@/lib/client-label"
 import {
-  fetchAssignedCountsByLineId,
+  fetchIssuedCountsByLineId,
+  fetchRequestDisplayStatus,
   fetchStockRequestById,
-  markRequestInvoiced,
-  uploadInvoiceDocumentForRequest,
+  setRequestInvoice,
   type StockRequestWithRelations,
 } from "@/lib/supabase/stock-requests-db"
-import { canMarkRequestInvoiced, lineRequiresSerialAssignment } from "@/lib/stock-request-rules"
-import { formatDateDDMMYYYY } from "@/lib/utils"
+import { invoiceChoiceProblem, type InvoiceChoice, type NotInvoicedKind } from "@/lib/invoices"
+import { displayStatusOrReviewState, type RequestDisplayStatus } from "@/lib/stock-request-statuses"
 import { toast } from "sonner"
 import { toastFromCaughtError } from "@/lib/toast-reportable-error"
 import {
@@ -34,18 +37,39 @@ import {
   notifySessionExpired,
   signedOutLoadError,
 } from "@/lib/unauthorized"
-import { AlertCircle, ExternalLink, Loader2 } from "lucide-react"
+import { ExternalLink, Loader2 } from "lucide-react"
 import { PageHeader } from "@/components/page-nav"
 import { PageBreadcrumbs } from "@/components/page-breadcrumbs"
 import { SignedStorageLink } from "@/components/signed-storage-link"
 import { canInvoiceStockRequests } from "@/lib/permissions"
 
+type Loaded = {
+  request: StockRequestWithRelations | null
+  issuedByLine: Record<string, number>
+  displayStatus: RequestDisplayStatus | null
+}
+
+const EMPTY: Loaded = { request: null, issuedByLine: {}, displayStatus: null }
+
+async function load(requestId: string): Promise<Loaded> {
+  const sb = getSupabaseClient()
+  const request = await fetchStockRequestById(sb, requestId)
+  if (!request) return EMPTY
+  const [issuedByLine, displayStatus] = await Promise.all([
+    fetchIssuedCountsByLineId(
+      sb,
+      request.stock_request_lines.map((l) => l.id)
+    ),
+    fetchRequestDisplayStatus(sb, requestId).catch(() => null),
+  ])
+  return { request, issuedByLine, displayStatus }
+}
+
 export function StockRequestBilling({ requestId }: { requestId: string }) {
   const router = useRouter()
-  const { user, role } = useAuth()
+  const { role } = useAuth()
   const canInvoice = canInvoiceStockRequests(role)
-  const [row, setRow] = useState<StockRequestWithRelations | null>(null)
-  const [assigned, setAssigned] = useState<Record<string, number>>({})
+  const [data, setData] = useState<Loaded>(EMPTY)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [loadedForId, setLoadedForId] = useState(requestId)
@@ -53,102 +77,94 @@ export function StockRequestBilling({ requestId }: { requestId: string }) {
     setLoadedForId(requestId)
     setLoading(true)
     setLoadError(null)
-    setRow(null)
-    setAssigned({})
+    setData(EMPTY)
   }
+  const [choice, setChoice] = useState<InvoiceChoice | "">("")
   const [invoiceNumber, setInvoiceNumber] = useState("")
+  const [reason, setReason] = useState("")
+  const [kind, setKind] = useState<NotInvoicedKind | "">("")
+  const [changeReason, setChangeReason] = useState("")
   const [busy, setBusy] = useState(false)
-  const [file, setFile] = useState<File | null>(null)
 
-  useEffect(() => {
-    let cancelled = false
-    void (async () => {
+  const refresh = useCallback(
+    async (isCancelled: () => boolean = () => false) => {
       try {
-        const sb = getSupabaseClient()
-        const r = await fetchStockRequestById(sb, requestId)
-        if (cancelled) return
-        if (!r) {
-          const sessionErr = await signedOutLoadError(sb)
-          if (cancelled) return
+        const next = await load(requestId)
+        if (isCancelled()) return
+        if (!next.request) {
+          const sessionErr = await signedOutLoadError(getSupabaseClient())
+          if (isCancelled()) return
           if (sessionErr) {
             setLoadError(sessionErr)
-            setRow(null)
+            setData(EMPTY)
             return
           }
         }
         setLoadError(null)
-        setRow(r)
-        if (r?.stock_request_lines?.length) {
-          const asg = await fetchAssignedCountsByLineId(
-            sb,
-            r.stock_request_lines.map((l) => l.id)
-          )
-          if (!cancelled) setAssigned(asg)
-        } else {
-          setAssigned({})
-        }
+        setData(next)
       } catch (e) {
-        if (!cancelled) {
-          if (isAuthFailure(e)) notifySessionExpired()
-          else toastFromCaughtError(e, "Could not load request")
-          setLoadError(loadErrorFromCaught(e, "Could not load this request."))
-          setRow(null)
-        }
+        if (isCancelled()) return
+        if (isAuthFailure(e)) notifySessionExpired()
+        else toastFromCaughtError(e, "Could not load request")
+        setLoadError(loadErrorFromCaught(e, "Could not load this request."))
+        setData(EMPTY)
       } finally {
-        if (!cancelled) setLoading(false)
+        if (!isCancelled()) setLoading(false)
       }
-    })()
+    },
+    [requestId]
+  )
+
+  useEffect(() => {
+    if (!canInvoice) return
+    let cancelled = false
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- refresh is async; setState is after await
+    void refresh(() => cancelled)
     return () => {
       cancelled = true
     }
-  }, [requestId])
+  }, [canInvoice, refresh])
 
-  const gate =
-    row && row.status === "serviced"
-      ? canMarkRequestInvoiced({
-          lines: row.stock_request_lines ?? [],
-          assignedCountByLineId: assigned,
-        })
-      : { ok: true as const }
+  const { request: row, issuedByLine } = data
+  const crumbs = [
+    { label: "Requests", href: "/requests" },
+    { label: requestId, href: `/requests/${requestId}` },
+    { label: "Invoice" },
+  ]
 
-  async function onSubmitInvoice(e: React.FormEvent) {
+  /** Everything after the first entry needs a reason when the number changes. */
+  const changing = Boolean(row && row.invoice_status !== "pending" && choice === "number")
+  const approvedZero = row?.invoice_status === "not_invoiced" && row.invoice_approval === "approved"
+
+  async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!row || row.status !== "serviced") return
-    const uid = user?.id
-    if (!uid) {
-      toast.error("You must be signed in.")
+    if (!row || choice === "") return
+    if (choice === "pending") {
+      toast.error("Enter an invoice number, or mark the request 00000.")
       return
     }
-    if (!invoiceNumber.trim()) {
-      toast.error("Invoice number is required.")
+    const problem = invoiceChoiceProblem(choice, invoiceNumber, reason, kind)
+    if (problem) {
+      toast.error(problem)
       return
     }
-    const check = canMarkRequestInvoiced({
-      lines: row.stock_request_lines ?? [],
-      assignedCountByLineId: assigned,
-    })
-    if (!check.ok) {
-      toast.error(check.message ?? "Cannot invoice yet.")
+    if (changing && changeReason.trim().length < 15) {
+      toast.error("Give a reason of at least 15 characters for changing the invoice.")
       return
     }
-
     setBusy(true)
     try {
-      const sb = getSupabaseClient()
-      let docUrl: string | null = null
-      if (file) {
-        docUrl = await uploadInvoiceDocumentForRequest(row.id, file)
-      }
-      await markRequestInvoiced(sb, row.id, {
-        invoiceNumber: invoiceNumber.trim(),
-        invoiceDocumentUrl: docUrl,
-        invoicedBy: uid,
+      await setRequestInvoice(getSupabaseClient(), row.id, {
+        invoiceChoice: choice,
+        invoiceNumber: choice === "number" ? invoiceNumber.trim() : null,
+        notInvoicedReason: choice === "not_invoiced" ? reason.trim() : changing ? changeReason.trim() : null,
+        notInvoicedKind: choice === "not_invoiced" ? kind || null : null,
       })
-      toast.success("Recorded as invoiced.")
+      toast.success("Invoice saved.")
       router.push(`/requests/${row.id}`)
       router.refresh()
     } catch (err) {
-      toastFromCaughtError(err, "Could not record invoice")
+      toastFromCaughtError(err, "Could not save invoice")
     } finally {
       setBusy(false)
     }
@@ -157,16 +173,8 @@ export function StockRequestBilling({ requestId }: { requestId: string }) {
   if (!canInvoice) {
     return (
       <div className="flex flex-col gap-4">
-        <PageBreadcrumbs
-          items={[
-            { label: "Requests", href: "/requests" },
-            { label: requestId, href: `/requests/${requestId}` },
-            { label: "Billing" },
-          ]}
-        />
-        <p className="text-sm text-muted-foreground">
-          Your account has read-only access to stock requests.
-        </p>
+        <PageBreadcrumbs items={crumbs} />
+        <p className="text-sm text-muted-foreground">Only admin or accounts can change a request invoice.</p>
       </div>
     )
   }
@@ -183,7 +191,7 @@ export function StockRequestBilling({ requestId }: { requestId: string }) {
   if (loadError) {
     return (
       <div className="flex flex-col gap-4">
-        <PageBreadcrumbs items={[{ label: "Requests", href: "/requests" }, { label: requestId }]} />
+        <PageBreadcrumbs items={crumbs} />
         <p role="alert" className="text-sm text-destructive">
           {loadError}
         </p>
@@ -194,87 +202,51 @@ export function StockRequestBilling({ requestId }: { requestId: string }) {
   if (!row) {
     return (
       <div className="flex flex-col gap-4">
-        <PageBreadcrumbs items={[{ label: "Requests", href: "/requests" }, { label: requestId }]} />
+        <PageBreadcrumbs items={crumbs} />
         <p className="text-sm text-muted-foreground">Request not found.</p>
       </div>
     )
   }
 
-  if (row.status !== "serviced" && row.status !== "invoiced") {
-    return (
-      <div className="flex flex-col gap-4 max-w-xl">
-        <PageBreadcrumbs
-          items={[
-            { label: "Requests", href: "/requests" },
-            { label: row.id, href: `/requests/${row.id}` },
-            { label: "Billing" },
-          ]}
-        />
-        <p className="text-sm text-muted-foreground">
-          Billing is available once the request is serviced (current: {row.status}).
-        </p>
-      </div>
-    )
-  }
-
-  const readOnlyInvoiced = row.status === "invoiced"
+  const displayStatus = data.displayStatus ?? displayStatusOrReviewState(null, row.review_state)
+  const closedForInvoice = row.review_state === "cancelled" || row.review_state === "rejected"
 
   return (
     <div className="flex flex-col gap-6 max-w-3xl">
       <PageHeader
-        title="Billing"
+        title="Invoice"
         description={row.client ? formatClientLabel(row.client) : row.client_id}
       />
-      <PageBreadcrumbs
-        items={[
-          { label: "Requests", href: "/requests" },
-          { label: row.id, href: `/requests/${row.id}` },
-          { label: "Billing" },
-        ]}
-      />
+      <PageBreadcrumbs items={crumbs} />
 
-      {row.status === "serviced" && !gate.ok && (
-        <div
-          role="alert"
-          className="flex gap-3 rounded-lg border border-warning/40 bg-warning-soft px-4 py-3 text-sm text-warning"
-        >
-          <AlertCircle className="size-5 shrink-0" />
-          <p>{gate.message}</p>
-        </div>
-      )}
+      <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+        <RequestStatusPill status={displayStatus} />
+        <span>{row.type}</span>
+      </div>
 
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium">Request lines &amp; serials</CardTitle>
+          <CardTitle className="text-sm font-medium">Lines</CardTitle>
         </CardHeader>
         <CardContent className="p-0 overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Product</TableHead>
-                <TableHead className="text-right">Qty</TableHead>
-                <TableHead className="text-right">Assigned</TableHead>
+                <TableHead className="text-right">Requested</TableHead>
+                <TableHead className="text-right">Issued</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {(row.stock_request_lines ?? []).map((l) => {
-                const g = assigned[l.id] ?? 0
-                const star = lineRequiresSerialAssignment(l)
-                return (
-                  <TableRow key={l.id}>
-                    <TableCell>
-                      {l.product_name}
-                      {star ? (
-                        <span className="block text-xs text-muted-foreground">Serial-tracked — needs full serials to invoice</span>
-                      ) : null}
-                    </TableCell>
-                    <TableCell className="text-right">{l.quantity_requested}</TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {g}/{l.quantity_requested}
-                    </TableCell>
-                  </TableRow>
-                )
-              })}
+              {row.stock_request_lines.map((l) => (
+                <TableRow key={l.id}>
+                  <TableCell>{l.product_name}</TableCell>
+                  <TableCell className="text-right tabular-nums">{l.quantity_requested}</TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {Math.min(l.quantity_requested, issuedByLine[l.id] ?? 0)} of {l.quantity_requested}
+                  </TableCell>
+                </TableRow>
+              ))}
             </TableBody>
           </Table>
         </CardContent>
@@ -290,67 +262,75 @@ export function StockRequestBilling({ requestId }: { requestId: string }) {
         </SignedStorageLink>
       )}
 
-      {readOnlyInvoiced ? (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Invoice recorded</CardTitle>
-          </CardHeader>
-          <CardContent className="text-sm space-y-2">
-            <p>
-              <span className="text-muted-foreground">Invoice #:</span> {row.invoice_number ?? "—"}
-            </p>
-            {row.invoiced_at ? (
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-medium">Current invoice</CardTitle>
+        </CardHeader>
+        <CardContent className="text-sm space-y-1">
+          {row.invoice_status === "invoiced" ? (
+            <p>Invoice {row.invoice_number}</p>
+          ) : row.invoice_status === "pending" ? (
+            <p>Invoice pending</p>
+          ) : (
+            <>
               <p>
-                <span className="text-muted-foreground">Date:</span> {formatDateDDMMYYYY(row.invoiced_at)}
+                00000 — not invoiced{row.not_invoiced_kind ? ` (${row.not_invoiced_kind})` : ""},{" "}
+                {row.invoice_approval === "approved" ? "approved" : "awaiting approval"}
               </p>
-            ) : null}
-            {row.invoice_document_url ? (
-              <SignedStorageLink
-                path={row.invoice_document_url}
-                className="text-brand inline-flex items-center gap-1"
-              >
-                Invoice document
-                <ExternalLink className="size-3.5" />
-              </SignedStorageLink>
-            ) : null}
-          </CardContent>
-        </Card>
+              {row.not_invoiced_reason ? (
+                <p className="text-muted-foreground">{row.not_invoiced_reason}</p>
+              ) : null}
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      {closedForInvoice ? (
+        <p className="text-sm text-muted-foreground">
+          The invoice cannot change on a {row.review_state} request.
+        </p>
+      ) : approvedZero ? (
+        <p className="text-sm text-muted-foreground">This 00000 is approved and final.</p>
       ) : (
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Record invoice</CardTitle>
+            <CardTitle className="text-sm font-medium">
+              {row.invoice_status === "pending" ? "Record invoice" : "Change invoice"}
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <form onSubmit={(e) => void onSubmitInvoice(e)} className="flex flex-col gap-4 max-w-md">
-              <div className="grid gap-2">
-                <Label htmlFor="inv-no">Invoice number</Label>
-                <Input
-                  id="inv-no"
-                  value={invoiceNumber}
-                  onChange={(e) => setInvoiceNumber(e.target.value)}
-                  className="bg-card"
-                  required
-                  disabled={!gate.ok}
-                />
+            <form onSubmit={(e) => void onSubmit(e)} className="flex flex-col gap-4 max-w-md">
+              <InvoiceChoiceFields
+                idPrefix="rq-billing"
+                choice={choice}
+                invoiceNumber={invoiceNumber}
+                reason={reason}
+                kind={kind}
+                onChoice={setChoice}
+                onInvoiceNumber={setInvoiceNumber}
+                onReason={setReason}
+                onKind={setKind}
+              />
+              {changing ? (
+                <div className="grid gap-2">
+                  <Label htmlFor="rq-billing-change">Reason for the change (at least 15 characters)</Label>
+                  <Textarea
+                    id="rq-billing-change"
+                    value={changeReason}
+                    onChange={(e) => setChangeReason(e.target.value)}
+                    className="bg-card"
+                  />
+                </div>
+              ) : null}
+              <div className="flex gap-2">
+                <Button type="submit" disabled={busy || choice === ""}>
+                  {busy ? <Loader2 className="size-4 animate-spin" /> : null}
+                  Save invoice
+                </Button>
+                <Button type="button" variant="ghost" asChild disabled={busy}>
+                  <Link href={`/requests/${row.id}`}>Cancel</Link>
+                </Button>
               </div>
-              <div className="grid gap-2">
-                <Label>Invoice PDF (optional)</Label>
-                <Input
-                  type="file"
-                  accept=".pdf,image/jpeg,image/png,image/webp,application/pdf"
-                  className="cursor-pointer text-sm"
-                  disabled={!gate.ok || busy}
-                  onChange={(e) => {
-                    const f = e.target.files?.[0]
-                    setFile(f ?? null)
-                    e.target.value = ""
-                  }}
-                />
-              </div>
-              <Button type="submit" disabled={!gate.ok || busy}>
-                {busy ? <Loader2 className="size-4 animate-spin" /> : null}
-                Mark invoiced
-              </Button>
             </form>
           </CardContent>
         </Card>

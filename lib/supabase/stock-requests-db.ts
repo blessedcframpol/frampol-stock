@@ -1,36 +1,50 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import type { Database } from "./database.types"
+import type { Database, Json } from "./database.types"
 import type { AppSupabaseClient } from "./app-client"
 import { getSupabaseClient } from "./client"
-import { notifyRequestServicedByEmail } from "@/lib/notify-request-email"
 import { rowToClient } from "./clients-db"
 import type { Client } from "@/lib/data"
-import { rowToInventoryItem } from "./inventory-db"
-import type { InventoryItem } from "@/lib/data"
-import type { StockRequestStatus } from "@/lib/stock-request-statuses"
+import {
+  displayStatusOrReviewState,
+  isRequestDisplayStatus,
+  type RequestDisplayStatus,
+  type StockRequestReviewState,
+} from "@/lib/stock-request-statuses"
+import type { InvoiceChoice, NotInvoicedKind } from "@/lib/invoices"
 import { uploadDocument } from "@/lib/upload-documents"
 import { ensureProductLine } from "./product-lines"
 import { fetchAllPages } from "./postgrest-page"
 
 type SB = AppSupabaseClient
 
-export type { StockRequestStatus }
+export type { StockRequestReviewState }
 
-const ALREADY_MOVED = "request has already moved on"
+export type StockRequestType = "Sale" | "POC Out" | "Rentals"
+export type StockRequestInvoiceStatus = "invoiced" | "pending" | "not_invoiced"
+export type StockRequestInvoiceApproval = "awaiting" | "approved"
+export type RejectReasonCode = "insufficient_customer_info" | "no_atlas_task" | "no_invoice" | "other"
 
-function assertUpdated(
-  data: { id: string }[] | null,
-  error: { message: string } | null
-): void {
-  if (error) throw error
-  if (!data?.length) throw new Error(ALREADY_MOVED)
+type StockRequestDbRow = Database["public"]["Tables"]["stock_requests"]["Row"]
+type StockRequestLineDbRow = Database["public"]["Tables"]["stock_request_lines"]["Row"]
+
+export type StockRequestRow = Omit<
+  StockRequestDbRow,
+  "review_state" | "type" | "invoice_status" | "not_invoiced_kind" | "invoice_approval" | "reject_reason_code"
+> & {
+  review_state: StockRequestReviewState
+  type: StockRequestType
+  invoice_status: StockRequestInvoiceStatus
+  not_invoiced_kind: NotInvoicedKind | null
+  invoice_approval: StockRequestInvoiceApproval | null
+  reject_reason_code: RejectReasonCode | null
 }
 
-export type StockRequestRow = Database["public"]["Tables"]["stock_requests"]["Row"]
-export type StockRequestLineRow = Database["public"]["Tables"]["stock_request_lines"]["Row"] & {
+export type StockRequestLineRow = StockRequestLineDbRow & {
   requires_serial: boolean
+  requires_cloud_key: boolean
+  vendor: string | null
 }
 
 export type StockRequestWithRelations = StockRequestRow & {
@@ -38,36 +52,43 @@ export type StockRequestWithRelations = StockRequestRow & {
   client?: Pick<Client, "id" | "name" | "company" | "email"> | null
 }
 
-const REQUEST_WITH_LINES_SELECT = "*, stock_request_lines(*, product_lines(requires_serial))"
+const REQUEST_WITH_LINES_SELECT =
+  "*, stock_request_lines(*, product_lines(requires_serial, requires_cloud_key, vendor))"
 
-type LineEmbed = { requires_serial?: boolean } | { requires_serial?: boolean }[] | null
-type StockRequestWithLineEmbeds = StockRequestRow & {
-  stock_request_lines: (Database["public"]["Tables"]["stock_request_lines"]["Row"] & {
-    product_lines?: LineEmbed
-  })[]
+type ProductLineEmbed = {
+  requires_serial?: boolean | null
+  requires_cloud_key?: boolean | null
+  vendor?: string | null
 }
+type LineEmbed = ProductLineEmbed | ProductLineEmbed[] | null
+type LineWithEmbed = StockRequestLineDbRow & { product_lines?: LineEmbed }
+type StockRequestWithLineEmbeds = StockRequestRow & { stock_request_lines: LineWithEmbed[] }
 
 function foldProductName(name: string): string {
   return name.trim().toLowerCase()
 }
 
-function requiresSerialFromEmbed(embed: LineEmbed): boolean {
-  if (!embed) return false
-  if (Array.isArray(embed)) return Boolean(embed[0]?.requires_serial)
-  return Boolean(embed.requires_serial)
+function firstEmbed(embed: LineEmbed | undefined): ProductLineEmbed | null {
+  if (!embed) return null
+  return Array.isArray(embed) ? embed[0] ?? null : embed
 }
 
-function normalizeLines(
-  lines: (Database["public"]["Tables"]["stock_request_lines"]["Row"] & {
-    product_lines?: LineEmbed
-  })[]
-): StockRequestLineRow[] {
+function normalizeLines(lines: LineWithEmbed[]): StockRequestLineRow[] {
   return [...(lines ?? [])]
-    .map((l) => ({
-      ...l,
-      requires_serial: requiresSerialFromEmbed(l.product_lines ?? null),
-    }))
+    .map(({ product_lines, ...line }) => {
+      const pl = firstEmbed(product_lines)
+      return {
+        ...line,
+        requires_serial: Boolean(pl?.requires_serial),
+        requires_cloud_key: Boolean(pl?.requires_cloud_key),
+        vendor: pl?.vendor ?? null,
+      }
+    })
     .sort((a, b) => a.sort_order - b.sort_order)
+}
+
+function toRows(data: unknown): StockRequestWithLineEmbeds[] {
+  return (data ?? []) as StockRequestWithLineEmbeds[]
 }
 
 /**
@@ -113,29 +134,32 @@ function getSb(): SB | null {
   }
 }
 
+async function fetchClientsById(sb: SB, clientIds: string[]): Promise<Map<string, Client>> {
+  const byId = new Map<string, Client>()
+  if (clientIds.length === 0) return byId
+  const clientsData = await fetchAllPages((from, to) =>
+    sb.from("clients").select("*").in("id", clientIds).order("id", { ascending: true }).range(from, to)
+  )
+  for (const c of clientsData) byId.set(c.id, rowToClient(c))
+  return byId
+}
+
+async function withClients(sb: SB, rows: StockRequestWithLineEmbeds[]): Promise<StockRequestWithRelations[]> {
+  const byId = await fetchClientsById(sb, [...new Set(rows.map((r) => r.client_id))])
+  return rows.map((r) => ({
+    ...r,
+    client: byId.get(r.client_id) ?? null,
+    stock_request_lines: normalizeLines(r.stock_request_lines ?? []),
+  }))
+}
+
 export async function fetchStockRequests(sb: SB): Promise<StockRequestWithRelations[]> {
   const { data, error } = await sb
     .from("stock_requests")
     .select(REQUEST_WITH_LINES_SELECT)
     .order("created_at", { ascending: false })
   if (error) throw error
-  const rows = (data ?? []) as StockRequestWithLineEmbeds[]
-  const clientIds = [...new Set(rows.map((r) => r.client_id))]
-  if (clientIds.length === 0) {
-    return rows.map((r) => ({
-      ...r,
-      stock_request_lines: normalizeLines(r.stock_request_lines ?? []),
-    }))
-  }
-  const clientsData = await fetchAllPages((from, to) =>
-    sb.from("clients").select("*").in("id", clientIds).order("id", { ascending: true }).range(from, to)
-  )
-  const byId = new Map(clientsData.map((c) => [c.id, rowToClient(c)]))
-  return rows.map((r) => ({
-    ...r,
-    client: byId.get(r.client_id) ?? null,
-    stock_request_lines: normalizeLines(r.stock_request_lines ?? []),
-  }))
+  return withClients(sb, toRows(data))
 }
 
 export async function fetchStockRequestById(sb: SB, id: string): Promise<StockRequestWithRelations | null> {
@@ -146,13 +170,8 @@ export async function fetchStockRequestById(sb: SB, id: string): Promise<StockRe
     .maybeSingle()
   if (error) throw error
   if (!data) return null
-  const row = data as StockRequestWithLineEmbeds
-  const { data: clientRow } = await sb.from("clients").select("*").eq("id", row.client_id).maybeSingle()
-  return {
-    ...row,
-    client: clientRow ? rowToClient(clientRow) : null,
-    stock_request_lines: normalizeLines(row.stock_request_lines ?? []),
-  }
+  const [row] = await withClients(sb, toRows([data]))
+  return row ?? null
 }
 
 export async function fetchStockRequestsForClient(sb: SB, clientId: string): Promise<StockRequestWithRelations[]> {
@@ -162,41 +181,23 @@ export async function fetchStockRequestsForClient(sb: SB, clientId: string): Pro
     .eq("client_id", clientId)
     .order("created_at", { ascending: false })
   if (error) throw error
-  const rows = (data ?? []) as StockRequestWithLineEmbeds[]
-  const { data: clientRow } = await sb.from("clients").select("*").eq("id", clientId).maybeSingle()
-  const client = clientRow ? rowToClient(clientRow) : null
-  return rows.map((r) => ({
-    ...r,
-    client,
-    stock_request_lines: normalizeLines(r.stock_request_lines ?? []),
-  }))
+  return withClients(sb, toRows(data))
 }
+
+const OPEN_REVIEW_STATES: StockRequestReviewState[] = ["submitted", "awaiting_approval"]
 
 export async function fetchLatestOpenRequests(sb: SB, limit: number): Promise<StockRequestWithRelations[]> {
   const { data, error } = await sb
     .from("stock_requests")
     .select(REQUEST_WITH_LINES_SELECT)
-    .in("status", ["submitted", "in_progress", "serviced"])
+    .in("review_state", OPEN_REVIEW_STATES)
     .order("created_at", { ascending: false })
     .limit(limit)
   if (error) throw error
-  const rows = (data ?? []) as StockRequestWithLineEmbeds[]
-  const clientIds = [...new Set(rows.map((r) => r.client_id))]
-  const byId = new Map<string, Client>()
-  if (clientIds.length > 0) {
-    const clientsData = await fetchAllPages((from, to) =>
-      sb.from("clients").select("*").in("id", clientIds).order("id", { ascending: true }).range(from, to)
-    )
-    for (const c of clientsData) byId.set(c.id, rowToClient(c))
-  }
-  return rows.map((r) => ({
-    ...r,
-    client: byId.get(r.client_id) ?? null,
-    stock_request_lines: normalizeLines(r.stock_request_lines ?? []),
-  }))
+  return withClients(sb, toRows(data))
 }
 
-/** Free pool: In Stock and not reserved, keyed by product_id. */
+/** In Stock units keyed by product_id. */
 export async function fetchAvailabilityByProductIds(
   sb: SB,
   productIds: string[]
@@ -209,7 +210,6 @@ export async function fetchAvailabilityByProductIds(
       .select("product_id")
       .in("product_id", unique)
       .eq("status", "In Stock")
-      .is("reserved_for_request_line_id", null)
       .order("id", { ascending: true })
       .range(from, to)
   )
@@ -222,239 +222,318 @@ export async function fetchAvailabilityByProductIds(
   return counts
 }
 
-export async function fetchAssignedCountsByLineId(sb: SB, lineIds: string[]): Promise<Record<string, number>> {
+/** Issued units per line: active (non-reversed) transactions carrying the line id. */
+export async function fetchIssuedCountsByLineId(sb: SB, lineIds: string[]): Promise<Record<string, number>> {
   if (lineIds.length === 0) return {}
   const data = await fetchAllPages((from, to) =>
     sb
-      .from("inventory_items")
-      .select("reserved_for_request_line_id")
-      .in("reserved_for_request_line_id", lineIds)
+      .from("active_transactions")
+      .select("id, request_line_id")
+      .in("request_line_id", lineIds)
       .order("id", { ascending: true })
       .range(from, to)
   )
   const counts: Record<string, number> = {}
   for (const id of lineIds) counts[id] = 0
   for (const row of data) {
-    const lid = row.reserved_for_request_line_id
+    const lid = row.request_line_id
     if (lid) counts[lid] = (counts[lid] ?? 0) + 1
   }
   return counts
 }
 
-export async function fetchInventoryItemsForAssignment(
-  sb: SB,
-  productId: string
-): Promise<InventoryItem[]> {
-  if (!productId) return []
-  return fetchInventoryItemsForAssignmentByProductIds(sb, [productId])
+// ---------------------------------------------------------------------------
+// RPC wrappers
+// ---------------------------------------------------------------------------
+
+export type RequestLineInput = {
+  productName: string
+  /** Catalog id; when omitted the name is fold-matched (or created under 'General'). */
+  productId?: string | null
+  quantity: number
 }
 
-/** One query for many catalog ids; caller groups by product_id. */
-export async function fetchInventoryItemsForAssignmentByProductIds(
-  sb: SB,
-  productIds: string[]
-): Promise<InventoryItem[]> {
-  const unique = [...new Set(productIds.filter(Boolean))]
-  if (unique.length === 0) return []
-  const data = await fetchAllPages((from, to) =>
-    sb
-      .from("inventory_items")
-      .select("*, product_lines(product_name, vendor)")
-      .in("product_id", unique)
-      .eq("status", "In Stock")
-      .order("date_added", { ascending: true })
-      .order("id", { ascending: true })
-      .range(from, to)
-  )
-  return data.map(rowToInventoryItem)
+export type RequestInvoiceInput = {
+  invoiceChoice: InvoiceChoice
+  invoiceNumber?: string | null
+  notInvoicedReason?: string | null
+  notInvoicedKind?: NotInvoicedKind | null
 }
 
-export type CreateRequestInput = {
+export type SubmitRequestInput = RequestInvoiceInput & {
   clientId: string
-  createdBy: string
-  notes?: string | null
+  type: StockRequestType
+  returnDate?: string | null
+  atlasTaskUrl: string
   quotationUrl?: string | null
-  lines: { productName: string; quantity: number }[]
+  notes?: string | null
+  lines: RequestLineInput[]
 }
 
-export async function createStockRequest(sb: SB, input: CreateRequestInput): Promise<StockRequestWithRelations> {
-  const productIds = await resolveProductIdsForLineNames(
-    sb,
-    input.lines.map((l) => l.productName)
-  )
-  const { data: req, error: e1 } = await sb
-    .from("stock_requests")
-    .insert({
-      client_id: input.clientId,
-      created_by: input.createdBy,
-      status: "draft",
-      notes: input.notes ?? null,
-      quotation_url: input.quotationUrl ?? null,
-    })
-    .select()
-    .single()
-  if (e1) throw e1
+export type ResubmitRequestChanges = Partial<SubmitRequestInput>
 
-  const requestId = req.id
-  const lineRows = input.lines.map((l, i) => ({
-    request_id: requestId,
-    product_name: l.productName.trim(),
-    product_id: productIds[i],
-    quantity_requested: l.quantity,
-    sort_order: i,
+async function linesPayload(sb: SB, lines: RequestLineInput[]): Promise<{ product_id: string; quantity: number }[]> {
+  const missing = lines.map((l, i) => (l.productId ? null : i)).filter((i): i is number => i !== null)
+  const resolved = missing.length
+    ? await resolveProductIdsForLineNames(sb, missing.map((i) => lines[i].productName))
+    : []
+  const resolvedByIndex = new Map(missing.map((lineIndex, k) => [lineIndex, resolved[k]]))
+  return lines.map((l, i) => ({
+    product_id: l.productId || resolvedByIndex.get(i)!,
+    quantity: l.quantity,
   }))
-  const { error: e2 } = await sb.from("stock_request_lines").insert(lineRows)
-  if (e2) throw e2
-
-  const full = await fetchStockRequestById(sb, requestId)
-  if (!full) throw new Error("Failed to load new request")
-  return full
 }
 
-export async function submitStockRequest(sb: SB, requestId: string): Promise<void> {
-  const { data, error } = await sb
-    .from("stock_requests")
-    .update({ status: "submitted" })
-    .eq("id", requestId)
-    .eq("status", "draft")
-    .select("id")
-  assertUpdated(data, error)
+async function requestPayload(sb: SB, input: ResubmitRequestChanges): Promise<Record<string, Json>> {
+  const out: Record<string, Json> = {}
+  if (input.clientId !== undefined) out.client_id = input.clientId
+  if (input.type !== undefined) out.type = input.type
+  if (input.returnDate !== undefined) out.return_date = input.returnDate
+  if (input.atlasTaskUrl !== undefined) out.atlas_task_url = input.atlasTaskUrl
+  if (input.quotationUrl !== undefined) out.quotation_url = input.quotationUrl
+  if (input.notes !== undefined) out.notes = input.notes
+  if (input.invoiceChoice !== undefined) out.invoice_choice = input.invoiceChoice
+  if (input.invoiceNumber !== undefined) out.invoice_number = input.invoiceNumber
+  if (input.notInvoicedReason !== undefined) out.not_invoiced_reason = input.notInvoicedReason
+  if (input.notInvoicedKind !== undefined) out.not_invoiced_kind = input.notInvoicedKind
+  if (input.lines !== undefined) out.lines = await linesPayload(sb, input.lines)
+  return out
 }
 
-/** Move to in_progress from submitted (start work) or serviced (recovery). */
-export async function markRequestInProgress(
+/** Creates the request and its lines. Returns the new request id. */
+export async function submitRequest(sb: SB, input: SubmitRequestInput): Promise<string> {
+  const payload = await requestPayload(sb, input)
+  const { data, error } = await sb.rpc("submit_request", { p_payload: payload })
+  if (error) throw error
+  return data as string
+}
+
+export async function approveNotInvoiced(sb: SB, requestId: string): Promise<void> {
+  const { error } = await sb.rpc("approve_not_invoiced", { p_request_id: requestId })
+  if (error) throw error
+}
+
+export async function rejectRequest(
   sb: SB,
   requestId: string,
-  fromStatus: Extract<StockRequestStatus, "submitted" | "serviced"> = "submitted"
+  code: RejectReasonCode,
+  note?: string | null
 ): Promise<void> {
-  const { data, error } = await sb
-    .from("stock_requests")
-    .update({ status: "in_progress" })
-    .eq("id", requestId)
-    .eq("status", fromStatus)
-    .select("id")
-  assertUpdated(data, error)
+  const { error } = await sb.rpc("reject_request", {
+    p_request_id: requestId,
+    p_code: code,
+    p_note: note ?? null,
+  })
+  if (error) throw error
 }
 
-export async function markRequestServiced(
-  sb: SB,
-  requestId: string,
-  ownerEmail?: string | null,
-  fromStatus: Extract<StockRequestStatus, "submitted" | "in_progress"> = "in_progress"
-): Promise<void> {
-  const { data: before } = await sb.from("stock_requests").select("created_by").eq("id", requestId).single()
-  const { data, error } = await sb
-    .from("stock_requests")
-    .update({ status: "serviced", serviced_at: new Date().toISOString() })
-    .eq("id", requestId)
-    .eq("status", fromStatus)
-    .select("id")
-  assertUpdated(data, error)
-  const { error: rpcErr } = await sb.rpc("create_request_serviced_notification", { p_request_id: requestId })
-  if (rpcErr) throw rpcErr
-  if (before?.created_by) {
-    void notifyRequestServicedByEmail({
-      requestId,
-      ownerUserId: before.created_by,
-      ownerEmail: ownerEmail ?? null,
-    })
+/** Keys left out keep their current value; `lines`, when present, replaces every line. */
+export async function resubmitRequest(sb: SB, requestId: string, changes: ResubmitRequestChanges): Promise<void> {
+  const payload = await requestPayload(sb, changes)
+  const { error } = await sb.rpc("resubmit_request", { p_request_id: requestId, p_changes: payload })
+  if (error) throw error
+}
+
+export async function cancelRequest(sb: SB, requestId: string, reason?: string | null): Promise<void> {
+  const { error } = await sb.rpc("cancel_request", { p_request_id: requestId, p_reason: reason ?? null })
+  if (error) throw error
+}
+
+export type IssueUnitScan = {
+  serial: string
+  lineId?: string | null
+  cloudKey?: string | null
+}
+
+export type IssueUnitsResult = {
+  ok: boolean
+  batch_id?: string
+  failures: { serial: string; reason: string }[]
+  serials: string[]
+}
+
+/** All-or-nothing: any failing serial writes nothing and is listed in `failures`. */
+export async function issueUnits(sb: SB, requestId: string, scans: IssueUnitScan[]): Promise<IssueUnitsResult> {
+  const p_scans = scans.map((s) => {
+    const scan: Record<string, string> = { serial: s.serial }
+    if (s.lineId) scan.line_id = s.lineId
+    if (s.cloudKey) scan.cloud_key = s.cloudKey
+    return scan
+  })
+  const { data, error } = await sb.rpc("issue_units", { p_request_id: requestId, p_scans: p_scans })
+  if (error) throw error
+  const raw = (data ?? {}) as Partial<IssueUnitsResult>
+  return {
+    ok: Boolean(raw.ok),
+    batch_id: raw.batch_id ?? undefined,
+    failures: Array.isArray(raw.failures) ? raw.failures : [],
+    serials: Array.isArray(raw.serials) ? raw.serials : [],
   }
 }
 
-export async function markRequestInvoiced(
-  sb: SB,
-  requestId: string,
-  args: { invoiceNumber: string; invoiceDocumentUrl?: string | null; invoicedBy: string }
-): Promise<void> {
-  const { data, error } = await sb
-    .from("stock_requests")
-    .update({
-      status: "invoiced",
-      invoice_number: args.invoiceNumber,
-      invoice_document_url: args.invoiceDocumentUrl ?? null,
-      invoiced_at: new Date().toISOString(),
-      invoiced_by: args.invoicedBy,
-    })
-    .eq("id", requestId)
-    .eq("status", "serviced")
-    .select("id")
-  assertUpdated(data, error)
+export async function closeOutstanding(sb: SB, requestId: string, reason: string): Promise<void> {
+  const { error } = await sb.rpc("close_outstanding", { p_request_id: requestId, p_reason: reason })
+  if (error) throw error
 }
 
-export async function cancelStockRequest(
-  sb: SB,
-  requestId: string,
-  fromStatus: Extract<StockRequestStatus, "draft" | "submitted" | "in_progress">
-): Promise<void> {
-  const { data, error } = await sb
-    .from("stock_requests")
-    .update({ status: "cancelled" })
-    .eq("id", requestId)
-    .eq("status", fromStatus)
-    .select("id")
-  assertUpdated(data, error)
+export async function setRequestInvoice(sb: SB, requestId: string, input: RequestInvoiceInput): Promise<void> {
+  const { error } = await sb.rpc("set_request_invoice", {
+    p_request_id: requestId,
+    p_choice: input.invoiceChoice,
+    p_invoice_number: input.invoiceNumber ?? null,
+    p_reason: input.notInvoicedReason ?? null,
+    p_kind: input.notInvoicedKind ?? null,
+  })
+  if (error) throw error
 }
 
-export async function revertStockRequestToDraft(sb: SB, requestId: string): Promise<void> {
-  const { data, error } = await sb
-    .from("stock_requests")
-    .update({ status: "draft" })
-    .eq("id", requestId)
-    .eq("status", "submitted")
-    .select("id")
-  assertUpdated(data, error)
+// ---------------------------------------------------------------------------
+// Display status, issued serials, timeline
+// ---------------------------------------------------------------------------
+
+/** Server-side display status (public.request_display_status). Null when the call fails. */
+export async function fetchRequestDisplayStatus(sb: SB, requestId: string): Promise<RequestDisplayStatus | null> {
+  const { data, error } = await sb.rpc("request_display_status", { p_request_id: requestId })
+  if (error) throw error
+  return isRequestDisplayStatus(data) ? data : null
 }
 
-export async function updateDraftRequest(
+const DISPLAY_STATUS_CONCURRENCY = 8
+
+/**
+ * Display status for many requests. Only `submitted` requests need the server
+ * function (their status depends on issued counts); every other review_state maps
+ * one-to-one, so those never cost a round trip.
+ */
+export async function fetchRequestDisplayStatuses(
+  sb: SB,
+  rows: Pick<StockRequestRow, "id" | "review_state">[]
+): Promise<Record<string, RequestDisplayStatus>> {
+  const out: Record<string, RequestDisplayStatus> = {}
+  const needServer: string[] = []
+  for (const row of rows) {
+    if (row.review_state === "submitted") needServer.push(row.id)
+    else out[row.id] = displayStatusOrReviewState(null, row.review_state)
+  }
+  let next = 0
+  async function worker() {
+    while (next < needServer.length) {
+      const id = needServer[next++]
+      try {
+        out[id] = (await fetchRequestDisplayStatus(sb, id)) ?? "being_reviewed"
+      } catch {
+        out[id] = "being_reviewed"
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(DISPLAY_STATUS_CONCURRENCY, needServer.length) }, worker))
+  return out
+}
+
+export type IssuedSerialRow = {
+  transactionId: string
+  serial: string
+  productName: string
+  lineId: string | null
+  cloudKey: string | null
+  issuedAt: string | null
+}
+
+/** Units issued against a request (active, non-reversed), with the cloud key held on the kit. */
+export async function fetchIssuedSerialsForRequest(sb: SB, requestId: string): Promise<IssuedSerialRow[]> {
+  const txns = await fetchAllPages((from, to) =>
+    sb
+      .from("active_transactions")
+      .select("id, serial_number, item_name, request_line_id, created_at")
+      .eq("request_id", requestId)
+      .order("created_at", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, to)
+  )
+  if (txns.length === 0) return []
+  const serials = [...new Set(txns.map((t) => t.serial_number))]
+  const keyBySerial = new Map<string, string>()
+  try {
+    const items = await fetchAllPages((from, to) =>
+      sb
+        .from("inventory_items")
+        .select("id, serial_number, cloud_key")
+        .in("serial_number", serials)
+        .is("deleted_at", null)
+        .order("id", { ascending: true })
+        .range(from, to)
+    )
+    for (const item of items) {
+      const key = item.cloud_key?.trim()
+      if (key) keyBySerial.set(item.serial_number, key)
+    }
+  } catch {
+    // Cloud keys are a convenience; the serial list still renders without them.
+  }
+  return txns.map((t) => ({
+    transactionId: t.id,
+    serial: t.serial_number,
+    productName: t.item_name,
+    lineId: t.request_line_id,
+    cloudKey: keyBySerial.get(t.serial_number) ?? null,
+    issuedAt: t.created_at,
+  }))
+}
+
+export type StockRequestEvent = Database["public"]["Tables"]["stock_request_events"]["Row"] & {
+  actorLabel: string | null
+}
+
+/** Oldest first. Actor names are best effort: RLS lets only admin and Admin viewer read other profiles. */
+export async function fetchRequestEvents(sb: SB, requestId: string): Promise<StockRequestEvent[]> {
+  const { data, error } = await sb
+    .from("stock_request_events")
+    .select("*")
+    .eq("request_id", requestId)
+    .order("created_at", { ascending: true })
+    .order("id", { ascending: true })
+  if (error) throw error
+  const rows = data ?? []
+  const labels = await fetchProfileLabels(
+    sb,
+    rows.map((r) => r.actor_id).filter((id): id is string => Boolean(id))
+  )
+  return rows.map((r) => ({ ...r, actorLabel: r.actor_id ? (labels.get(r.actor_id) ?? null) : null }))
+}
+
+/** id → display name (or email). Missing when RLS hides the profile. */
+export async function fetchProfileLabels(sb: SB, ids: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>()
+  const unique = [...new Set(ids)]
+  if (unique.length === 0) return out
+  try {
+    const { data } = await sb.from("profiles").select("id, display_name, email").in("id", unique)
+    for (const p of data ?? []) {
+      out.set(p.id, p.display_name?.trim() || p.email)
+    }
+  } catch {
+    // Labels are cosmetic.
+  }
+  return out
+}
+
+/** Only notes and quotation_url may be written directly; everything else goes through RPCs. */
+export async function updateRequestDetails(
   sb: SB,
   requestId: string,
-  args: { notes?: string | null; quotationUrl?: string | null; clientId?: string }
+  args: { notes?: string | null; quotationUrl?: string | null }
 ): Promise<void> {
   const patch: Database["public"]["Tables"]["stock_requests"]["Update"] = {}
   if (args.notes !== undefined) patch.notes = args.notes
   if (args.quotationUrl !== undefined) patch.quotation_url = args.quotationUrl
-  if (args.clientId !== undefined) patch.client_id = args.clientId
+  if (Object.keys(patch).length === 0) return
   const { error } = await sb.from("stock_requests").update(patch).eq("id", requestId)
   if (error) throw error
 }
 
-export async function replaceDraftLines(
-  sb: SB,
-  requestId: string,
-  lines: { productName: string; quantity: number }[]
-): Promise<void> {
-  const { error: delErr } = await sb.from("stock_request_lines").delete().eq("request_id", requestId)
-  if (delErr) throw delErr
-  if (lines.length === 0) return
-  const productIds = await resolveProductIdsForLineNames(
-    sb,
-    lines.map((l) => l.productName)
-  )
-  const lineRows = lines.map((l, i) => ({
-    request_id: requestId,
-    product_name: l.productName.trim(),
-    product_id: productIds[i],
-    quantity_requested: l.quantity,
-    sort_order: i,
-  }))
-  const { error: insErr } = await sb.from("stock_request_lines").insert(lineRows)
-  if (insErr) throw insErr
-}
-
-export async function assignSerialToLine(sb: SB, lineId: string, inventoryItemId: string): Promise<void> {
-  const { error } = await sb.rpc("assign_serial_to_request_line", {
-    p_line_id: lineId,
-    p_inventory_item_id: inventoryItemId,
-  })
-  if (error) throw error
-}
-
-export async function releaseSerialFromLine(sb: SB, inventoryItemId: string): Promise<void> {
-  const { error } = await sb.rpc("release_serial_from_request_line", {
-    p_inventory_item_id: inventoryItemId,
-  })
-  if (error) throw error
-}
+// ---------------------------------------------------------------------------
+// Notifications
+// ---------------------------------------------------------------------------
 
 export type AppNotificationRow = Database["public"]["Tables"]["notifications"]["Row"]
 
@@ -492,13 +571,6 @@ export async function uploadQuotationForRequest(
   file: File
 ): Promise<string> {
   return uploadDocument("quotation", requestId, file)
-}
-
-export async function uploadInvoiceDocumentForRequest(
-  requestId: string,
-  file: File
-): Promise<string> {
-  return uploadDocument("invoice", requestId, file)
 }
 
 export function useStockRequests(): {

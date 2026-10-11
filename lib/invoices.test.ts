@@ -24,7 +24,10 @@ describe("invoice choice", () => {
     expect(invoiceChoiceProblem("", "", "")).toMatch(/Invoice pending/)
     expect(invoiceChoiceProblem("pending", "", "")).toBeNull()
     expect(invoiceChoiceProblem("not_invoiced", "", "short")).toMatch(/at least 15/)
-    expect(invoiceChoiceProblem("not_invoiced", "", "Complimentary kit for the site")).toBeNull()
+    expect(invoiceChoiceProblem("not_invoiced", "", "Complimentary kit for the site")).toMatch(/kind/)
+    expect(
+      invoiceChoiceProblem("not_invoiced", "", "Complimentary kit for the site", "complimentary")
+    ).toBeNull()
     expect(invoiceChoiceProblem("number", "80183", "")).toBeNull()
   })
 })

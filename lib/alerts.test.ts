@@ -120,7 +120,7 @@ describe("record return", () => {
   })
 
   it("follows the stock-movement role gate for every role", () => {
-    const allowed = new Set(["admin", "technicians"])
+    const allowed = new Set(["admin"])
     for (const role of ROLES) {
       expect(canRecordReturn(role)).toBe(allowed.has(role))
     }
@@ -132,7 +132,7 @@ describe("record return", () => {
   })
 
   it("keeps drawer actions on the same roles, and only for kits that are still out", () => {
-    const allowed = new Set(["admin", "technicians"])
+    const allowed = new Set(["admin"])
     for (const role of ROLES) {
       const actions = holdingDrawerActions("POC", role)
       expect(actions).toEqual(allowed.has(role) ? ["convert", "return", "extend"] : [])

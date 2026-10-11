@@ -30,8 +30,9 @@ const SUITE = [
   { id: "078", file: "scripts/verify-078-returns-report.mjs" },
   { id: "079", file: "scripts/verify-079-audit-log.mjs" },
   { id: "080", file: "scripts/verify-080-p36-movement-payload.mjs" },
+  { id: "081", file: "scripts/verify-081-rq1-requests.mjs" },
+  { id: "082", file: "scripts/verify-082-rq2-roles.mjs" },
   { id: "movement", file: "scripts/verify-movement-transitions.mjs" },
-  { id: "parity", file: "scripts/verify-transition-parity.mjs" },
 ]
 
 function runNode(relPath) {

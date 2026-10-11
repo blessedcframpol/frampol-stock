@@ -264,7 +264,32 @@ export async function runChecks(ctx) {
   else if (afterDenied?.status !== "POC") fail("permissions", JSON.stringify(afterDenied))
   else pass("permissions", "a sales user cannot resolve, and the kit stays on POC")
 
-  await setJwt(db, techId)
+  // Technicians lost UPDATE on inventory_items (RQ2), so SELECT … FOR UPDATE inside
+  // bulk_resolve cannot see the kit ("not on the ledger"). Direct apply is admin-gated.
+  const techDenied = await ctx.asUser(techId, async () => {
+    const sp = `sp_${Math.random().toString(36).slice(2, 10)}`
+    await db.query(`SAVEPOINT ${sp}`)
+    try {
+      const row = await db.query(`SELECT public.bulk_resolve_holdings($1::jsonb) AS result`, [
+        JSON.stringify([returned(serials.ret, today, { return_pool: "sale" })]),
+      ])
+      await db.query(`ROLLBACK TO SAVEPOINT ${sp}`)
+      const result = row.rows[0]?.result
+      const messages = JSON.stringify(result?.errors ?? [])
+      if (result?.ok === false && /not on the ledger/i.test(messages)) return null
+      return `expected soft denial, got ${JSON.stringify(result)}`
+    } catch (error) {
+      await db.query(`ROLLBACK TO SAVEPOINT ${sp}`)
+      const message = error instanceof Error ? error.message : String(error)
+      return /Only an admin can record stock movements|permission/i.test(message) ? null : message
+    }
+  })
+  const afterTechDenied = await readItem(serials.ret)
+  if (techDenied) fail("tech_permissions", techDenied)
+  else if (afterTechDenied?.status !== "POC") fail("tech_permissions", JSON.stringify(afterTechDenied))
+  else pass("tech_permissions", "a technician cannot resolve after RQ2")
+
+  await setJwt(db, adminId)
   const beforeDates = await txnCount()
   const tooEarly = await resolve([returned(serials.ret, beforeDispatch, { return_pool: "sale" })])
   const beforeLast = await resolve([returned(serials.ret, start, { return_pool: "sale" })])
@@ -404,11 +429,11 @@ export async function runChecks(ctx) {
     soldInvoice?.status === "invoiced" &&
     soldInvoice.invoice_number === INVOICE &&
     soldInvoice.metadata?.converted_from === "POC" &&
-    soldInvoice.created_by === techId &&
+    soldInvoice.created_by === adminId &&
     zero?.status === "Sold" &&
     zeroInvoice?.status === "not_invoiced" &&
     zeroInvoice.approval === "awaiting" &&
-    zeroInvoice.entered_by === techId &&
+    zeroInvoice.entered_by === adminId &&
     zeroInvoice.invoice_number == null &&
     rentRet?.status === "Pending Inspection" &&
     rentRet.stock_pool === "rental" &&

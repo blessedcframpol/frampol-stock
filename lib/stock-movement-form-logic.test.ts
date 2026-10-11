@@ -40,6 +40,7 @@ function baseFields(over: Partial<MovementFormFields> = {}): MovementFormFields 
     invoiceChoice: "pending",
     invoiceNumber: "",
     invoiceReason: "",
+    notInvoicedKind: "",
     returnDate: "",
     returnPool: "",
     intakeCategory: "",

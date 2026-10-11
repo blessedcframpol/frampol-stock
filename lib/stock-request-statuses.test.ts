@@ -1,107 +1,109 @@
 import { describe, expect, it } from "vitest"
 import {
-  allowedTransitions,
-  type StockRequestStatus,
+  DISPLAY_STATUS_LABELS,
+  DISPLAY_STATUS_PILL_CLASS,
+  REQUEST_DISPLAY_STATUSES,
+  displayStatusLabel,
+  displayStatusOrReviewState,
+  displayStatusPillClass,
+  displayStatusTone,
+  isRequestDisplayStatus,
+  isStockRequestReviewState,
+  requestInvoiceColumnLabel,
+  requestItemsSummary,
+  type RequestDisplayStatus,
+  type StockRequestReviewState,
 } from "@/lib/stock-request-statuses"
-import type { AppRole } from "@/lib/permissions"
 
-const STATUSES: StockRequestStatus[] = [
-  "draft",
+const REVIEW_STATES: StockRequestReviewState[] = [
   "submitted",
-  "in_progress",
-  "serviced",
-  "invoiced",
+  "awaiting_approval",
+  "rejected",
   "cancelled",
+  "closed",
 ]
 
-const ROLES: Array<AppRole | null> = [
-  "admin",
-  "sales",
-  "accounts",
-  "technicians",
-  "viewer",
-  null,
+const DISPLAY: RequestDisplayStatus[] = [
+  "cancelled",
+  "closed",
+  "rejected",
+  "awaiting_approval",
+  "being_reviewed",
+  "partially_issued",
+  "awaiting_invoice",
+  "completed",
 ]
 
-/** Expected transitions matching migration 049 + STOCK_REQUEST_TRANSITIONS. */
-function expected(
-  status: StockRequestStatus,
-  role: AppRole | null,
-  isOwner: boolean
-): StockRequestStatus[] {
-  // owner_or_admin: admin always; ownership only for creator roles (not accounts).
-  const ownerOrAdmin =
-    role === "admin" ||
-    (isOwner === true && (role === "sales" || role === "technicians"))
-  const adminOrTech = role === "admin" || role === "technicians"
-  const adminOrAccounts = role === "admin" || role === "accounts"
-
-  switch (status) {
-    case "draft":
-      return ownerOrAdmin ? ["submitted", "cancelled"] : []
-    case "submitted": {
-      const out: StockRequestStatus[] = []
-      if (ownerOrAdmin) out.push("draft")
-      if (adminOrTech) out.push("in_progress", "serviced")
-      if (ownerOrAdmin) out.push("cancelled")
-      return out
+describe("stock request review states (RQ1)", () => {
+  it("recognises every review_state", () => {
+    for (const state of REVIEW_STATES) {
+      expect(isStockRequestReviewState(state)).toBe(true)
     }
-    case "in_progress":
-      return adminOrTech ? ["serviced", "cancelled"] : []
-    case "serviced": {
-      const out: StockRequestStatus[] = []
-      if (adminOrTech) out.push("in_progress")
-      if (adminOrAccounts) out.push("invoiced")
-      return out
-    }
-    case "invoiced":
-    case "cancelled":
-      return []
-  }
-}
+    expect(isStockRequestReviewState("draft")).toBe(false)
+    expect(isStockRequestReviewState("serviced")).toBe(false)
+  })
 
-describe("allowedTransitions", () => {
-  for (const status of STATUSES) {
-    for (const role of ROLES) {
-      for (const isOwner of [true, false]) {
-        const label = `${status} / role=${role ?? "null"} / isOwner=${isOwner}`
-        it(label, () => {
-          expect(allowedTransitions(status, role, isOwner)).toEqual(
-            expected(status, role, isOwner)
-          )
-        })
-      }
-    }
-  }
+  it("lists the display statuses the server function returns", () => {
+    expect(DISPLAY).toHaveLength(8)
+    expect([...REQUEST_DISPLAY_STATUSES].sort()).toEqual([...DISPLAY].sort())
+  })
+})
 
-  it("invoiced returns [] for every role and ownership", () => {
-    for (const role of ROLES) {
-      for (const isOwner of [true, false]) {
-        expect(allowedTransitions("invoiced", role, isOwner)).toEqual([])
-      }
+describe("display status helpers", () => {
+  it("labels and colours every display status", () => {
+    for (const status of DISPLAY) {
+      expect(DISPLAY_STATUS_LABELS[status]).toBeTruthy()
+      expect(DISPLAY_STATUS_PILL_CLASS[status]).toMatch(/^bg-/)
+      expect(isRequestDisplayStatus(status)).toBe(true)
     }
   })
 
-  it("cancelled returns [] for every role and ownership", () => {
-    for (const role of ROLES) {
-      for (const isOwner of [true, false]) {
-        expect(allowedTransitions("cancelled", role, isOwner)).toEqual([])
-      }
-    }
+  it("gives every display status a tone, muted when unknown", () => {
+    for (const status of DISPLAY) expect(displayStatusTone(status)).toBeTruthy()
+    expect(displayStatusTone("completed")).toBe("success")
+    expect(displayStatusTone("rejected")).toBe("danger")
+    expect(displayStatusTone("awaiting_invoice")).toBe("warning")
+    expect(displayStatusTone("nope")).toBe("muted")
+    expect(displayStatusTone(null)).toBe("muted")
   })
 
-  it("serviced -> in_progress is offered to admin and technicians", () => {
-    expect(allowedTransitions("serviced", "admin", false)).toContain("in_progress")
-    expect(allowedTransitions("serviced", "technicians", false)).toContain("in_progress")
-    expect(allowedTransitions("serviced", "sales", true)).not.toContain("in_progress")
-    expect(allowedTransitions("serviced", "accounts", true)).not.toContain("in_progress")
+  it("is defensive about unknown values", () => {
+    expect(isRequestDisplayStatus("draft")).toBe(false)
+    expect(isRequestDisplayStatus(null)).toBe(false)
+    expect(displayStatusLabel("nope")).toBe("Unknown")
+    expect(displayStatusPillClass(undefined)).toBe("bg-muted text-muted-foreground")
   })
 
-  it("in_progress -> submitted is offered to NOBODY", () => {
-    for (const role of ROLES) {
-      for (const isOwner of [true, false]) {
-        expect(allowedTransitions("in_progress", role, isOwner)).not.toContain("submitted")
-      }
-    }
+  it("falls back to the review state when the RPC value is missing", () => {
+    expect(displayStatusOrReviewState("completed", "submitted")).toBe("completed")
+    expect(displayStatusOrReviewState(undefined, "rejected")).toBe("rejected")
+    expect(displayStatusOrReviewState(undefined, "awaiting_approval")).toBe("awaiting_approval")
+    expect(displayStatusOrReviewState(undefined, "submitted")).toBe("being_reviewed")
+  })
+
+  it("formats the invoice column and item summary for the list", () => {
+    expect(
+      requestInvoiceColumnLabel({ invoice_status: "invoiced", invoice_number: "INV-9" }),
+    ).toBe("INV-9")
+    expect(requestInvoiceColumnLabel({ invoice_status: "pending" })).toBe("Pending")
+    expect(
+      requestInvoiceColumnLabel({
+        invoice_status: "not_invoiced",
+        invoice_approval: "awaiting",
+      }),
+    ).toBe("Awaiting approval")
+    expect(
+      requestInvoiceColumnLabel({
+        invoice_status: "not_invoiced",
+        invoice_approval: "approved",
+        not_invoiced_kind: "internal",
+      }),
+    ).toBe("Not invoiced · Internal")
+    expect(
+      requestItemsSummary([
+        { product_name: "Starlink Standard Kit v4", quantity_requested: 2, sort_order: 0 },
+        { product_name: "UCG Ultra", quantity_requested: 1, sort_order: 1 },
+      ]),
+    ).toBe("Starlink Standard Kit v4 ×2, UCG Ultra +1")
   })
 })

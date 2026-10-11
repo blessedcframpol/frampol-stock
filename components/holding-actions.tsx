@@ -19,7 +19,11 @@ import { extendHolding } from "@/lib/holdings"
 import { useInventoryStore } from "@/lib/inventory-store"
 import { useOrgTimezone } from "@/hooks/use-org-timezone"
 import { InvoiceChoiceFields } from "@/components/invoice-choice-fields"
-import { invoiceChoiceProblem, type InvoiceChoice } from "@/lib/invoices"
+import {
+  invoiceChoiceProblem,
+  type InvoiceChoice,
+  type NotInvoicedKind,
+} from "@/lib/invoices"
 import {
   inclusiveRentalDays,
   latestRentalStart,
@@ -49,8 +53,11 @@ export function ConvertToSaleDialog({
   const [invoiceChoice, setInvoiceChoice] = useState<InvoiceChoice | "">("")
   const [invoiceNumber, setInvoiceNumber] = useState("")
   const [invoiceReason, setInvoiceReason] = useState("")
+  const [notInvoicedKind, setNotInvoicedKind] = useState<NotInvoicedKind | "">("")
   const [saving, setSaving] = useState(false)
-  const invoiceProblem = requireInvoice ? invoiceChoiceProblem(invoiceChoice, invoiceNumber, invoiceReason) : null
+  const invoiceProblem = requireInvoice
+    ? invoiceChoiceProblem(invoiceChoice, invoiceNumber, invoiceReason, notInvoicedKind)
+    : null
 
   async function submit() {
     if (invoiceProblem) {
@@ -66,6 +73,7 @@ export function ConvertToSaleDialog({
         invoiceNumber: invoiceNumber.trim() || undefined,
         invoiceChoice: invoiceChoice || undefined,
         invoiceReason: invoiceReason.trim() || undefined,
+        notInvoicedKind: notInvoicedKind || undefined,
         saleTransactionDateIso: saleDate,
       })
       if (result.success.length === 0) {
@@ -115,9 +123,11 @@ export function ConvertToSaleDialog({
               choice={invoiceChoice}
               invoiceNumber={invoiceNumber}
               reason={invoiceReason}
+              kind={notInvoicedKind}
               onChoice={setInvoiceChoice}
               onInvoiceNumber={setInvoiceNumber}
               onReason={setInvoiceReason}
+              onKind={setNotInvoicedKind}
             />
           ) : null}
         </div>
@@ -160,8 +170,14 @@ export function ConvertRentalToSaleDialog({
   const [invoiceChoice, setInvoiceChoice] = useState<InvoiceChoice | "">("")
   const [invoiceNumber, setInvoiceNumber] = useState("")
   const [invoiceReason, setInvoiceReason] = useState("")
+  const [notInvoicedKind, setNotInvoicedKind] = useState<NotInvoicedKind | "">("")
   const [saving, setSaving] = useState(false)
-  const invoiceProblem = invoiceChoiceProblem(invoiceChoice, invoiceNumber, invoiceReason)
+  const invoiceProblem = invoiceChoiceProblem(
+    invoiceChoice,
+    invoiceNumber,
+    invoiceReason,
+    notInvoicedKind
+  )
   const days = rentalStart ? inclusiveRentalDays(rentalStart, rentalEnd) : null
   const problem = rentalConversionProblem({
     rentalStart,
@@ -188,6 +204,7 @@ export function ConvertRentalToSaleDialog({
         invoiceNumber: invoiceNumber.trim() || undefined,
         invoiceChoice: invoiceChoice || undefined,
         invoiceReason: invoiceReason.trim() || undefined,
+        notInvoicedKind: notInvoicedKind || undefined,
         saleTransactionDateIso: saleDate,
         rentalStartDate: rentalStart,
         rentalEndDate: rentalEnd,
@@ -261,9 +278,11 @@ export function ConvertRentalToSaleDialog({
             choice={invoiceChoice}
             invoiceNumber={invoiceNumber}
             reason={invoiceReason}
+            kind={notInvoicedKind}
             onChoice={setInvoiceChoice}
             onInvoiceNumber={setInvoiceNumber}
             onReason={setInvoiceReason}
+            onKind={setNotInvoicedKind}
           />
         </div>
         <DialogFooter>

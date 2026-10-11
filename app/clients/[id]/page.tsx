@@ -81,6 +81,8 @@ import { formatCount } from "@/lib/format-display"
 import { fetchClientTransactions, type ResolvedClientTransaction } from "@/lib/clients-orders"
 import type { ClientSite, Transaction } from "@/lib/data"
 import { StatusPill } from "@/components/fs/status-pill"
+import { RequestStatusPill } from "@/components/request-status-pill"
+import { useRequestDisplayStatuses } from "@/hooks/use-request-display-statuses"
 
 type ConsignmentRow = {
   kind: "consignment"
@@ -133,6 +135,7 @@ export default function ClientDetailPage() {
   const [cases, setCases] = useState<RemediationCaseRow[]>([])
   const [caseHolders, setCaseHolders] = useState<Record<string, string>>({})
   const [clientRequests, setClientRequests] = useState<StockRequestWithRelations[]>([])
+  const displayStatuses = useRequestDisplayStatuses(clientRequests)
   const [requestsLoading, setRequestsLoading] = useState(true)
   const [requestsForId, setRequestsForId] = useState(id)
   if (id !== requestsForId) {
@@ -318,7 +321,7 @@ export default function ClientDetailPage() {
   const activeClient = client
   const held = holdingsForClient(heldUnits, activeClient)
   const overdueHeld = held.filter((unit) => unit.returnDate && isOverdue(unit.returnDate, today))
-  const openRequests = clientRequests.filter((request) => OPEN_REQUEST_STATUSES.has(request.status))
+  const openRequests = clientRequests.filter((request) => OPEN_REQUEST_STATUSES.has(request.review_state))
   const lastActivity = ledgerReady ? saleStats.last : ""
   const emails = splitEmails(activeClient.email)
   const phone = displayContact(activeClient.phone)
@@ -570,7 +573,7 @@ export default function ClientDetailPage() {
                         {(r.stock_request_lines ?? []).length !== 1 ? "s" : ""}
                       </TableCell>
                       <TableCell>
-                        <StatusPill value={r.status} />
+                        <RequestStatusPill status={displayStatuses[r.id]} />
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
                         {formatDateDDMMYYYY(r.created_at)}

@@ -40,7 +40,8 @@ import {
   UsersRound,
 } from "lucide-react"
 import { useAuth } from "@/lib/auth-context"
-import { canManageUsers, isValidRole, ROLES, type AppRole } from "@/lib/permissions"
+import { canManageUsers, canViewUsers, isValidRole, ROLE_LABELS, ROLES } from "@/lib/permissions"
+import { getSupabaseClient } from "@/lib/supabase/client"
 import { pageTitleClass } from "@/components/page-nav"
 import { PageBreadcrumbs } from "@/components/page-breadcrumbs"
 import { toast } from "sonner"
@@ -59,14 +60,6 @@ type ProfileRow = {
 
 const ROLE_PLACEHOLDER = "__role_pending__"
 const PAGE_SIZE_OPTIONS = [10, 15, 25, 50] as const
-
-const ROLE_LABELS: Record<AppRole, string> = {
-  admin: "Admin",
-  sales: "Sales",
-  accounts: "Accounts",
-  technicians: "Technicians",
-  viewer: "Viewer — read-only",
-}
 
 function profileInitials(display: string | null | undefined, email: string | null | undefined): string {
   return displayInitials(display, (email || "").split("@")[0])
@@ -115,7 +108,9 @@ function downloadUsersCsv(profiles: ProfileRow[]) {
 
 export function UsersContent() {
   const { role } = useAuth()
-  const allowed = canManageUsers(role)
+  const canWrite = canManageUsers(role)
+  /** Admin writes through the admin API; Admin viewer reads profiles directly (RLS allows it). */
+  const allowed = canViewUsers(role)
 
   const [profiles, setProfiles] = useState<ProfileRow[]>([])
   const [loading, setLoading] = useState(true)
@@ -139,6 +134,14 @@ export function UsersContent() {
   const [saving, setSaving] = useState(false)
 
   const loadProfiles = useCallback(async (): Promise<ProfileRow[]> => {
+    if (!canWrite) {
+      const { data, error } = await getSupabaseClient()
+        .from("profiles")
+        .select("id, email, display_name, role, active, created_at")
+        .order("created_at", { ascending: true })
+      if (error) throw error
+      return (data ?? []) as ProfileRow[]
+    }
     const res = await fetch("/api/admin/profiles")
     const data = await res.json().catch(() => ({}))
     if (!res.ok) {
@@ -146,7 +149,7 @@ export function UsersContent() {
       return []
     }
     return Array.isArray(data) ? (data as ProfileRow[]) : []
-  }, [])
+  }, [canWrite])
 
   const fetchProfiles = useCallback(async () => {
     if (!allowed) return
@@ -275,7 +278,9 @@ export function UsersContent() {
           </Badge>
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
-          People appear here after their first Microsoft sign-in. Assign a role to give them access.
+          {canWrite
+            ? "People appear here after their first Microsoft sign-in. Assign a role to give them access."
+            : "Read-only view of everyone with an account."}
         </p>
       </div>
 
@@ -348,7 +353,7 @@ export function UsersContent() {
                   <TableHead className="min-w-[8rem]">Role</TableHead>
                   <TableHead className="min-w-[7rem]">Status</TableHead>
                   <TableHead className="min-w-[10rem]">Joined date</TableHead>
-                  <TableHead className="w-[5rem] text-right">Actions</TableHead>
+                  {canWrite ? <TableHead className="w-[5rem] text-right">Actions</TableHead> : null}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -392,18 +397,20 @@ export function UsersContent() {
                     <TableCell className="text-muted-foreground whitespace-nowrap">
                       {formatJoined(p.created_at)}
                     </TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="size-8"
-                        onClick={() => openEdit(p)}
-                        aria-label={`Edit ${p.display_name || p.email}`}
-                      >
-                        <Pencil className="size-4" />
-                      </Button>
-                    </TableCell>
+                    {canWrite ? (
+                      <TableCell className="text-right">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="size-8"
+                          onClick={() => openEdit(p)}
+                          aria-label={`Edit ${p.display_name || p.email}`}
+                        >
+                          <Pencil className="size-4" />
+                        </Button>
+                      </TableCell>
+                    ) : null}
                   </TableRow>
                 ))}
               </TableBody>

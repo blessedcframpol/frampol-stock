@@ -274,7 +274,6 @@ export async function runChecks(ctx) {
           poc_out_date: poc,
           return_date: ret,
           assignment_history: item.assignment_history ?? [],
-          reserved_for_request_line_id: item.reserved_for_request_line_id,
           cloud_key: item.cloud_key,
           deleted_at: null,
         },

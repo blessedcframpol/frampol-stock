@@ -118,7 +118,7 @@ export async function runChecks(ctx) {
       `SELECT id, product_id, serial_number, status, date_added::text AS date_added, location,
               client, notes, assigned_to, purchase_date::text AS purchase_date,
               warranty_end_date::text AS warranty_end_date, assignment_history,
-              reserved_for_request_line_id, cloud_key, poc_out_date, return_date
+              cloud_key, poc_out_date, return_date
        FROM public.inventory_items
        WHERE id = $1 AND deleted_at IS NULL`,
       [itemId],
@@ -144,7 +144,6 @@ export async function runChecks(ctx) {
           poc_out_date: after.poc_out_date,
           return_date: after.return_date,
           assignment_history: row.assignment_history ?? [],
-          reserved_for_request_line_id: row.reserved_for_request_line_id,
           cloud_key: row.cloud_key,
           deleted_at: null,
         },

@@ -2,6 +2,7 @@ import type { Transaction } from "@/lib/data"
 
 export const INVOICE_CHOICES = ["number", "pending", "not_invoiced"] as const
 export type InvoiceChoice = (typeof INVOICE_CHOICES)[number]
+export type NotInvoicedKind = "internal" | "complimentary"
 export type InvoiceStatus = "invoiced" | "pending" | "not_invoiced" | "legacy_unreviewed"
 export type InvoiceApproval = "awaiting" | "approved" | "rejected"
 
@@ -11,6 +12,7 @@ export type InvoiceState = {
   approval?: InvoiceApproval | null
   legacy?: boolean
   notInvoicedReason?: string
+  notInvoicedKind?: NotInvoicedKind | null
   rejectionReason?: string
   enteredBy?: string
   enteredAt?: string
@@ -50,18 +52,23 @@ export function realInvoiceNumberProblem(value: string): string | null {
   return null
 }
 
-/** Sale and Rentals must pick a number, Invoice pending, or 00000 with a reason. */
+/** Sale and Rentals must pick a number, Invoice pending, or 00000 with a reason and kind. */
 export function invoiceChoiceProblem(
   choice: InvoiceChoice | "",
   invoiceNumber: string,
   reason: string,
+  kind: NotInvoicedKind | "" = "",
 ): string | null {
   if (choice === "number") return realInvoiceNumberProblem(invoiceNumber)
   if (choice === "pending") {
     return invoiceNumber.trim() ? "Invoice pending does not take a number" : null
   }
   if (choice === "not_invoiced") {
-    return reason.trim().length < 15 ? "00000 needs a reason of at least 15 characters" : null
+    if (reason.trim().length < 15) return "00000 needs a reason of at least 15 characters"
+    if (kind !== "internal" && kind !== "complimentary") {
+      return "00000 needs a kind: internal or complimentary"
+    }
+    return null
   }
   return "Sale and Rentals need an invoice number, Invoice pending, or 00000 — not invoiced"
 }

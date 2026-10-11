@@ -337,11 +337,16 @@ export async function runChecks(ctx) {
   if (!appDelete) pass("app_role_delete", "authenticated cannot delete audit_log")
   else fail("app_role_delete", appDelete)
 
-  const viewerRead = await ctx.asUser(viewerId, async () =>
-    ctx.raises(`SELECT public.audit_log_read()`, [], "admin only"),
-  )
-  if (!viewerRead) pass("viewer_hidden", "a viewer cannot read the audit log through the function")
-  else fail("viewer_hidden", viewerRead)
+  // RQ2: Admin viewer may read the audit log; other non-admin roles still cannot.
+  const viewerRead = await ctx.asUser(viewerId, async () => {
+    const res = await db.query(`SELECT public.audit_log_read() AS payload`)
+    return res.rows[0]?.payload
+  })
+  if (viewerRead != null) {
+    pass("viewer_audit_read", "Admin viewer can read the audit log through the function")
+  } else {
+    fail("viewer_audit_read", "Admin viewer should receive the audit payload")
+  }
 
   const grants = await db.query(
     `SELECT

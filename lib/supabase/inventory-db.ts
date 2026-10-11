@@ -5,14 +5,18 @@ type InventoryRow = Database["public"]["Tables"]["inventory_items"]["Row"]
 type TransactionRow = Database["public"]["Tables"]["transactions"]["Row"]
 
 /** Embed from PostgREST when selecting inventory with FK to product_lines. */
-export type ProductLineEmbed = { product_name: string; vendor: string }
+export type ProductLineEmbed = {
+  product_name: string
+  vendor: string
+  requires_cloud_key?: boolean
+}
 
 export type InventoryItemQueryRow = InventoryRow & {
   product_lines: ProductLineEmbed | null
 }
 
 /** Use on all inventory_items reads that must populate name/vendor for the app. */
-export const INVENTORY_ITEM_SELECT = "*, product_lines(product_name, vendor)"
+export const INVENTORY_ITEM_SELECT = "*, product_lines(product_name, vendor, requires_cloud_key)"
 
 export function rowToInventoryItem(row: InventoryItemQueryRow | InventoryRow): InventoryItem {
   const pl = "product_lines" in row ? row.product_lines : null
@@ -42,8 +46,8 @@ export function rowToInventoryItem(row: InventoryItemQueryRow | InventoryRow): I
     pocOutDate: row.poc_out_date ?? undefined,
     returnDate: row.return_date ?? undefined,
     assignmentHistory: assignmentHistory ?? undefined,
-    reservedForRequestLineId: row.reserved_for_request_line_id ?? undefined,
     cloudKey: row.cloud_key ?? undefined,
+    requiresCloudKey: pl?.requires_cloud_key === true,
     deletedAt: row.deleted_at ? String(row.deleted_at) : undefined,
   }
 }
@@ -72,7 +76,6 @@ export function inventoryItemToRow(item: InventoryItem): Database["public"]["Tab
     poc_out_date: item.pocOutDate ?? null,
     return_date: item.returnDate ?? null,
     assignment_history: history ?? null,
-    reserved_for_request_line_id: item.reservedForRequestLineId ?? null,
     cloud_key: item.cloudKey ?? null,
     deleted_at: item.deletedAt ?? null,
   }
@@ -97,10 +100,14 @@ export function rowToTransaction(
     | "previous_stock_pool"
     | "after_stock_pool"
     | "reverses_transaction_id"
+    | "request_id"
+    | "request_line_id"
   > & {
     previous_status?: string | null
     previous_status_source?: string | null
     reverses_transaction_id?: string | null
+    request_id?: string | null
+    request_line_id?: string | null
   }
 ): Transaction {
   const r = row as TransactionRow & {

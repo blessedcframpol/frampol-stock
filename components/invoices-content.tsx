@@ -375,6 +375,7 @@ function ApprovalActions({
 function ClassifyLegacy({ batchId, onDone }: { batchId: string; onDone: () => Promise<void> }) {
   const [number, setNumber] = useState("")
   const [reason, setReason] = useState("")
+  const [kind, setKind] = useState<"internal" | "complimentary" | "">("")
   const [saving, setSaving] = useState(false)
 
   async function run(choice: "number" | "pending" | "not_invoiced") {
@@ -382,6 +383,16 @@ function ClassifyLegacy({ batchId, onDone }: { batchId: string; onDone: () => Pr
       const problem = realInvoiceNumberProblem(number)
       if (problem) {
         toast.error(problem)
+        return
+      }
+    }
+    if (choice === "not_invoiced") {
+      if (reason.trim().length < 15) {
+        toast.error("00000 needs a reason of at least 15 characters")
+        return
+      }
+      if (kind !== "internal" && kind !== "complimentary") {
+        toast.error("00000 needs a kind: internal or complimentary")
         return
       }
     }
@@ -394,6 +405,7 @@ function ClassifyLegacy({ batchId, onDone }: { batchId: string; onDone: () => Pr
         p_choice: choice,
         p_invoice_number: choice === "number" ? number.trim() : "",
         p_reason: reason.trim(),
+        p_kind: choice === "not_invoiced" ? kind : null,
       })
       if (error) throw new Error(error.message)
       toast.success("Classified")
@@ -410,6 +422,10 @@ function ClassifyLegacy({ batchId, onDone }: { batchId: string; onDone: () => Pr
       <Input className="font-mono" value={number} placeholder="Real invoice number" onChange={(event) => setNumber(event.target.value)} />
       <Button type="button" size="sm" disabled={saving} onClick={() => void run("number")}>Enter number</Button>
       <Button type="button" size="sm" variant="outline" disabled={saving} onClick={() => void run("pending")}>Mark pending</Button>
+      <div className="flex gap-2">
+        <Button type="button" size="sm" variant={kind === "internal" ? "default" : "outline"} disabled={saving} onClick={() => setKind("internal")}>Internal</Button>
+        <Button type="button" size="sm" variant={kind === "complimentary" ? "default" : "outline"} disabled={saving} onClick={() => setKind("complimentary")}>Complimentary</Button>
+      </div>
       <Textarea value={reason} placeholder="Not invoiced reason, at least 15 characters" onChange={(event) => setReason(event.target.value)} />
       <Button type="button" size="sm" variant="outline" disabled={saving} onClick={() => void run("not_invoiced")}>Mark not invoiced</Button>
     </div>

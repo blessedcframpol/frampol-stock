@@ -1,9 +1,11 @@
 /**
- * FortiGate products need cloud keys when moving out (Sale, POC, rental, transfer, dispose).
- * Inbound only requires serial numbers.
+ * Cloud keys when moving out (Sale, POC, rental, transfer, dispose).
+ * Driven by product_lines.requires_cloud_key — no name heuristic.
  */
-export function isFortigateProductName(name: string): boolean {
-  return name.trim().toLowerCase().includes("fortigate")
+export function productRequiresCloudKey(
+  product: { requiresCloudKey?: boolean } | null | undefined
+): boolean {
+  return product?.requiresCloudKey === true
 }
 
 /** Split comma/newline-separated values (same rules as serial lists). */

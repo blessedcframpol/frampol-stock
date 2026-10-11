@@ -10,6 +10,7 @@ export interface Database {
           low_stock_emails_enabled: boolean
           low_stock_recipients: string[]
           timezone: string
+          internal_client_id: string | null
           updated_at: string
           updated_by: string | null
         }
@@ -19,6 +20,7 @@ export interface Database {
           low_stock_emails_enabled?: boolean
           low_stock_recipients?: string[]
           timezone?: string
+          internal_client_id?: string | null
           updated_at?: string
           updated_by?: string | null
         }
@@ -28,6 +30,7 @@ export interface Database {
           low_stock_emails_enabled?: boolean
           low_stock_recipients?: string[]
           timezone?: string
+          internal_client_id?: string | null
           updated_at?: string
           updated_by?: string | null
         }
@@ -89,7 +92,6 @@ export interface Database {
           poc_out_date: string | null
           return_date: string | null
           assignment_history: Json | null
-          reserved_for_request_line_id: string | null
           cloud_key: string | null
           deleted_at: string | null
         }
@@ -110,7 +112,6 @@ export interface Database {
           poc_out_date?: string | null
           return_date?: string | null
           assignment_history?: Json | null
-          reserved_for_request_line_id?: string | null
           deleted_at?: string | null
         }
         Update: {
@@ -129,7 +130,6 @@ export interface Database {
           poc_out_date?: string | null
           return_date?: string | null
           assignment_history?: Json | null
-          reserved_for_request_line_id?: string | null
           cloud_key?: string | null
           deleted_at?: string | null
         }
@@ -183,6 +183,7 @@ export interface Database {
           vendor: string
           created_at: string
           requires_serial: boolean
+          requires_cloud_key: boolean
           reorder_level: number | null
           is_active: boolean
         }
@@ -192,6 +193,7 @@ export interface Database {
           vendor?: string
           created_at?: string
           requires_serial?: boolean
+          requires_cloud_key?: boolean
           reorder_level?: number | null
           is_active?: boolean
         }
@@ -201,6 +203,7 @@ export interface Database {
           vendor?: string
           created_at?: string
           requires_serial?: boolean
+          requires_cloud_key?: boolean
           reorder_level?: number | null
           is_active?: boolean
         }
@@ -209,46 +212,103 @@ export interface Database {
       stock_requests: {
         Row: {
           id: string
+          request_number: string
           client_id: string
           created_by: string
-          status: string
+          review_state: string
+          type: string
+          return_date: string | null
+          atlas_task_url: string | null
           quotation_url: string | null
           notes: string | null
-          serviced_at: string | null
+          submitted_at: string
+          invoice_status: string
           invoice_number: string | null
-          invoice_document_url: string | null
-          invoiced_at: string | null
-          invoiced_by: string | null
+          not_invoiced_reason: string | null
+          not_invoiced_kind: string | null
+          invoice_approval: string | null
+          invoice_entered_by: string | null
+          invoice_entered_at: string | null
+          invoice_approved_by: string | null
+          invoice_approved_at: string | null
+          reject_reason_code: string | null
+          reject_note: string | null
+          rejected_by: string | null
+          rejected_at: string | null
+          closed_reason: string | null
+          closed_by: string | null
+          closed_at: string | null
+          cancel_reason: string | null
+          cancelled_by: string | null
+          cancelled_at: string | null
           created_at: string
           updated_at: string
         }
         Insert: {
           id?: string
+          request_number?: string
           client_id: string
           created_by: string
-          status?: string
+          review_state?: string
+          type: string
+          return_date?: string | null
+          atlas_task_url?: string | null
           quotation_url?: string | null
           notes?: string | null
-          serviced_at?: string | null
+          submitted_at?: string
+          invoice_status: string
           invoice_number?: string | null
-          invoice_document_url?: string | null
-          invoiced_at?: string | null
-          invoiced_by?: string | null
+          not_invoiced_reason?: string | null
+          not_invoiced_kind?: string | null
+          invoice_approval?: string | null
+          invoice_entered_by?: string | null
+          invoice_entered_at?: string | null
+          invoice_approved_by?: string | null
+          invoice_approved_at?: string | null
+          reject_reason_code?: string | null
+          reject_note?: string | null
+          rejected_by?: string | null
+          rejected_at?: string | null
+          closed_reason?: string | null
+          closed_by?: string | null
+          closed_at?: string | null
+          cancel_reason?: string | null
+          cancelled_by?: string | null
+          cancelled_at?: string | null
           created_at?: string
           updated_at?: string
         }
         Update: {
           id?: string
+          request_number?: string
           client_id?: string
           created_by?: string
-          status?: string
+          review_state?: string
+          type?: string
+          return_date?: string | null
+          atlas_task_url?: string | null
           quotation_url?: string | null
           notes?: string | null
-          serviced_at?: string | null
+          submitted_at?: string
+          invoice_status?: string
           invoice_number?: string | null
-          invoice_document_url?: string | null
-          invoiced_at?: string | null
-          invoiced_by?: string | null
+          not_invoiced_reason?: string | null
+          not_invoiced_kind?: string | null
+          invoice_approval?: string | null
+          invoice_entered_by?: string | null
+          invoice_entered_at?: string | null
+          invoice_approved_by?: string | null
+          invoice_approved_at?: string | null
+          reject_reason_code?: string | null
+          reject_note?: string | null
+          rejected_by?: string | null
+          rejected_at?: string | null
+          closed_reason?: string | null
+          closed_by?: string | null
+          closed_at?: string | null
+          cancel_reason?: string | null
+          cancelled_by?: string | null
+          cancelled_at?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -374,6 +434,8 @@ export interface Database {
           after_return_date: string | null
           after_stock_pool: string | null
           reverses_transaction_id: string | null
+          request_id: string | null
+          request_line_id: string | null
         }
         Insert: {
           id: string
@@ -411,6 +473,8 @@ export interface Database {
           after_return_date?: string | null
           after_stock_pool?: string | null
           reverses_transaction_id?: string | null
+          request_id?: string | null
+          request_line_id?: string | null
         }
         Update: {
           id?: string
@@ -448,6 +512,8 @@ export interface Database {
           after_return_date?: string | null
           after_stock_pool?: string | null
           reverses_transaction_id?: string | null
+          request_id?: string | null
+          request_line_id?: string | null
         }
         Relationships: []
       }
@@ -841,6 +907,7 @@ export interface Database {
           status: string
           invoice_number: string | null
           not_invoiced_reason: string | null
+          not_invoiced_kind: string | null
           entered_by: string | null
           entered_at: string | null
           approval: string | null
@@ -854,6 +921,7 @@ export interface Database {
           status: string
           invoice_number?: string | null
           not_invoiced_reason?: string | null
+          not_invoiced_kind?: string | null
           entered_by?: string | null
           entered_at?: string | null
           approval?: string | null
@@ -867,6 +935,7 @@ export interface Database {
           status?: string
           invoice_number?: string | null
           not_invoiced_reason?: string | null
+          not_invoiced_kind?: string | null
           entered_by?: string | null
           entered_at?: string | null
           approval?: string | null
@@ -1052,6 +1121,8 @@ export interface Database {
           after_return_date: string | null
           after_stock_pool: string | null
           reverses_transaction_id: string | null
+          request_id: string | null
+          request_line_id: string | null
         }
         Relationships: []
       }
@@ -1204,6 +1275,7 @@ export interface Database {
           p_choice: string
           p_invoice_number: string
           p_reason: string
+          p_kind?: string | null
         }
         Returns: undefined
       }
@@ -1306,17 +1378,47 @@ export interface Database {
         Args: { p_product_name: string; p_vendor: string }
         Returns: string
       }
-      assign_serial_to_request_line: {
-        Args: { p_line_id: string; p_inventory_item_id: string }
-        Returns: undefined
+      submit_request: {
+        Args: { p_payload: Json }
+        Returns: string
       }
-      release_serial_from_request_line: {
-        Args: { p_inventory_item_id: string }
-        Returns: undefined
-      }
-      create_request_serviced_notification: {
+      approve_not_invoiced: {
         Args: { p_request_id: string }
         Returns: undefined
+      }
+      reject_request: {
+        Args: { p_request_id: string; p_code: string; p_note?: string | null }
+        Returns: undefined
+      }
+      resubmit_request: {
+        Args: { p_request_id: string; p_changes: Json }
+        Returns: undefined
+      }
+      cancel_request: {
+        Args: { p_request_id: string; p_reason?: string | null }
+        Returns: undefined
+      }
+      issue_units: {
+        Args: { p_request_id: string; p_scans: Json }
+        Returns: Json
+      }
+      close_outstanding: {
+        Args: { p_request_id: string; p_reason: string }
+        Returns: undefined
+      }
+      set_request_invoice: {
+        Args: {
+          p_request_id: string
+          p_choice: string
+          p_invoice_number?: string | null
+          p_reason?: string | null
+          p_kind?: string | null
+        }
+        Returns: undefined
+      }
+      request_display_status: {
+        Args: { p_request_id: string }
+        Returns: string
       }
     }
   }
