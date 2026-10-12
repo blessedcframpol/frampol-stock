@@ -159,14 +159,21 @@ export function StockRequestsList({
             : "Your stock requests. Raise one for stock to be issued against."
         }
         actions={
-          canCreate ? (
-            <Button asChild>
-              <Link href="/requests/new" className="gap-2">
-                <Plus className="size-4" />
-                New request
-              </Link>
-            </Button>
-          ) : undefined
+          <span className="flex flex-wrap gap-2">
+            {!seesAll ? (
+              <Button asChild variant="outline">
+                <Link href="/problems/mine">My reported problems</Link>
+              </Button>
+            ) : null}
+            {canCreate ? (
+              <Button asChild>
+                <Link href="/requests/new" className="gap-2">
+                  <Plus className="size-4" />
+                  New request
+                </Link>
+              </Button>
+            ) : null}
+          </span>
         }
       />
 

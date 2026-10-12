@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server"
 import {
+  ALLOWED_PROBLEM_SCREENSHOT_MIME_TYPES,
   ALLOWED_UPLOAD_MIME_TYPES,
   isAllowedUploadMimeType,
+  MAX_PROBLEM_REPORT_BYTES,
   MAX_UPLOAD_BYTES,
   UPLOAD_BUCKET,
   type UploadDocumentKind,
@@ -11,6 +13,7 @@ import {
   ADMIN,
   SALES,
   TECHNICIANS,
+  VIEWER,
   type AppRole,
 } from "@/lib/permissions"
 import { requireWriteAccess } from "@/lib/require-write-access"
@@ -20,6 +23,7 @@ const ALLOWED_ROLES: Record<UploadDocumentKind, readonly AppRole[]> = {
   "delivery-note": [ADMIN, TECHNICIANS],
   "decommission-document": [ADMIN, TECHNICIANS],
   invoice: [ADMIN, ACCOUNTS],
+  "problem-report": [ADMIN, SALES, ACCOUNTS, TECHNICIANS, VIEWER],
 }
 
 const PREFIX: Record<UploadDocumentKind, string> = {
@@ -27,6 +31,7 @@ const PREFIX: Record<UploadDocumentKind, string> = {
   "delivery-note": "delivery-notes",
   "decommission-document": "delivery-notes",
   invoice: "invoices",
+  "problem-report": "problem-reports",
 }
 
 const EXTENSION: Record<(typeof ALLOWED_UPLOAD_MIME_TYPES)[number], string> = {
@@ -46,9 +51,16 @@ function safeScope(value: string): string | null {
 }
 
 export async function POST(request: Request) {
-  const auth = await requireWriteAccess("uploads POST")
+  // Viewers may attach problem-report screenshots only; per-kind ALLOWED_ROLES enforces the rest.
+  const auth = await requireWriteAccess("uploads POST", [
+    ADMIN,
+    SALES,
+    ACCOUNTS,
+    TECHNICIANS,
+    VIEWER,
+  ])
   if (!auth.ok) return auth.response
-  const { role, supabase } = auth
+  const { role, supabase, user } = auth
 
   const form = await request.formData()
   const kindValue = form.get("kind")
@@ -70,13 +82,31 @@ export async function POST(request: Request) {
   if (!scopeId) {
     return NextResponse.json({ error: "Invalid upload scope" }, { status: 400 })
   }
-  if (fileValue.size <= 0 || fileValue.size > MAX_UPLOAD_BYTES) {
+  if (kindValue === "problem-report" && scopeId !== user.id) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+  }
+  const maxBytes = kindValue === "problem-report" ? MAX_PROBLEM_REPORT_BYTES : MAX_UPLOAD_BYTES
+  if (fileValue.size <= 0 || fileValue.size > maxBytes) {
     return NextResponse.json(
-      { error: "File must be between 1 byte and 10 MB" },
+      {
+        error:
+          kindValue === "problem-report"
+            ? "Screenshot must be between 1 byte and 5 MB"
+            : "File must be between 1 byte and 10 MB",
+      },
       { status: 413 }
     )
   }
-  if (!isAllowedUploadMimeType(fileValue.type)) {
+  if (kindValue === "problem-report") {
+    if (!(ALLOWED_PROBLEM_SCREENSHOT_MIME_TYPES as readonly string[]).includes(fileValue.type)) {
+      return NextResponse.json(
+        {
+          error: `Unsupported file type. Allowed: ${ALLOWED_PROBLEM_SCREENSHOT_MIME_TYPES.join(", ")}`,
+        },
+        { status: 415 }
+      )
+    }
+  } else if (!isAllowedUploadMimeType(fileValue.type)) {
     return NextResponse.json(
       {
         error: `Unsupported file type. Allowed: ${ALLOWED_UPLOAD_MIME_TYPES.join(", ")}`,
@@ -87,14 +117,12 @@ export async function POST(request: Request) {
 
   const category = kindValue === "decommission-document" ? "decommissioned" : scopeId
   const objectPath = `${PREFIX[kindValue]}/${category}/${crypto.randomUUID()}.${
-    EXTENSION[fileValue.type]
+    EXTENSION[fileValue.type as keyof typeof EXTENSION]
   }`
-  const { error } = await supabase.storage
-    .from(UPLOAD_BUCKET)
-    .upload(objectPath, fileValue, {
-      contentType: fileValue.type,
-      upsert: false,
-    })
+  const { error } = await supabase.storage.from(UPLOAD_BUCKET).upload(objectPath, fileValue, {
+    contentType: fileValue.type,
+    upsert: false,
+  })
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 400 })
   }

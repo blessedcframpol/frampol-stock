@@ -133,6 +133,21 @@ export function canAccessSettings(role: AppRole | null | undefined): boolean {
   return role === ADMIN || role === SALES || role === ACCOUNTS || role === TECHNICIANS || role === VIEWER
 }
 
+/** Any signed-in staff role can file a problem report. */
+export function canReportProblem(role: AppRole | null | undefined): boolean {
+  return role === ADMIN || role === SALES || role === ACCOUNTS || role === TECHNICIANS || role === VIEWER
+}
+
+/** Admin manages all problem reports (list + status). */
+export function canManageProblemReports(role: AppRole | null | undefined): boolean {
+  return role === ADMIN
+}
+
+/** Sales/technicians see their reports under Requests; others via the user menu. */
+export function problemReportsLiveUnderRequests(role: AppRole | null | undefined): boolean {
+  return role === SALES || role === TECHNICIANS
+}
+
 /** UI label for each role. */
 export const ROLE_LABELS: Record<AppRole, string> = {
   admin: "Admin",

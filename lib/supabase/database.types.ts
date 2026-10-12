@@ -10,6 +10,7 @@ export interface Database {
           low_stock_emails_enabled: boolean
           low_stock_recipients: string[]
           audit_report_recipients: string[]
+          problem_report_recipients: string[]
           timezone: string
           internal_client_id: string | null
           updated_at: string
@@ -21,6 +22,7 @@ export interface Database {
           low_stock_emails_enabled?: boolean
           low_stock_recipients?: string[]
           audit_report_recipients?: string[]
+          problem_report_recipients?: string[]
           timezone?: string
           internal_client_id?: string | null
           updated_at?: string
@@ -32,6 +34,7 @@ export interface Database {
           low_stock_emails_enabled?: boolean
           low_stock_recipients?: string[]
           audit_report_recipients?: string[]
+          problem_report_recipients?: string[]
           timezone?: string
           internal_client_id?: string | null
           updated_at?: string
@@ -397,6 +400,66 @@ export interface Database {
           read_at?: string | null
           metadata?: Json
           created_at?: string
+        }
+        Relationships: []
+      }
+      problem_reports: {
+        Row: {
+          id: string
+          report_number: string
+          created_by: string
+          what_happened: string
+          what_expected: string | null
+          screenshot_path: string | null
+          page_url: string
+          reporter_role: string | null
+          browser: string | null
+          device: string | null
+          context: Json
+          status: "open" | "in_progress" | "resolved"
+          resolution_note: string | null
+          resolved_by: string | null
+          resolved_at: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          report_number?: string
+          created_by: string
+          what_happened: string
+          what_expected?: string | null
+          screenshot_path?: string | null
+          page_url: string
+          reporter_role?: string | null
+          browser?: string | null
+          device?: string | null
+          context?: Json
+          status?: "open" | "in_progress" | "resolved"
+          resolution_note?: string | null
+          resolved_by?: string | null
+          resolved_at?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          report_number?: string
+          created_by?: string
+          what_happened?: string
+          what_expected?: string | null
+          screenshot_path?: string | null
+          page_url?: string
+          reporter_role?: string | null
+          browser?: string | null
+          device?: string | null
+          context?: Json
+          status?: "open" | "in_progress" | "resolved"
+          resolution_note?: string | null
+          resolved_by?: string | null
+          resolved_at?: string | null
+          created_at?: string
+          updated_at?: string
         }
         Relationships: []
       }
@@ -1175,7 +1238,7 @@ export interface Database {
       }
     }
     Enums: {
-      [_ in never]: never
+      problem_report_status: "open" | "in_progress" | "resolved"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -1364,6 +1427,26 @@ export interface Database {
       }
       profile_last_sign_ins: {
         Args: Record<string, never>
+        Returns: Json
+      }
+      submit_problem_report: {
+        Args: {
+          p_what_happened: string
+          p_what_expected?: string | null
+          p_screenshot_path?: string | null
+          p_page_url?: string | null
+          p_browser?: string | null
+          p_device?: string | null
+          p_context?: Json
+        }
+        Returns: Json
+      }
+      update_problem_report_status: {
+        Args: {
+          p_id: string
+          p_status: "open" | "in_progress" | "resolved"
+          p_resolution_note?: string | null
+        }
         Returns: Json
       }
       audit_exceptions_read: {

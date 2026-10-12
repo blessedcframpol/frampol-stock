@@ -1,7 +1,13 @@
 export const UPLOAD_BUCKET = "uploads"
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+export const MAX_PROBLEM_REPORT_BYTES = 5 * 1024 * 1024
 export const ALLOWED_UPLOAD_MIME_TYPES = [
   "application/pdf",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+] as const
+export const ALLOWED_PROBLEM_SCREENSHOT_MIME_TYPES = [
   "image/jpeg",
   "image/png",
   "image/webp",
@@ -12,6 +18,7 @@ export type UploadDocumentKind =
   | "delivery-note"
   | "decommission-document"
   | "invoice"
+  | "problem-report"
 
 export function isAllowedUploadMimeType(
   value: string

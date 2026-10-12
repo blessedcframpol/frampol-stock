@@ -35,6 +35,7 @@ const SUITE = [
   { id: "083", file: "scripts/verify-083-rq3-preview-scan.mjs" },
   { id: "084", file: "scripts/verify-084-au1-audit-trail.mjs" },
   { id: "085", file: "scripts/verify-085-lg1-set-user-access.mjs" },
+  { id: "086", file: "scripts/verify-086-fb1-problem-reports.mjs" },
   { id: "movement", file: "scripts/verify-movement-transitions.mjs" },
 ]
 

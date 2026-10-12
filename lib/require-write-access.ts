@@ -26,7 +26,8 @@ export type RequireWriteAccessResult =
 
 /** Reject inactive, unassigned, and viewer accounts before any API mutation. */
 export async function requireWriteAccess(
-  logLabel: string
+  logLabel: string,
+  allowedRoles: readonly AppRole[] = WRITE_ROLES
 ): Promise<RequireWriteAccessResult> {
   const supabase = await createServerSupabaseClient()
   const {
@@ -45,7 +46,7 @@ export async function requireWriteAccess(
     .eq("id", user.id)
     .single()
   const role = profile?.active ? (profile.role as AppRole | null) : null
-  if (!role || !WRITE_ROLES.includes(role)) {
+  if (!role || !allowedRoles.includes(role)) {
     return {
       ok: false,
       response: apiClientError(403, "Read-only accounts cannot perform this action", {

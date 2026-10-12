@@ -29,6 +29,7 @@ import {
   UsersRound,
   Volume2,
   VolumeX,
+  MessageSquareWarning,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Input } from "@/components/ui/input"
@@ -62,6 +63,9 @@ import {
   canRecordStockMovement,
   canViewUsers,
   canViewAppLogs,
+  canManageProblemReports,
+  canReportProblem,
+  problemReportsLiveUnderRequests,
   isValidRole,
   ROLE_LABELS,
   type AppRole,
@@ -122,6 +126,7 @@ type BottomNavEntry = {
 
 const bottomNavItems: BottomNavEntry[] = [
   { href: "/users", label: "User management", icon: UsersRound, adminOnly: true },
+  { href: "/problems", label: "Reported problems", icon: MessageSquareWarning, adminOnly: true },
   { href: "/logs", label: "Error logs", icon: ScrollText, adminOnly: true },
   { href: "/settings", label: "Settings", icon: Settings },
 ]
@@ -132,6 +137,7 @@ function filterBottomNavForRole(role: string | null | undefined): BottomNavEntry
     if (item.href === "/settings") return canAccessSettings(r)
     if (!item.adminOnly) return true
     if (item.href === "/users") return canViewUsers(r)
+    if (item.href === "/problems") return canManageProblemReports(r)
     return canViewAppLogs(r)
   })
 }
@@ -1030,11 +1036,23 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                   </Avatar>
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuContent align="end" className="w-56">
                 <div className="px-2 py-1.5">
                   <p className="text-sm font-medium text-foreground">{displayName}</p>
                   {roleLabel ? <p className="text-xs text-muted-foreground">{roleLabel}</p> : null}
                 </div>
+                {canReportProblem(role) ? (
+                  <DropdownMenuItem asChild>
+                    <Link href={`/problems/new?from=${encodeURIComponent(pathname || "/")}`}>
+                      Report a problem
+                    </Link>
+                  </DropdownMenuItem>
+                ) : null}
+                {canReportProblem(role) && !problemReportsLiveUnderRequests(role) ? (
+                  <DropdownMenuItem asChild>
+                    <Link href="/problems/mine">My reported problems</Link>
+                  </DropdownMenuItem>
+                ) : null}
                 <DropdownMenuItem onClick={() => void handleSignOut()}>
                   Sign out
                 </DropdownMenuItem>
