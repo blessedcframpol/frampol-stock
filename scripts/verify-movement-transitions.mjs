@@ -236,7 +236,8 @@ export async function runChecks(ctx) {
     }
   }
 
-  const dispatched = await ctx.asUser(techId, async () => {
+  // Admin reads Dispatched (sales/tech cannot SELECT inventory kits after HF1).
+  const dispatched = await ctx.asUser(adminId, async () => {
     const row = await db.query(
       `SELECT public.dispatched_page($1, $2, $3, NULL, NULL, $4) AS page`,
       [10, 0, "Sale", saleSerial],
@@ -361,7 +362,7 @@ export async function runChecks(ctx) {
     const before = await loadItem(serial)
     const error = await applyMoveAs(adminId, before, "Transfer", before.status, "Warehouse B")
     const after = await loadItem(serial)
-    const page = await ctx.asUser(techId, async () => {
+    const page = await ctx.asUser(adminId, async () => {
       const row = await db.query(
         `SELECT public.dispatched_page($1, $2, $3, NULL, NULL, $4) AS page`,
         [5, 0, movement, serial],

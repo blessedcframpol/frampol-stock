@@ -34,8 +34,8 @@ import { useAuth } from "@/lib/auth-context"
 import type { ClientSite } from "@/lib/data"
 import { formatClientLabel } from "@/lib/client-label"
 import { useClients, insertClient } from "@/lib/supabase/clients-db"
-import { useInventoryStore } from "@/lib/inventory-store"
 import { getSupabaseClient } from "@/lib/supabase/client"
+import { fetchProductCatalogue } from "@/lib/product-catalogue"
 import {
   resubmitRequest,
   submitRequest,
@@ -129,19 +129,27 @@ export function StockRequestForm({
   const timeZone = useOrgTimezone()
   const today = todayBusinessDate(timeZone)
   const { clients, refetch: refetchClients } = useClients()
-  const { inventory } = useInventoryStore()
-  // Available (sale-pool) counts per product, loaded once. Missing until it arrives or if it fails.
+  // Catalogue via product_catalogue (not inventory serials). Counts via stock_availability.
+  const [catalogue, setCatalogue] = useState<ProductOption[]>([])
   const [availability, setAvailability] = useState<Record<string, number> | null>(null)
 
   useEffect(() => {
     if (!canCreate) return
     let cancelled = false
-    void fetchStockAvailability()
-      .then((rows) => {
-        if (!cancelled) setAvailability(availabilityByProductId(rows))
+    void Promise.all([fetchProductCatalogue(), fetchStockAvailability()])
+      .then(([products, rows]) => {
+        if (cancelled) return
+        setCatalogue(
+          products.map((p) => ({
+            id: p.product_id,
+            name: p.product_name,
+            vendor: p.vendor?.trim() || null,
+          }))
+        )
+        setAvailability(availabilityByProductId(rows))
       })
       .catch(() => {
-        // Counts are a convenience; the form works without them.
+        // Catalogue/counts failure still leaves the form usable for resubmit seed lines.
       })
     return () => {
       cancelled = true
@@ -178,22 +186,15 @@ export function StockRequestForm({
 
   const productOptions = useMemo<ProductOption[]>(() => {
     const byId = new Map<string, ProductOption>()
-    for (const item of inventory) {
-      if (!item.productId || byId.has(item.productId)) continue
-      byId.set(item.productId, {
-        id: item.productId,
-        name: item.name,
-        vendor: item.vendor?.trim() || null,
-      })
-    }
-    // A resubmitted request may name a product that has no stock right now.
+    for (const p of catalogue) byId.set(p.id, p)
+    // A resubmitted request may name a product that is no longer active.
     for (const l of seed?.stock_request_lines ?? []) {
       if (!byId.has(l.product_id)) {
         byId.set(l.product_id, { id: l.product_id, name: l.product_name, vendor: l.vendor })
       }
     }
     return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name))
-  }, [inventory, seed])
+  }, [catalogue, seed])
 
   const sortedClients = useMemo(() => {
     const collator = new Intl.Collator(undefined, { sensitivity: "base" })

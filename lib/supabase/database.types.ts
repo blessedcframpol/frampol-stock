@@ -225,6 +225,7 @@ export interface Database {
           type: string
           return_date: string | null
           atlas_task_url: string | null
+          atlas_task_id: string | null
           quotation_url: string | null
           notes: string | null
           submitted_at: string
@@ -259,6 +260,7 @@ export interface Database {
           type: string
           return_date?: string | null
           atlas_task_url?: string | null
+          atlas_task_id?: string | null
           quotation_url?: string | null
           notes?: string | null
           submitted_at?: string
@@ -293,6 +295,7 @@ export interface Database {
           type?: string
           return_date?: string | null
           atlas_task_url?: string | null
+          atlas_task_id?: string | null
           quotation_url?: string | null
           notes?: string | null
           submitted_at?: string
@@ -1270,6 +1273,24 @@ export interface Database {
           reorder_level: number
           is_low: boolean
         }[]
+      }
+      product_catalogue: {
+        Args: Record<string, never>
+        Returns: {
+          product_id: string
+          product_name: string
+          vendor: string | null
+          is_active: boolean
+          requires_cloud_key: boolean
+        }[]
+      }
+      atlas_task_id_from_url: {
+        Args: { p_url: string }
+        Returns: string
+      }
+      atlas_task_url_ok: {
+        Args: { p_url: string }
+        Returns: boolean
       }
       client_last_activity: {
         Args: Record<string, never>

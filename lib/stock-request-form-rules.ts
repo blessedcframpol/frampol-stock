@@ -4,24 +4,10 @@
  * give feedback while the form is being filled in.
  */
 
+export { atlasTaskUrlProblem, ATLAS_TASK_URL_EXAMPLE, ATLAS_TASK_LINK_HINT } from "@/lib/atlas-task-url"
+
 export const REQUEST_TYPES = ["Sale", "POC Out", "Rentals"] as const
 export type RequestType = (typeof REQUEST_TYPES)[number]
-
-export const ATLAS_TASK_URL_RE =
-  /^https:\/\/ai\.frampolafrica\.com:10801\/projects\/[0-9a-f-]{36}\?task=[0-9a-f-]{36}$/
-
-export const ATLAS_TASK_URL_EXAMPLE =
-  "https://ai.frampolafrica.com:10801/projects/<project-id>?task=<task-id>"
-
-/** Null when the link is acceptable. Empty input is "required", not a format error. */
-export function atlasTaskUrlProblem(value: string): string | null {
-  const trimmed = value.trim()
-  if (!trimmed) return "Atlas task link is required"
-  if (!ATLAS_TASK_URL_RE.test(trimmed)) {
-    return `Atlas task link must look like ${ATLAS_TASK_URL_EXAMPLE}`
-  }
-  return null
-}
 
 export function requestTypeNeedsReturnDate(type: string): boolean {
   return type === "POC Out" || type === "Rentals"

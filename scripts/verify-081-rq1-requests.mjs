@@ -333,8 +333,8 @@ export async function runChecks(ctx) {
     const bad = [
       "https://example.com/projects/11111111-1111-1111-1111-111111111111?task=22222222-2222-2222-2222-222222222222",
       "https://ai.frampolafrica.com:10801/projects/11111111-1111-1111-1111-111111111111",
-      "http://ai.frampolafrica.com:10801/projects/11111111-1111-1111-1111-111111111111?task=22222222-2222-2222-2222-222222222222",
-      "https://ai.frampolafrica.com:10801/projects/not-a-uuid?task=22222222-2222-2222-2222-222222222222",
+      "https://ai.frampolafrica.com:9999/my-tasks?task=22222222-2222-2222-2222-222222222222",
+      "https://ai.frampolafrica.com:10801/my-tasks?task=not-a-uuid",
       "",
     ]
     const problems = []

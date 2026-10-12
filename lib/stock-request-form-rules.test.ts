@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   atlasTaskUrlProblem,
+  ATLAS_TASK_LINK_HINT,
   clientIsAutomatic,
   requestLinesProblem,
   returnDateProblem,
@@ -10,6 +11,7 @@ import {
 const UUID_A = "0b9f4c1e-3c52-4e0a-9d0a-1f4c2b7a8e11"
 const UUID_B = "9a7d2f10-55aa-4b13-8c77-2e6f0d1c3b22"
 const GOOD = `https://ai.frampolafrica.com:10801/projects/${UUID_A}?task=${UUID_B}`
+const MY_TASKS = `https://ai.frampolafrica.com:10801/my-tasks?view=all&task=${UUID_B}`
 
 const line = (over: Partial<FormLine> = {}): FormLine => ({
   productId: "p1",
@@ -20,17 +22,18 @@ const line = (over: Partial<FormLine> = {}): FormLine => ({
 })
 
 describe("atlasTaskUrlProblem", () => {
-  it("accepts the canonical link", () => {
+  it("accepts project and My tasks Atlas links", () => {
     expect(atlasTaskUrlProblem(GOOD)).toBeNull()
     expect(atlasTaskUrlProblem(`  ${GOOD}  `)).toBeNull()
+    expect(atlasTaskUrlProblem(MY_TASKS)).toBeNull()
+    expect(atlasTaskUrlProblem(GOOD.replace("https", "http"))).toBeNull()
+    expect(atlasTaskUrlProblem(`${GOOD}&x=1`)).toBeNull()
+    expect(atlasTaskUrlProblem(GOOD.replace(":10801", ""))).toBeNull()
   })
 
-  it("requires a value and the exact shape", () => {
+  it("requires a value and uses the fixed hint for bad shapes", () => {
     expect(atlasTaskUrlProblem("")).toBe("Atlas task link is required")
-    expect(atlasTaskUrlProblem("https://example.com")).toMatch(/must look like/)
-    expect(atlasTaskUrlProblem(GOOD.replace("https", "http"))).toMatch(/must look like/)
-    expect(atlasTaskUrlProblem(`${GOOD}&x=1`)).toMatch(/must look like/)
-    expect(atlasTaskUrlProblem(GOOD.replace(":10801", ""))).toMatch(/must look like/)
+    expect(atlasTaskUrlProblem("https://example.com")).toBe(ATLAS_TASK_LINK_HINT)
   })
 })
 
