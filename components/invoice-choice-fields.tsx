@@ -46,21 +46,21 @@ export function InvoiceChoiceFields({
             onKind("")
           }
         }}
-        className="gap-2"
+        className="gap-1"
       >
-        <div className="flex items-center gap-2">
+        <div className="flex min-h-11 items-center gap-2">
           <RadioGroupItem id={`${idPrefix}-number`} value="number" />
           <Label htmlFor={`${idPrefix}-number`} className="font-normal">
             Invoice number
           </Label>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex min-h-11 items-center gap-2">
           <RadioGroupItem id={`${idPrefix}-pending`} value="pending" />
           <Label htmlFor={`${idPrefix}-pending`} className="font-normal">
             Invoice pending
           </Label>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex min-h-11 items-center gap-2">
           <RadioGroupItem id={`${idPrefix}-zero`} value="not_invoiced" />
           <Label htmlFor={`${idPrefix}-zero`} className="font-normal">
             00000 — not invoiced
@@ -70,9 +70,10 @@ export function InvoiceChoiceFields({
       {choice === "number" ? (
         <Input
           id={`${idPrefix}-value`}
-          className="font-mono"
+          className="min-h-11 font-mono text-base sm:text-sm"
           value={invoiceNumber}
           placeholder="Invoice number"
+          enterKeyHint="done"
           onChange={(event) => onInvoiceNumber(event.target.value)}
         />
       ) : null}

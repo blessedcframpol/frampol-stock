@@ -3,16 +3,36 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
-import { Building2, Loader2, RefreshCw } from "lucide-react"
+import { useTheme } from "next-themes"
+import { Building2, Loader2, Moon, RefreshCw, Sun } from "lucide-react"
 import { useAuth, hasAppAccess } from "@/lib/auth-context"
 import { Button } from "@/components/ui/button"
 
 const POLL_MS = 7000
 
+function PendingThemeToggle() {
+  const { resolvedTheme, setTheme } = useTheme()
+  const dark = resolvedTheme === "dark"
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      className="size-10 rounded-xl"
+      aria-label={dark ? "Switch to light mode" : "Switch to dark mode"}
+      onClick={() => setTheme(dark ? "light" : "dark")}
+    >
+      {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
+    </Button>
+  )
+}
+
 function PendingRoleContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const reason = searchParams.get("reason")
+  const preview =
+    process.env.NODE_ENV === "development" && searchParams.get("preview") === "1"
   const { user, profile, loading, refetch, signOut } = useAuth()
   const [polling, setPolling] = useState(false)
   const redirected = useRef(false)
@@ -26,7 +46,7 @@ function PendingRoleContent() {
   }, [reason, profile])
 
   useEffect(() => {
-    if (loading) return
+    if (loading || preview) return
     if (!user) {
       router.replace("/login")
       return
@@ -38,10 +58,10 @@ function PendingRoleContent() {
         router.refresh()
       }
     }
-  }, [loading, user, profile, router])
+  }, [loading, user, profile, router, preview])
 
   useEffect(() => {
-    if (loading || !user || hasAppAccess(profile)) return
+    if (loading || preview || !user || hasAppAccess(profile)) return
 
     const tick = () => {
       setPolling(true)
@@ -63,7 +83,7 @@ function PendingRoleContent() {
     }
   }, [loading, user, profile, refetch])
 
-  if (loading || !user) {
+  if (!preview && (loading || !user)) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
         <Loader2 className="size-8 animate-spin text-muted-foreground" aria-hidden />
@@ -72,7 +92,7 @@ function PendingRoleContent() {
     )
   }
 
-  if (hasAppAccess(profile)) {
+  if (!preview && hasAppAccess(profile)) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
         <Loader2 className="size-8 animate-spin text-muted-foreground" aria-hidden />
@@ -85,19 +105,22 @@ function PendingRoleContent() {
 
   return (
     <div className="min-h-screen bg-background px-6 py-16">
-      <div className="mx-auto flex w-full max-w-lg flex-col items-center text-center">
-        <Link
-          href="/"
-          className="mb-10 inline-flex items-center gap-2 text-foreground transition-opacity hover:opacity-80"
-        >
-          <span className="flex size-10 items-center justify-center rounded-xl bg-muted">
-            <Building2 className="size-5 text-muted-foreground" strokeWidth={1.5} aria-hidden />
-          </span>
-          <span className="text-lg font-semibold tracking-tight">Fram-Stock</span>
-        </Link>
+      <div className="mx-auto flex w-full max-w-lg flex-col items-center px-1 text-center">
+        <div className="mb-10 flex w-full items-start justify-between gap-4">
+          <Link
+            href="/"
+            className="inline-flex items-center gap-2 text-foreground transition-opacity hover:opacity-80"
+          >
+            <span className="flex size-10 items-center justify-center rounded-xl bg-muted">
+              <Building2 className="size-5 text-muted-foreground" strokeWidth={1.5} aria-hidden />
+            </span>
+            <span className="text-lg font-semibold tracking-tight">Fram-Stock</span>
+          </Link>
+          <PendingThemeToggle />
+        </div>
 
         <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
-          {inactiveCopy ? "Account inactive" : "Almost there"}
+          {inactiveCopy ? "Account inactive" : "Waiting for a role"}
         </h1>
         <p className="mt-4 text-[15px] leading-relaxed text-muted-foreground">
           {inactiveCopy ? (
@@ -105,21 +128,19 @@ function PendingRoleContent() {
               Your account has been deactivated. If you think this is a mistake, contact your Fram-Stock administrator.
             </>
           ) : (
-            <>
-              Your account is waiting for an administrator to assign access.
-            </>
+            <>Your account is waiting for a role. Josh or another admin will set it up.</>
           )}
         </p>
         <p className="mt-3 text-xs text-muted-foreground">
           This page checks for updates automatically; when your role is ready you&apos;ll be sent to the dashboard.
         </p>
 
-        <div className="mt-10 flex flex-col gap-3 sm:flex-row sm:justify-center">
+        <div className="mt-10 flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:justify-center">
           {!inactiveCopy && (
             <Button
               type="button"
               variant="secondary"
-              className="rounded-xl"
+              className="min-h-11 w-full rounded-xl sm:w-auto"
               disabled={polling}
               onClick={() => {
                 setPolling(true)
@@ -137,7 +158,7 @@ function PendingRoleContent() {
           <Button
             type="button"
             variant="outline"
-            className="rounded-xl"
+            className="min-h-11 w-full rounded-xl sm:w-auto"
             onClick={async () => {
               await signOut()
               router.replace("/login")

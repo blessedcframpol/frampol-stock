@@ -1,17 +1,14 @@
 import { NextRequest, NextResponse } from "next/server"
 import { apiClientError, apiErrorResponse } from "@/lib/api-error-response"
 import { requireAdmin } from "@/lib/require-admin"
-import { createAdminClient, isAdminApiConfigured } from "@/lib/supabase/admin"
+import { isValidRole } from "@/lib/permissions"
 
-function adminConfigError() {
-  return apiClientError(
-    503,
-    "Admin features need SUPABASE_SERVICE_ROLE_KEY on the server (Supabase Dashboard → Project Settings → API → service_role). Add it to .env.local for local, or your host’s environment variables for production, then redeploy/restart."
-  )
-}
-
+/**
+ * PATCH profile access via set_user_access as the signed-in admin (not service_role),
+ * so audit_log.actor is that admin.
+ */
 export async function PATCH(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
@@ -21,42 +18,47 @@ export async function PATCH(
     }
     const auth = await requireAdmin()
     if (!auth.ok) return auth.response
-    if (!isAdminApiConfigured()) {
-      return adminConfigError()
-    }
-    const body = await _request.json() as { role?: string; active?: boolean; display_name?: string }
-    const updates: {
+
+    const body = (await request.json()) as {
       role?: string
       active?: boolean
-      display_name?: string | null
-      updated_at: string
-    } = {
-      updated_at: new Date().toISOString(),
+      display_name?: string
+      reason?: string
     }
-    const validRoles = ["admin", "sales", "accounts", "technicians", "viewer"] as const
-    if (body.role !== undefined) {
-      if (validRoles.includes(body.role as (typeof validRoles)[number])) {
-        updates.role = body.role
-      }
+
+    if (body.role === undefined || !isValidRole(body.role)) {
+      return apiClientError(400, "A valid role is required", {
+        log: "warn",
+        logLabel: "Admin profile update",
+      })
     }
-    if (body.active !== undefined) {
-      updates.active = Boolean(body.active)
+    if (typeof body.active !== "boolean") {
+      return apiClientError(400, "active is required", {
+        log: "warn",
+        logLabel: "Admin profile update",
+      })
     }
-    if (body.display_name !== undefined) {
-      updates.display_name = typeof body.display_name === "string" ? body.display_name.trim() || null : undefined
-    }
-    const admin = createAdminClient()
-    const { data, error } = await admin
-      .from("profiles")
-      .update(updates)
-      .eq("id", id)
-      .select("id, email, display_name, role, active, updated_at")
-      .single()
+
+    const { data, error } = await auth.supabase.rpc("set_user_access", {
+      p_profile_id: id,
+      p_role: body.role,
+      p_active: body.active,
+      p_display_name: typeof body.display_name === "string" ? body.display_name : null,
+      p_reason: typeof body.reason === "string" ? body.reason : null,
+    })
+
     if (error) {
-      return apiClientError(400, error.message, { log: "warn", logLabel: "Admin profile update" })
+      const msg = error.message || "Update failed"
+      const status =
+        /admin only|cannot change your own|insufficient/i.test(msg) ? 403 : 400
+      return apiClientError(status, msg, { log: "warn", logLabel: "Admin profile update" })
     }
+
     return NextResponse.json(data)
   } catch (err) {
-    return apiErrorResponse(500, "Internal server error", { cause: err, logLabel: "Admin profile PATCH" })
+    return apiErrorResponse(500, "Internal server error", {
+      cause: err,
+      logLabel: "Admin profile PATCH",
+    })
   }
 }

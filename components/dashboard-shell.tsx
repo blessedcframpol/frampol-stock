@@ -834,14 +834,24 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                   </div>
                   {inboxUnread.length > 0 && (
                     <div className="border-b border-border px-2 py-2 space-y-1 shrink-0 max-h-[140px] overflow-y-auto">
-                      <p className="px-2 text-[11px] font-medium text-muted-foreground uppercase tracking-wide">Requests</p>
+                      <p className="px-2 text-[11px] font-medium text-muted-foreground uppercase tracking-wide">Messages</p>
                       {inboxUnread.slice(0, 6).map((n) => {
-                        const rid = (n.metadata as { request_id?: string })?.request_id
+                        const meta = n.metadata as {
+                          request_id?: string
+                          href?: string
+                          profile_id?: string
+                        } | null
+                        const href =
+                          (typeof meta?.href === "string" && meta.href.startsWith("/")
+                            ? meta.href
+                            : null) ||
+                          (meta?.request_id ? `/requests/${meta.request_id}` : null) ||
+                          (n.type === "pending_role" ? "/users" : "/requests")
                         return (
                           <Link
                             key={n.id}
-                            href={rid ? `/requests/${rid}` : "/requests"}
-                            className="block rounded-md px-2 py-2 text-sm hover:bg-muted/80"
+                            href={href}
+                            className="block rounded-md px-2 py-2 text-sm hover:bg-muted/80 min-h-11"
                             onClick={() => void markInboxRead([n.id])}
                           >
                             <span className="font-medium text-foreground">{n.title}</span>

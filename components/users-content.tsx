@@ -1,6 +1,7 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useSearchParams } from "next/navigation"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { EmptyState } from "@/components/fs/empty-state"
@@ -56,6 +57,7 @@ type ProfileRow = {
   role: string | null
   active: boolean
   created_at?: string
+  last_sign_in_at?: string | null
 }
 
 const ROLE_PLACEHOLDER = "__role_pending__"
@@ -84,7 +86,7 @@ function toCsv(rows: string[][]): string {
 }
 
 function downloadUsersCsv(profiles: ProfileRow[]) {
-  const header = ["ID", "Full name", "Email", "Role", "Status", "Joined date"]
+  const header = ["ID", "Full name", "Email", "Role", "Status", "Last sign-in", "Date added"]
   const rows: string[][] = [
     header,
     ...profiles.map((p) => [
@@ -93,6 +95,7 @@ function downloadUsersCsv(profiles: ProfileRow[]) {
       p.email,
       roleLabel(p.role),
       p.active ? "Active" : "Inactive",
+      p.last_sign_in_at ? formatJoined(p.last_sign_in_at) : "",
       p.created_at ? formatJoined(p.created_at) : "",
     ]),
   ]
@@ -107,10 +110,13 @@ function downloadUsersCsv(profiles: ProfileRow[]) {
 }
 
 export function UsersContent() {
-  const { role } = useAuth()
+  const { role, user } = useAuth()
+  const searchParams = useSearchParams()
+  const selectUserId = searchParams.get("user")
   const canWrite = canManageUsers(role)
-  /** Admin writes through the admin API; Admin viewer reads profiles directly (RLS allows it). */
+  /** Admin writes via set_user_access (signed-in); Admin viewer reads profiles directly. */
   const allowed = canViewUsers(role)
+  const openedFromQuery = useRef<string | null>(null)
 
   const [profiles, setProfiles] = useState<ProfileRow[]>([])
   const [loading, setLoading] = useState(true)
@@ -134,21 +140,29 @@ export function UsersContent() {
   const [saving, setSaving] = useState(false)
 
   const loadProfiles = useCallback(async (): Promise<ProfileRow[]> => {
+    let rows: ProfileRow[] = []
     if (!canWrite) {
       const { data, error } = await getSupabaseClient()
         .from("profiles")
         .select("id, email, display_name, role, active, created_at")
         .order("created_at", { ascending: true })
       if (error) throw error
-      return (data ?? []) as ProfileRow[]
+      rows = (data ?? []) as ProfileRow[]
+    } else {
+      const res = await fetch("/api/admin/profiles")
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        toastFromApiErrorBody(data, "Could not load users", res.status)
+        return []
+      }
+      rows = Array.isArray(data) ? (data as ProfileRow[]) : []
     }
-    const res = await fetch("/api/admin/profiles")
-    const data = await res.json().catch(() => ({}))
-    if (!res.ok) {
-      toastFromApiErrorBody(data, "Could not load users", res.status)
-      return []
+    const { data: signIns, error: signErr } = await getSupabaseClient().rpc("profile_last_sign_ins")
+    if (!signErr && signIns && typeof signIns === "object") {
+      const map = signIns as Record<string, string>
+      rows = rows.map((p) => ({ ...p, last_sign_in_at: map[p.id] ?? null }))
     }
-    return Array.isArray(data) ? (data as ProfileRow[]) : []
+    return rows
   }, [canWrite])
 
   const fetchProfiles = useCallback(async () => {
@@ -184,6 +198,20 @@ export function UsersContent() {
       cancelled = true
     }
   }, [allowed, loadProfiles])
+
+  useEffect(() => {
+    if (!selectUserId || loading || profiles.length === 0) return
+    if (openedFromQuery.current === selectUserId) return
+    const target = profiles.find((p) => p.id === selectUserId)
+    if (!target) return
+    openedFromQuery.current = selectUserId
+    setSearch(target.email)
+    setRoleFilter("all")
+    setStatusFilter("all")
+    if (canWrite && user?.id !== target.id) {
+      openEdit(target)
+    }
+  }, [selectUserId, loading, profiles, canWrite, user?.id])
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -223,20 +251,24 @@ export function UsersContent() {
       toast.error("Assign a role before saving")
       return
     }
+    if (
+      user?.id === editProfile.id &&
+      (editRole !== editProfile.role || editActive !== editProfile.active)
+    ) {
+      toast.error("You cannot change your own role or active state")
+      return
+    }
     setSaving(true)
     try {
-      const res = await fetch(`/api/admin/profiles/${editProfile.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          display_name: editDisplayName.trim(),
-          role: editRole,
-          active: editActive,
-        }),
+      const { error } = await getSupabaseClient().rpc("set_user_access", {
+        p_profile_id: editProfile.id,
+        p_role: editRole,
+        p_active: editActive,
+        p_display_name: editDisplayName.trim(),
+        p_reason: null,
       })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        toastFromApiErrorBody(data, "Update failed", res.status)
+      if (error) {
+        toastFromCaughtError(error, "Update failed")
         return
       }
       const name = editDisplayName.trim() || editProfile.email
@@ -348,17 +380,22 @@ export function UsersContent() {
             <Table>
               <TableHeader>
                 <TableRow className="hover:bg-transparent bg-muted/40">
-                  <TableHead className="min-w-[12rem]">Full name</TableHead>
-                  <TableHead className="min-w-[12rem]">Email</TableHead>
-                  <TableHead className="min-w-[8rem]">Role</TableHead>
-                  <TableHead className="min-w-[7rem]">Status</TableHead>
-                  <TableHead className="min-w-[10rem]">Joined date</TableHead>
-                  {canWrite ? <TableHead className="w-[5rem] text-right">Actions</TableHead> : null}
+                  <TableHead className="min-w-[10rem]">Full name</TableHead>
+                  <TableHead className="min-w-[10rem]">Email</TableHead>
+                  <TableHead className="min-w-[7rem]">Role</TableHead>
+                  <TableHead className="hidden sm:table-cell min-w-[7rem]">Active</TableHead>
+                  <TableHead className="min-w-[9rem]">Last sign-in</TableHead>
+                  <TableHead className="hidden md:table-cell min-w-[10rem]">Date added</TableHead>
+                  {canWrite ? <TableHead className="w-[3.5rem] text-right">Actions</TableHead> : null}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {pageRows.map((p) => (
-                  <TableRow key={p.id}>
+                  <TableRow
+                    key={p.id}
+                    className={cn(selectUserId === p.id && "bg-muted/50")}
+                    data-selected={selectUserId === p.id ? "true" : undefined}
+                  >
                     <TableCell>
                       <div className="flex items-center gap-3 min-w-0">
                         <Avatar className="size-8 shrink-0 border border-border">
@@ -371,7 +408,7 @@ export function UsersContent() {
                         </span>
                       </div>
                     </TableCell>
-                    <TableCell className="text-muted-foreground">{p.email}</TableCell>
+                    <TableCell className="text-muted-foreground break-all">{p.email}</TableCell>
                     <TableCell>
                       <span
                         className={cn(
@@ -382,7 +419,7 @@ export function UsersContent() {
                         {roleLabel(p.role)}
                       </span>
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="hidden sm:table-cell">
                       <span className="inline-flex items-center gap-2 text-sm">
                         <span
                           className={cn(
@@ -394,7 +431,10 @@ export function UsersContent() {
                         {p.active ? "Active" : "Inactive"}
                       </span>
                     </TableCell>
-                    <TableCell className="text-muted-foreground whitespace-nowrap">
+                    <TableCell className="text-muted-foreground whitespace-nowrap text-xs sm:text-sm">
+                      {p.last_sign_in_at ? formatJoined(p.last_sign_in_at) : "—"}
+                    </TableCell>
+                    <TableCell className="hidden md:table-cell text-muted-foreground whitespace-nowrap">
                       {formatJoined(p.created_at)}
                     </TableCell>
                     {canWrite ? (
@@ -403,9 +443,11 @@ export function UsersContent() {
                           type="button"
                           variant="ghost"
                           size="icon"
-                          className="size-8"
+                          className="min-h-11 min-w-11"
                           onClick={() => openEdit(p)}
                           aria-label={`Edit ${p.display_name || p.email}`}
+                          disabled={user?.id === p.id}
+                          title={user?.id === p.id ? "You cannot edit your own role or active state" : undefined}
                         >
                           <Pencil className="size-4" />
                         </Button>

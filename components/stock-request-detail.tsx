@@ -412,7 +412,7 @@ export function StockRequestDetail({ requestId }: { requestId: string }) {
       : null
 
   return (
-    <div className="flex flex-col gap-6 min-w-0 max-w-4xl">
+    <div className="flex flex-col gap-6 min-w-0 max-w-4xl w-full pb-[max(1.5rem,env(safe-area-inset-bottom))]">
       <div className="flex flex-col gap-2 min-w-0 items-start">
         <PageBreadcrumbs
           items={[{ label: "Requests", href: "/requests" }, { label: row.request_number }]}
@@ -619,14 +619,14 @@ export function StockRequestDetail({ requestId }: { requestId: string }) {
       {serials.length > 0 ? (
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium flex flex-wrap items-center justify-between gap-2">
+            <CardTitle className="text-sm font-medium flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
               <span>Issued serials</span>
-              <span className="flex flex-wrap gap-2">
+              <span className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap">
                 <Button
                   type="button"
                   size="sm"
                   variant="outline"
-                  className="gap-1"
+                  className="min-h-11 w-full gap-1 sm:w-auto"
                   onClick={() => void copyLines(descriptionValues, "description")}
                 >
                   <Copy className="size-3.5" />
@@ -636,7 +636,7 @@ export function StockRequestDetail({ requestId }: { requestId: string }) {
                   type="button"
                   size="sm"
                   variant="outline"
-                  className="gap-1"
+                  className="min-h-11 w-full gap-1 sm:w-auto"
                   onClick={() => void copyLines(serialValues, "serial")}
                 >
                   <Copy className="size-3.5" />
@@ -677,7 +677,7 @@ export function StockRequestDetail({ requestId }: { requestId: string }) {
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium">Add invoice</CardTitle>
           </CardHeader>
-          <CardContent className="flex flex-col gap-4 max-w-md">
+          <CardContent className="flex flex-col gap-4 max-w-md w-full min-w-0">
             <p className="text-sm text-muted-foreground">
               The invoice is still pending. Enter the number as soon as it exists, or mark the request 00000.
             </p>
@@ -692,9 +692,13 @@ export function StockRequestDetail({ requestId }: { requestId: string }) {
               onReason={setInvReason}
               onKind={setInvKind}
             />
-            <Button className="w-fit gap-1" disabled={busy} onClick={() => void onAddInvoice()}>
+            <Button
+              className="min-h-11 w-full gap-1 sm:w-fit"
+              disabled={busy}
+              onClick={() => void onAddInvoice()}
+            >
               {busy ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
-              Save invoice
+              Add invoice number
             </Button>
           </CardContent>
         </Card>

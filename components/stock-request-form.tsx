@@ -308,7 +308,7 @@ export function StockRequestForm({
       : null
 
   return (
-    <div className="flex flex-col gap-6 max-w-3xl">
+    <div className="flex flex-col gap-6 max-w-3xl min-w-0 w-full pb-[max(1.5rem,env(safe-area-inset-bottom))]">
       <PageBreadcrumbs items={breadcrumbs} />
 
       {mode === "resubmit" && rejectReason ? (
@@ -340,7 +340,7 @@ export function StockRequestForm({
                   if (!requestTypeNeedsReturnDate(v)) setReturnDate("")
                 }}
               >
-                <SelectTrigger id="rq-type" className="bg-card border-border">
+                <SelectTrigger id="rq-type" className="min-h-11 bg-card border-border text-base sm:text-sm">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -361,7 +361,7 @@ export function StockRequestForm({
                   value={returnDate}
                   min={today}
                   onChange={(e) => setReturnDate(e.target.value)}
-                  className="bg-card border-border"
+                  className="min-h-11 bg-card border-border text-base sm:text-sm"
                   disabled={busy}
                   aria-invalid={attempted && returnProblem ? true : undefined}
                 />
@@ -394,7 +394,7 @@ export function StockRequestForm({
                     variant="outline"
                     role="combobox"
                     aria-expanded={clientOpen}
-                    className="w-full justify-between h-10 font-normal bg-card"
+                    className="min-h-11 w-full justify-between font-normal bg-card text-base sm:text-sm"
                     disabled={busy}
                   >
                     <span className={cn("truncate", !selectedClient && "text-muted-foreground")}>
@@ -403,7 +403,7 @@ export function StockRequestForm({
                     <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                   </Button>
                 </PopoverTrigger>
-                <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-[300px] p-0" align="start">
+                <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-0 max-w-[calc(100vw-2rem)] sm:min-w-[300px] p-0" align="start">
                   <Command shouldFilter={false}>
                     <CommandInput
                       placeholder="Search clients…"
@@ -444,10 +444,11 @@ export function StockRequestForm({
               onChange={(e) => setAtlasUrl(e.target.value)}
               onBlur={() => setAtlasTouched(true)}
               placeholder={ATLAS_TASK_URL_EXAMPLE}
-              className="bg-card border-border font-mono text-xs"
+              className="min-h-11 bg-card border-border font-mono text-sm sm:text-xs"
               disabled={busy}
               autoComplete="off"
               spellCheck={false}
+              enterKeyHint="done"
               aria-invalid={(atlasTouched || attempted || atlasUrl.length > 0) && atlasProblem ? true : undefined}
             />
             {atlasUrl.length > 0 ? (
@@ -525,12 +526,23 @@ export function StockRequestForm({
             />
           </div>
 
-          <div className="flex flex-wrap gap-2 pt-2 border-t border-border">
-            <Button type="button" disabled={busy} onClick={() => void handleSubmit()}>
+          <div className="flex flex-col-reverse gap-2 pt-2 border-t border-border sm:flex-row sm:flex-wrap">
+            <Button
+              type="button"
+              className="min-h-11 w-full sm:w-auto"
+              disabled={busy}
+              onClick={() => void handleSubmit()}
+            >
               {busy ? <Loader2 className="size-4 animate-spin mr-2" /> : null}
               {mode === "resubmit" ? "Resubmit request" : "Submit request"}
             </Button>
-            <Button type="button" variant="ghost" disabled={busy} onClick={() => router.push(onCancelHref)}>
+            <Button
+              type="button"
+              variant="ghost"
+              className="min-h-11 w-full sm:w-auto"
+              disabled={busy}
+              onClick={() => router.push(onCancelHref)}
+            >
               Cancel
             </Button>
           </div>
@@ -644,7 +656,7 @@ function LineRowEditor({
               <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
             </Button>
           </PopoverTrigger>
-          <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-[260px] p-0" align="start">
+          <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-0 max-w-[calc(100vw-2rem)] sm:min-w-[260px] p-0" align="start">
             <Command shouldFilter={false}>
               <CommandInput placeholder="Search products…" value={search} onValueChange={setSearch} />
               <CommandList>

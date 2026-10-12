@@ -525,7 +525,7 @@ export function StockRequestFulfill({
   const serialOnlyLines = issuedView?.map((s) => s.serial) ?? []
 
   return (
-    <div className="flex flex-col gap-6 max-w-3xl">
+    <div className="flex min-w-0 w-full max-w-3xl flex-col gap-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
       <PageHeader
         title={request.request_number}
         description={`${request.type} · ${request.client ? formatClientLabel(request.client) : request.client_id}`}
@@ -777,10 +777,11 @@ export function StockRequestFulfill({
                         ? cloudKeyPrompt ?? "Scan cloud key"
                         : "Scan serial (Enter or Tab)"
                     }
-                    className="border-0 bg-transparent pl-7 font-mono shadow-none focus-visible:ring-0"
+                    className="min-h-11 border-0 bg-transparent pl-7 text-base font-mono shadow-none focus-visible:ring-0 md:min-h-12"
                     disabled={busy}
                     autoFocus
                     autoComplete="off"
+                    enterKeyHint="done"
                     aria-label={mode === "cloud_key" ? "Cloud key" : "Serial number"}
                   />
                 </div>

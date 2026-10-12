@@ -1352,6 +1352,20 @@ export interface Database {
         }
         Returns: number
       }
+      set_user_access: {
+        Args: {
+          p_profile_id: string
+          p_role: string
+          p_active: boolean
+          p_display_name?: string | null
+          p_reason?: string | null
+        }
+        Returns: Json
+      }
+      profile_last_sign_ins: {
+        Args: Record<string, never>
+        Returns: Json
+      }
       audit_exceptions_read: {
         Args: {
           p_from?: string | null

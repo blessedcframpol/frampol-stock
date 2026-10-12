@@ -229,12 +229,12 @@ export function StockRequestsList({
                 value={numberQuery}
                 onChange={(e) => setNumberQuery(e.target.value)}
                 placeholder="Request # (e.g. 42)"
-                className="h-9 rounded-lg bg-background pl-8"
+                className="min-h-11 rounded-lg bg-background pl-8 text-base sm:min-h-9 sm:text-sm"
                 aria-label="Search by request number"
               />
             </div>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="h-9 w-full sm:w-[12rem] rounded-lg bg-background" aria-label="Filter by status">
+              <SelectTrigger className="min-h-11 w-full rounded-lg bg-background text-base sm:min-h-9 sm:w-[12rem] sm:text-sm" aria-label="Filter by status">
                 <SelectValue placeholder="Status" />
               </SelectTrigger>
               <SelectContent>
@@ -248,7 +248,7 @@ export function StockRequestsList({
             </Select>
             {isAdmin ? (
               <Select value={userFilter} onValueChange={setUserFilter}>
-                <SelectTrigger className="h-9 w-full sm:w-[12rem] rounded-lg bg-background" aria-label="Filter by requester">
+                <SelectTrigger className="min-h-11 w-full rounded-lg bg-background text-base sm:min-h-9 sm:w-[12rem] sm:text-sm" aria-label="Filter by requester">
                   <SelectValue placeholder="Requester" />
                 </SelectTrigger>
                 <SelectContent>
@@ -262,7 +262,7 @@ export function StockRequestsList({
               </Select>
             ) : null}
             <Select value={sort} onValueChange={(v) => setSort(v as SortKey)}>
-              <SelectTrigger className="h-9 w-full sm:w-[12rem] rounded-lg bg-background" aria-label="Sort">
+              <SelectTrigger className="min-h-11 w-full rounded-lg bg-background text-base sm:min-h-9 sm:w-[12rem] sm:text-sm" aria-label="Sort">
                 <SelectValue placeholder="Sort" />
               </SelectTrigger>
               <SelectContent>
@@ -281,20 +281,20 @@ export function StockRequestsList({
           {visible.length === 0 ? (
             <EmptyState message="No requests match these filters." />
           ) : (
-            <Card>
-              <CardContent className="p-0 overflow-x-auto">
+            <Card className="min-w-0 overflow-hidden">
+              <CardContent className="p-0 min-w-0">
                 <Table>
                   <TableHeader>
                     <TableRow>
                       <TableHead>Request</TableHead>
                       <TableHead>Client</TableHead>
-                      <TableHead>Type</TableHead>
-                      <TableHead>Items</TableHead>
-                      <TableHead>Invoice</TableHead>
-                      {sees ? <TableHead>Requester</TableHead> : null}
+                      <TableHead className="hidden md:table-cell">Type</TableHead>
+                      <TableHead className="hidden lg:table-cell">Items</TableHead>
+                      <TableHead className="hidden md:table-cell">Invoice</TableHead>
+                      {sees ? <TableHead className="hidden lg:table-cell">Requester</TableHead> : null}
                       <TableHead>Status</TableHead>
-                      <TableHead>Created</TableHead>
-                      <TableHead className="w-[100px]" />
+                      <TableHead className="hidden sm:table-cell">Created</TableHead>
+                      <TableHead className="w-[5.5rem]" />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -303,30 +303,34 @@ export function StockRequestsList({
                         <TableCell className="font-medium whitespace-nowrap tabular-nums">
                           {r.request_number}
                         </TableCell>
-                        <TableCell className="font-medium">{clientLabel(r)}</TableCell>
-                        <TableCell className="text-sm text-muted-foreground whitespace-nowrap">{r.type}</TableCell>
-                        <TableCell className="text-muted-foreground text-sm max-w-[18rem]">
+                        <TableCell className="font-medium max-w-[8rem] truncate sm:max-w-none">
+                          {clientLabel(r)}
+                        </TableCell>
+                        <TableCell className="hidden md:table-cell text-sm text-muted-foreground whitespace-nowrap">
+                          {r.type}
+                        </TableCell>
+                        <TableCell className="hidden lg:table-cell text-muted-foreground text-sm max-w-[18rem]">
                           <span className="line-clamp-2">{requestItemsSummary(r.stock_request_lines ?? [])}</span>
                         </TableCell>
-                        <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
+                        <TableCell className="hidden md:table-cell text-sm text-muted-foreground whitespace-nowrap">
                           {requestInvoiceColumnLabel(r)}
                         </TableCell>
                         {sees ? (
-                          <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
+                          <TableCell className="hidden lg:table-cell text-sm text-muted-foreground whitespace-nowrap">
                             {requesterName(r.created_by)}
                           </TableCell>
                         ) : null}
                         <TableCell>
                           <RequestStatusPill status={displayStatuses[r.id]} />
                         </TableCell>
-                        <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
+                        <TableCell className="hidden sm:table-cell text-sm text-muted-foreground whitespace-nowrap">
                           {formatDateDDMMYYYY(r.created_at)}
                         </TableCell>
                         <TableCell>
-                          <Button variant="ghost" size="sm" asChild>
+                          <Button variant="ghost" size="sm" className="min-h-11 min-w-11" asChild>
                             <Link href={`/requests/${r.id}`} className="gap-1">
                               <MessageSquare className="size-3.5" />
-                              Open
+                              <span className="sm:inline">Open</span>
                             </Link>
                           </Button>
                         </TableCell>
