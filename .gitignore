@@ -21,3 +21,6 @@ supabase/.temp/
 .dev-routes-stash/
 
 _tmp-*
+
+.env
+.env.production
