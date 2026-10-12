@@ -71,23 +71,48 @@ export function searchUsers(users: AppUser[], query: string): AppUser[] {
   )
 }
 
+export type SearchProduct = {
+  productId: string
+  name: string
+  vendor: string
+}
+
 export interface SearchResults {
   inventory: InventoryItem[]
   clients: Client[]
   users: AppUser[]
+  products: SearchProduct[]
+}
+
+export type SearchEntity = "inventory" | "clients" | "users" | "products"
+
+/** Unique products by id (name/vendor only — no serials). */
+export function searchProducts(items: InventoryItem[], query: string): SearchProduct[] {
+  const q = normalizeQuery(query)
+  const byId = new Map<string, SearchProduct>()
+  for (const item of items) {
+    if (!item.productId || byId.has(item.productId)) continue
+    const name = item.name || item.productId
+    const vendor = item.vendor || ""
+    if (q && !matchQuery(name, q) && !matchQuery(vendor, q)) continue
+    byId.set(item.productId, { productId: item.productId, name, vendor })
+  }
+  return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name))
 }
 
 export function runSearch(
   data: { inventory: InventoryItem[]; clients: Client[]; users: AppUser[] },
-  query: string
+  query: string,
+  entities: readonly SearchEntity[] = ["inventory", "clients", "users"]
 ): SearchResults {
   const q = query.trim()
-  if (!q) {
-    return { inventory: [], clients: [], users: [] }
-  }
+  const empty: SearchResults = { inventory: [], clients: [], users: [], products: [] }
+  if (!q) return empty
+  const allow = new Set(entities)
   return {
-    inventory: searchInventory(data.inventory, q),
-    clients: searchClients(data.clients, q),
-    users: searchUsers(data.users, q),
+    inventory: allow.has("inventory") ? searchInventory(data.inventory, q) : [],
+    clients: allow.has("clients") ? searchClients(data.clients, q) : [],
+    users: allow.has("users") ? searchUsers(data.users, q) : [],
+    products: allow.has("products") ? searchProducts(data.inventory, q) : [],
   }
 }

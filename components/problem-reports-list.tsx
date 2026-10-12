@@ -1,7 +1,8 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
+import { useSearchParams } from "next/navigation"
 import { Loader2, MessageSquareWarning } from "lucide-react"
 import { EmptyState } from "@/components/fs/empty-state"
 import { ListToolbar, ListToolbarSearch } from "@/components/fs/list-toolbar"
@@ -26,6 +27,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { useAuth } from "@/lib/auth-context"
+import { useEffectiveRole } from "@/lib/dev-role-preview"
 import { canManageProblemReports, ROLE_LABELS } from "@/lib/permissions"
 import {
   fetchProblemReports,
@@ -38,14 +40,30 @@ import { toastFromCaughtError } from "@/lib/toast-reportable-error"
 import { getSupabaseClient } from "@/lib/supabase/client"
 
 const ALL = "all"
+const STATUS_QUERY_VALUES = ["open", "in_progress", "resolved", "open_group"]
 
 export function ProblemReportsList({ mode }: { mode: "admin" | "mine" }) {
-  const { role, user } = useAuth()
+  // useSearchParams needs a Suspense boundary during prerender.
+  return (
+    <Suspense fallback={null}>
+      <ProblemReportsListInner mode={mode} />
+    </Suspense>
+  )
+}
+
+function ProblemReportsListInner({ mode }: { mode: "admin" | "mine" }) {
+  const { user } = useAuth()
+  const role = useEffectiveRole()
   const isAdmin = mode === "admin" && canManageProblemReports(role)
   const [rows, setRows] = useState<ProblemReportRow[]>([])
   const [names, setNames] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
-  const [statusFilter, setStatusFilter] = useState<string>(ALL)
+  const searchParams = useSearchParams()
+  // Deep links such as /problems?status=open preselect the status filter.
+  const [statusFilter, setStatusFilter] = useState<string>(() => {
+    const status = searchParams.get("status")
+    return status && STATUS_QUERY_VALUES.includes(status) ? status : ALL
+  })
   const [personFilter, setPersonFilter] = useState<string>(ALL)
   const [fromDate, setFromDate] = useState("")
   const [toDate, setToDate] = useState("")

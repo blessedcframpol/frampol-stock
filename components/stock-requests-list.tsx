@@ -25,7 +25,8 @@ import { Plus, MessageSquare, Search } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { matchesRequestNumber } from "@/lib/request-number"
 import { useAuth } from "@/lib/auth-context"
-import { ADMIN, canCreateStockRequest } from "@/lib/permissions"
+import { useEffectiveRole } from "@/lib/dev-role-preview"
+import { ADMIN, SALES, TECHNICIANS, canCreateStockRequest } from "@/lib/permissions"
 import { getSupabaseClient } from "@/lib/supabase/client"
 import {
   fetchProfileLabels,
@@ -43,6 +44,7 @@ import { formatDateDDMMYYYY } from "@/lib/utils"
 import { formatClientLabel } from "@/lib/client-label"
 import { PageHeader } from "@/components/page-nav"
 import { ToIssueQueue } from "@/components/to-issue-queue"
+import { RequesterNeedsYou } from "@/components/requester-needs-you"
 
 type SortKey = "newest" | "oldest" | "status" | "client"
 
@@ -66,9 +68,12 @@ export function StockRequestsList({
   requests: StockRequestWithRelations[]
   onRequestsChanged?: () => void
 }) {
-  const { role, user } = useAuth()
+  const { user } = useAuth()
+  const role = useEffectiveRole()
   const canCreate = canCreateStockRequest(role)
   const isAdmin = role === ADMIN
+  /** Sales and technicians get a "Needs you" home above their list. */
+  const isRequester = role === SALES || role === TECHNICIANS
   /** Admin and Admin viewer can read other people's profiles, so only they get requester names. */
   const sees = isAdmin || role === "viewer"
   const seesAll = sees || role === "accounts"
@@ -177,6 +182,14 @@ export function StockRequestsList({
         }
       />
 
+      {isRequester ? (
+        <RequesterNeedsYou
+          requests={requests}
+          displayStatuses={displayStatuses}
+          onChanged={onRequestsChanged}
+        />
+      ) : null}
+
       {isAdmin ? (
         <ToIssueQueue
           requests={requests}
@@ -189,7 +202,8 @@ export function StockRequestsList({
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium">
-              Pending invoices ({pendingByRequester.reduce((n, g) => n + g.rows.length, 0)})
+              Stock requests waiting for an invoice number (
+              {pendingByRequester.reduce((n, g) => n + g.rows.length, 0)})
             </CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
@@ -235,7 +249,7 @@ export function StockRequestsList({
               <Input
                 value={numberQuery}
                 onChange={(e) => setNumberQuery(e.target.value)}
-                placeholder="Request # (e.g. 42)"
+                placeholder="e.g. REQ-26-0004"
                 className="min-h-11 rounded-lg bg-background pl-8 text-base sm:min-h-9 sm:text-sm"
                 aria-label="Search by request number"
               />
@@ -288,65 +302,97 @@ export function StockRequestsList({
           {visible.length === 0 ? (
             <EmptyState message="No requests match these filters." />
           ) : (
-            <Card className="min-w-0 overflow-hidden">
-              <CardContent className="p-0 min-w-0">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Request</TableHead>
-                      <TableHead>Client</TableHead>
-                      <TableHead className="hidden md:table-cell">Type</TableHead>
-                      <TableHead className="hidden lg:table-cell">Items</TableHead>
-                      <TableHead className="hidden md:table-cell">Invoice</TableHead>
-                      {sees ? <TableHead className="hidden lg:table-cell">Requester</TableHead> : null}
-                      <TableHead>Status</TableHead>
-                      <TableHead className="hidden sm:table-cell">Created</TableHead>
-                      <TableHead className="w-[5.5rem]" />
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {visible.map((r) => (
-                      <TableRow key={r.id}>
-                        <TableCell className="font-medium whitespace-nowrap tabular-nums">
-                          {r.request_number}
-                        </TableCell>
-                        <TableCell className="font-medium max-w-[8rem] truncate sm:max-w-none">
-                          {clientLabel(r)}
-                        </TableCell>
-                        <TableCell className="hidden md:table-cell text-sm text-muted-foreground whitespace-nowrap">
-                          {r.type}
-                        </TableCell>
-                        <TableCell className="hidden lg:table-cell text-muted-foreground text-sm max-w-[18rem]">
-                          <span className="line-clamp-2">{requestItemsSummary(r.stock_request_lines ?? [])}</span>
-                        </TableCell>
-                        <TableCell className="hidden md:table-cell text-sm text-muted-foreground whitespace-nowrap">
-                          {requestInvoiceColumnLabel(r)}
-                        </TableCell>
-                        {sees ? (
-                          <TableCell className="hidden lg:table-cell text-sm text-muted-foreground whitespace-nowrap">
-                            {requesterName(r.created_by)}
-                          </TableCell>
-                        ) : null}
-                        <TableCell>
+            <>
+              {/* Phone: cards — no horizontal scroll */}
+              <ul className="flex flex-col gap-2 sm:hidden">
+                {visible.map((r) => {
+                  const lineCount = (r.stock_request_lines ?? []).length
+                  return (
+                    <li key={r.id}>
+                      <Link
+                        href={`/requests/${r.id}`}
+                        className="flex min-w-0 flex-col gap-2 rounded-xl border border-border bg-card/30 px-4 py-3 transition-colors hover:bg-muted/40"
+                      >
+                        <div className="flex min-w-0 items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="font-medium tabular-nums text-foreground">{r.request_number}</p>
+                            <p className="truncate text-sm text-muted-foreground">{clientLabel(r)}</p>
+                          </div>
                           <RequestStatusPill status={displayStatuses[r.id]} />
-                        </TableCell>
-                        <TableCell className="hidden sm:table-cell text-sm text-muted-foreground whitespace-nowrap">
-                          {formatDateDDMMYYYY(r.created_at)}
-                        </TableCell>
-                        <TableCell>
-                          <Button variant="ghost" size="sm" className="min-h-11 min-w-11" asChild>
-                            <Link href={`/requests/${r.id}`} className="gap-1">
-                              <MessageSquare className="size-3.5" />
-                              <span className="sm:inline">Open</span>
-                            </Link>
-                          </Button>
-                        </TableCell>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                          <span>{formatDateDDMMYYYY(r.created_at)}</span>
+                          <span>
+                            {lineCount} line{lineCount === 1 ? "" : "s"}
+                          </span>
+                        </div>
+                      </Link>
+                    </li>
+                  )
+                })}
+              </ul>
+
+              {/* ≥640px: table */}
+              <Card className="hidden min-w-0 overflow-hidden sm:block">
+                <CardContent className="p-0 min-w-0 overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Request</TableHead>
+                        <TableHead>Client</TableHead>
+                        <TableHead className="hidden md:table-cell">Type</TableHead>
+                        <TableHead className="hidden lg:table-cell">Items</TableHead>
+                        <TableHead className="hidden md:table-cell">Invoice</TableHead>
+                        {sees ? <TableHead className="hidden lg:table-cell">Requester</TableHead> : null}
+                        <TableHead>Status</TableHead>
+                        <TableHead>Created</TableHead>
+                        <TableHead className="w-[5.5rem]" />
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
+                    </TableHeader>
+                    <TableBody>
+                      {visible.map((r) => (
+                        <TableRow key={r.id}>
+                          <TableCell className="font-medium whitespace-nowrap tabular-nums">
+                            {r.request_number}
+                          </TableCell>
+                          <TableCell className="font-medium max-w-[12rem] truncate">
+                            {clientLabel(r)}
+                          </TableCell>
+                          <TableCell className="hidden md:table-cell text-sm text-muted-foreground whitespace-nowrap">
+                            {r.type}
+                          </TableCell>
+                          <TableCell className="hidden lg:table-cell text-muted-foreground text-sm max-w-[18rem]">
+                            <span className="line-clamp-2">{requestItemsSummary(r.stock_request_lines ?? [])}</span>
+                          </TableCell>
+                          <TableCell className="hidden md:table-cell text-sm text-muted-foreground whitespace-nowrap">
+                            {requestInvoiceColumnLabel(r)}
+                          </TableCell>
+                          {sees ? (
+                            <TableCell className="hidden lg:table-cell text-sm text-muted-foreground whitespace-nowrap">
+                              {requesterName(r.created_by)}
+                            </TableCell>
+                          ) : null}
+                          <TableCell>
+                            <RequestStatusPill status={displayStatuses[r.id]} />
+                          </TableCell>
+                          <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
+                            {formatDateDDMMYYYY(r.created_at)}
+                          </TableCell>
+                          <TableCell>
+                            <Button variant="ghost" size="sm" className="min-h-11 min-w-11" asChild>
+                              <Link href={`/requests/${r.id}`} className="gap-1">
+                                <MessageSquare className="size-3.5" />
+                                <span>Open</span>
+                              </Link>
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            </>
           )}
         </>
       )}

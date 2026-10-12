@@ -8,16 +8,17 @@ import { QuickScan } from "@/components/quick-scan"
 import { TransactionsTable } from "@/components/transactions-table"
 import { useInventoryStore } from "@/lib/inventory-store"
 import { PageHeader } from "@/components/page-nav"
-import { useAuth } from "@/lib/auth-context"
+import { AdminTodoRow } from "@/components/admin-todo-row"
+import { useEffectiveRole } from "@/lib/dev-role-preview"
 import { inStockPoolCounts } from "@/lib/inventory-products"
-import { canRecordStockMovement } from "@/lib/permissions"
+import { ADMIN, canRecordStockMovement } from "@/lib/permissions"
 import { useAlertFeed } from "@/hooks/use-alert-feed"
 import { EMPTY, formatCount } from "@/lib/format-display"
 
 export function DashboardContent() {
   const { inventory } = useInventoryStore()
   const { feed, loading: lowStockLoading } = useAlertFeed()
-  const { role } = useAuth()
+  const role = useEffectiveRole()
   const showQuickScan = canRecordStockMovement(role)
   const statsReady = useIsClient()
 
@@ -35,6 +36,8 @@ export function DashboardContent() {
         title="Dashboard Overview"
         description="Track inventory, monitor stock movements, and manage operations."
       />
+
+      {role === ADMIN ? <AdminTodoRow /> : null}
 
       {/* Stat Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">

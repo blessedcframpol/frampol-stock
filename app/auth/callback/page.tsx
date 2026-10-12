@@ -5,10 +5,35 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { Loader2 } from "lucide-react"
 import { exchangeAuthCodeOnce } from "@/lib/auth/exchange-auth-code"
 import { createAuthReturnBrowserClient } from "@/lib/supabase/browser"
+import { isValidRole } from "@/lib/permissions"
+import { roleRedirectAfterSignIn } from "@/lib/role-pages"
 
 function safeNextPath(next: string): string {
   if (!next.startsWith("/") || next.startsWith("//")) return "/"
   return next
+}
+
+type CallbackClient = ReturnType<typeof createAuthReturnBrowserClient>
+
+/** Role-aware destination once a session exists. Falls back to `next` if the profile can't be read. */
+async function destinationAfterSignIn(supabase: CallbackClient, next: string): Promise<string> {
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) return next
+    const { data } = await supabase
+      .from("profiles")
+      .select("role, active")
+      .eq("id", user.id)
+      .single()
+    if (!data) return next
+    if (!data.active) return "/pending-role?reason=inactive"
+    if (data.role == null || !isValidRole(data.role)) return "/pending-role?reason=no-role"
+    return roleRedirectAfterSignIn(data.role, next)
+  } catch {
+    return next
+  }
 }
 
 function AuthCallbackContent() {
@@ -44,8 +69,9 @@ function AuthCallbackContent() {
           data: { session: already },
         } = await supabase.auth.getSession()
         if (already) {
+          const destination = await destinationAfterSignIn(supabase, next)
           if (!cancelled) {
-            router.replace(next)
+            router.replace(destination)
             router.refresh()
           }
           return
@@ -104,8 +130,9 @@ function AuthCallbackContent() {
           }
         }
 
+        const destination = await destinationAfterSignIn(supabase, next)
         if (!cancelled) {
-          router.replace(next)
+          router.replace(destination)
           router.refresh()
         }
       } catch {

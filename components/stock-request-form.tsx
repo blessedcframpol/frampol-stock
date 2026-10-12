@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -63,6 +63,8 @@ import { toastFromCaughtError } from "@/lib/toast-reportable-error"
 import { AlertCircle, Check, ChevronsUpDown, Loader2, Plus, Trash2 } from "lucide-react"
 import { PageBreadcrumbs } from "@/components/page-breadcrumbs"
 import { canCreateStockRequest } from "@/lib/permissions"
+import { availabilityByProductId, fetchStockAvailability, overRequestWarning } from "@/lib/stock-availability"
+import { useEffectiveRole } from "@/lib/dev-role-preview"
 
 type LineDraft = {
   id: string
@@ -121,12 +123,30 @@ export function StockRequestForm({
   onCancelHref?: string
 }) {
   const router = useRouter()
-  const { user, role } = useAuth()
+  const { user } = useAuth()
+  const role = useEffectiveRole()
   const canCreate = canCreateStockRequest(role)
   const timeZone = useOrgTimezone()
   const today = todayBusinessDate(timeZone)
   const { clients, refetch: refetchClients } = useClients()
   const { inventory } = useInventoryStore()
+  // Available (sale-pool) counts per product, loaded once. Missing until it arrives or if it fails.
+  const [availability, setAvailability] = useState<Record<string, number> | null>(null)
+
+  useEffect(() => {
+    if (!canCreate) return
+    let cancelled = false
+    void fetchStockAvailability()
+      .then((rows) => {
+        if (!cancelled) setAvailability(availabilityByProductId(rows))
+      })
+      .catch(() => {
+        // Counts are a convenience; the form works without them.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [canCreate])
 
   const seed = mode === "resubmit" ? (initialRequest ?? null) : null
 
@@ -474,6 +494,7 @@ export function StockRequestForm({
                   line={line}
                   products={productOptions}
                   taken={new Set(lines.filter((l) => l.id !== line.id).map((l) => l.productId))}
+                  available={line.productId && availability ? (availability[line.productId] ?? null) : null}
                   disabled={busy}
                   onProduct={(p) =>
                     updateLine(line.id, { productId: p.id, productName: p.name, vendor: p.vendor })
@@ -608,6 +629,7 @@ function LineRowEditor({
   line,
   products,
   taken,
+  available,
   disabled,
   onProduct,
   onQuantity,
@@ -618,6 +640,8 @@ function LineRowEditor({
   products: ProductOption[]
   /** Product ids already used on other lines. */
   taken: Set<string>
+  /** Units in stock for the chosen product; null when unknown. */
+  available: number | null
   disabled: boolean
   onProduct: (product: ProductOption) => void
   onQuantity: (q: number) => void
@@ -635,6 +659,8 @@ function LineRowEditor({
         (!q || p.name.toLowerCase().includes(q) || (p.vendor ?? "").toLowerCase().includes(q))
     )
   }, [products, taken, search])
+
+  const stockWarning = overRequestWarning(line.quantity, available)
 
   return (
     <div className="flex flex-col sm:flex-row gap-2 sm:items-end p-3 rounded-lg border border-border bg-muted/20">
@@ -682,7 +708,17 @@ function LineRowEditor({
             </Command>
           </PopoverContent>
         </Popover>
-        {line.vendor ? <p className="text-[11px] text-muted-foreground">Vendor: {line.vendor}</p> : null}
+        {line.vendor || available != null ? (
+          <p className="flex flex-wrap gap-x-3 text-[11px] text-muted-foreground">
+            {line.vendor ? <span>Vendor: {line.vendor}</span> : null}
+            {available != null ? <span>In stock: {available}</span> : null}
+          </p>
+        ) : null}
+        {stockWarning ? (
+          <p role="status" className="text-xs text-warning">
+            {stockWarning}
+          </p>
+        ) : null}
       </div>
       <div className="w-full sm:w-24 flex flex-col gap-1">
         <Label className="text-xs text-muted-foreground">Qty</Label>

@@ -22,6 +22,7 @@ import {
   MICROSOFT_PROVIDER,
 } from "@/lib/auth/microsoft-oauth"
 import { useAuth, hasAppAccess } from "@/lib/auth-context"
+import { roleRedirectAfterSignIn } from "@/lib/role-pages"
 
 /** Hero / brand panel artwork */
 const LOGIN_VISUAL = "/pexels-daniel-dan-47825192-7598913.jpg"
@@ -93,9 +94,9 @@ function LoginPageContent() {
   useEffect(() => {
     if (authLoading) return
     if (!user) return
-    const safeRedirect = redirectTo.startsWith("/login") ? "/" : redirectTo
     if (hasAppAccess(profile)) {
-      router.replace(safeRedirect)
+      // Honour the requested page only when this role may open it; otherwise its landing page.
+      router.replace(roleRedirectAfterSignIn(profile?.role, redirectTo))
       router.refresh()
       return
     }

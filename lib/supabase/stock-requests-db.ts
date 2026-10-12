@@ -532,6 +532,33 @@ export async function fetchIssuedSerialsForRequest(sb: SB, requestId: string): P
   }))
 }
 
+/**
+ * Request ids (newest issue first) that have units issued against them, capped at `maxRequests`.
+ * One query over the supplied ids; callers pass a bounded list.
+ */
+export async function fetchRecentlyIssuedRequestIds(
+  sb: SB,
+  requestIds: string[],
+  maxRequests = 5
+): Promise<string[]> {
+  const unique = [...new Set(requestIds)]
+  if (unique.length === 0) return []
+  const { data, error } = await sb
+    .from("active_transactions")
+    .select("request_id, created_at")
+    .in("request_id", unique)
+    .order("created_at", { ascending: false })
+    .limit(200)
+  if (error) throw error
+  const out: string[] = []
+  for (const row of data ?? []) {
+    const id = row.request_id
+    if (id && !out.includes(id)) out.push(id)
+    if (out.length >= maxRequests) break
+  }
+  return out
+}
+
 export type StockRequestEvent = Database["public"]["Tables"]["stock_request_events"]["Row"] & {
   actorLabel: string | null
 }

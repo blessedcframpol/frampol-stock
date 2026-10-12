@@ -13,6 +13,8 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useInventoryStore } from "@/lib/inventory-store"
 import { useClients } from "@/lib/supabase/clients-db"
 import { useSearchUsers } from "@/lib/supabase/search-users"
+import { useEffectiveRole } from "@/lib/dev-role-preview"
+import { roleSearchEntities } from "@/lib/role-pages"
 import { runSearch, type SearchResults } from "@/lib/search"
 import { clientCompanyDetail } from "@/lib/client-label"
 import {
@@ -39,6 +41,8 @@ export function SearchResultsContent() {
     setLocalQuery(qFromUrl)
   }
 
+  const role = useEffectiveRole()
+  const searchEntities = useMemo(() => roleSearchEntities(role), [role])
   const { inventory } = useInventoryStore()
   const { clients } = useClients()
   const users = useSearchUsers()
@@ -46,12 +50,16 @@ export function SearchResultsContent() {
   const results = useMemo<SearchResults>(() => {
     return runSearch(
       { inventory, clients, users },
-      qFromUrl
+      qFromUrl,
+      searchEntities.length > 0 ? searchEntities : ["inventory", "clients", "users"]
     )
-  }, [inventory, clients, users, qFromUrl])
+  }, [inventory, clients, users, qFromUrl, searchEntities])
 
   const totalCount =
-    results.inventory.length + results.clients.length + results.users.length
+    results.inventory.length +
+    results.clients.length +
+    results.users.length +
+    (results.products?.length ?? 0)
 
   const handleSearchSubmit = useCallback(
     (e: React.FormEvent) => {

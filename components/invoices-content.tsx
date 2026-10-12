@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react"
+import { useSearchParams } from "next/navigation"
 import { FileText } from "lucide-react"
 import { toast } from "sonner"
 import { PageHeader } from "@/components/page-nav"
@@ -18,7 +19,9 @@ import {
 } from "@/components/ui/table"
 import { useAuth } from "@/lib/auth-context"
 import { realInvoiceNumberProblem } from "@/lib/invoices"
-import { canManageInvoices, ADMIN } from "@/lib/permissions"
+import { AccountsHome } from "@/components/accounts-home"
+import { useEffectiveRole } from "@/lib/dev-role-preview"
+import { canManageInvoices, ADMIN, ACCOUNTS } from "@/lib/permissions"
 import { loadProfileLabels } from "@/lib/profile-labels"
 import { getSupabaseClient } from "@/lib/supabase/client"
 import { KitSerialList } from "@/components/kit-serial"
@@ -26,6 +29,22 @@ import type { Database } from "@/lib/supabase/database.types"
 import { fetchAllPages } from "@/lib/supabase/postgrest-page"
 
 type InvoiceListRow = Database["public"]["Views"]["batch_invoice_list"]["Row"]
+
+type InvoiceTab = "pending" | "awaiting" | "not-invoiced" | "legacy"
+
+function tabFromQuery(value: string | null): InvoiceTab | null {
+  switch (value) {
+    case "pending":
+    case "awaiting":
+    case "legacy":
+      return value
+    case "not_invoiced":
+    case "not-invoiced":
+      return "not-invoiced"
+    default:
+      return null
+  }
+}
 
 function downloadCsv(filename: string, rows: string[][]) {
   const body = rows
@@ -41,7 +60,11 @@ function downloadCsv(filename: string, rows: string[][]) {
 }
 
 export function InvoicesContent() {
-  const { role, user } = useAuth()
+  const { user } = useAuth()
+  const role = useEffectiveRole()
+  const searchParams = useSearchParams()
+  // /invoices?tab=not_invoiced opens that tab (used by the Accounts home link).
+  const [tab, setTab] = useState<InvoiceTab>(() => tabFromQuery(searchParams.get("tab")) ?? "pending")
   const [rows, setRows] = useState<InvoiceListRow[]>([])
   const [names, setNames] = useState<Map<string, string>>(new Map())
   const [loading, setLoading] = useState(true)
@@ -137,10 +160,13 @@ export function InvoicesContent() {
         icon={FileText}
       />
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
+      {role === ACCOUNTS ? <AccountsHome onShowNotInvoiced={() => setTab("not-invoiced")} /> : null}
       {loading ? <p className="text-sm text-muted-foreground">Loading invoices…</p> : null}
-      <Tabs defaultValue="pending">
+      <Tabs value={tab} onValueChange={(value) => setTab(value as InvoiceTab)}>
         <TabsList>
-          <TabsTrigger value="pending">Pending ({pending.length})</TabsTrigger>
+          <TabsTrigger value="pending">
+            Sale/rental batches awaiting a number ({pending.length})
+          </TabsTrigger>
           {isAdmin ? <TabsTrigger value="awaiting">Awaiting approval ({awaiting.length})</TabsTrigger> : null}
           <TabsTrigger value="not-invoiced">Not invoiced ({notInvoiced.length})</TabsTrigger>
           <TabsTrigger value="legacy">Legacy 00000 ({legacy.length})</TabsTrigger>

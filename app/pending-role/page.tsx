@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { useTheme } from "next-themes"
 import { Building2, Loader2, Moon, RefreshCw, Sun } from "lucide-react"
 import { useAuth, hasAppAccess } from "@/lib/auth-context"
+import { roleLandingPath } from "@/lib/role-pages"
 import { Button } from "@/components/ui/button"
 
 const POLL_MS = 7000
@@ -54,7 +55,7 @@ function PendingRoleContent() {
     if (hasAppAccess(profile)) {
       if (!redirected.current) {
         redirected.current = true
-        router.replace("/")
+        router.replace(roleLandingPath(profile?.role))
         router.refresh()
       }
     }
@@ -132,7 +133,7 @@ function PendingRoleContent() {
           )}
         </p>
         <p className="mt-3 text-xs text-muted-foreground">
-          This page checks for updates automatically; when your role is ready you&apos;ll be sent to the dashboard.
+          This page checks for updates automatically; when your role is ready you&apos;ll be sent to your home page.
         </p>
 
         <div className="mt-10 flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:justify-center">

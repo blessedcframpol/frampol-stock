@@ -20,13 +20,15 @@ import { ageInDays, formatAgeDays } from "@/lib/format-display"
 import { useRequestDisplayStatuses } from "@/hooks/use-request-display-statuses"
 import { displayStatusLabel, requestItemsSummary } from "@/lib/stock-request-statuses"
 import { useAuth } from "@/lib/auth-context"
+import { useEffectiveRole } from "@/lib/dev-role-preview"
 import { ADMIN } from "@/lib/permissions"
 import { requestIsAllFortinet } from "@/lib/issue-scan-feedback"
 
 const PREVIEW_COUNT = 6
 
 export function LatestRequests() {
-  const { role, user } = useAuth()
+  const { user } = useAuth()
+  const role = useEffectiveRole()
   const isAdmin = role === ADMIN
   const timeZone = useOrgTimezone()
   const today = todayBusinessDate(timeZone)

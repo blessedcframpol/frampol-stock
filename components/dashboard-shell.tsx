@@ -30,6 +30,9 @@ import {
   Volume2,
   VolumeX,
   MessageSquareWarning,
+  Boxes,
+  BellRing,
+  FilePlus,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Input } from "@/components/ui/input"
@@ -54,6 +57,14 @@ import { useIsClient } from "@/hooks/use-is-client"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useState, useMemo, useEffect } from "react"
 import { useAuth } from "@/lib/auth-context"
+import { useDevRolePreview, useEffectiveRole } from "@/lib/dev-role-preview"
+import {
+  roleCanAccessPath,
+  roleMenuItems,
+  roleRedirectForPath,
+  roleSearchEntities,
+  roleSearchPlaceholder,
+} from "@/lib/role-pages"
 import {
   canAccessReports,
   canAccessRequests,
@@ -105,17 +116,49 @@ type NavItem = {
   badge?: number
 }
 
-const allNavItems: NavItem[] = [
-  { href: "/", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/search", label: "Search", icon: Search },
-  { href: "/inventory", label: "Inventory", icon: Package, children: inventoryChildren },
-  { href: "/transaction-history", label: "Transaction history", icon: History },
-  { href: "/invoices", label: "Invoices", icon: FileText },
-  { href: "/alerts", label: "Alerts", icon: Bell },
-  { href: "/clients", label: "Clients", icon: Users },
-  { href: "/requests", label: "Requests", icon: MessageSquare },
-  { href: "/reports", label: "Reports", icon: BarChart3 },
-]
+type NavIcon = React.ComponentType<{ className?: string }>
+
+/** Icon per menu destination (labels come from lib/role-pages.ts). */
+const NAV_ICONS: Record<string, NavIcon> = {
+  "/": LayoutDashboard,
+  "/search": Search,
+  "/inventory": Package,
+  "/transaction-history": History,
+  "/invoices": FileText,
+  "/alerts": Bell,
+  "/clients": Users,
+  "/requests": MessageSquare,
+  "/requests/new": FilePlus,
+  "/reports": BarChart3,
+  "/stock": Boxes,
+  "/notifications": BellRing,
+  "/problems/new": MessageSquareWarning,
+}
+
+/** Main nav for a role, built from the single role → pages map. */
+function buildNavItems(role: string | null | undefined, notificationBadge = 0): NavItem[] {
+  const r = role as AppRole | null | undefined
+  return roleMenuItems(r).map((entry) => ({
+    href: entry.href,
+    label: entry.label,
+    icon: NAV_ICONS[entry.href] ?? MessageSquare,
+    badge: entry.href === "/notifications" ? notificationBadge : undefined,
+    children: entry.href === "/inventory" ? inventoryChildren : undefined,
+  }))
+}
+
+/** Active when this is the most specific menu entry matching the path. */
+function isNavActive(pathname: string, href: string, allHrefs: string[]): boolean {
+  if (href === "/") return pathname === "/"
+  if (pathname === href) return true
+  if (!pathname.startsWith(`${href}/`)) return false
+  return !allHrefs.some(
+    (other) =>
+      other !== href &&
+      other.length > href.length &&
+      (pathname === other || pathname.startsWith(`${other}/`))
+  )
+}
 
 type BottomNavEntry = {
   href: string
@@ -217,9 +260,10 @@ function SidebarNav({
   onSignOut: () => void
 }) {
   const pathname = usePathname()
-  const { role } = useAuth()
+  const role = useEffectiveRole()
   const bottomFiltered = useMemo(() => filterBottomNavForRole(role), [role])
   const [inventoryExpanded, setInventoryExpanded] = useState(true)
+  const navHrefs = useMemo(() => navItems.map((n) => n.href), [navItems])
 
   return (
     <>
@@ -229,7 +273,7 @@ function SidebarNav({
         </span>
         {navItems.map((item) => {
           const hasChildren = "children" in item && item.children && item.children.length > 0
-          const isParentActive = item.href === "/inventory" ? pathname.startsWith("/inventory") : pathname === item.href
+          const isParentActive = isNavActive(pathname, item.href, navHrefs)
           const badge = item.badge
 
           if (hasChildren && item.children) {
@@ -479,12 +523,17 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false)
-  const { user, profile, role, signOut, loading, refetch } = useAuth()
+  const { user, profile, signOut, loading, refetch } = useAuth()
+  const role = useEffectiveRole()
+  const { previewRole } = useDevRolePreview()
   const { inventory } = useInventoryStore()
   const { feed } = useAlertFeed()
   const { clients } = useClients()
   const users = useSearchUsers()
   const mounted = useIsClient()
+  const searchEntities = useMemo(() => roleSearchEntities(role), [role])
+  const searchPlaceholder = roleSearchPlaceholder(role)
+  const showGlobalSearch = searchEntities.length > 0
 
   const blockReason: "inactive" | "no-role" | null =
     user && profile && !profile.active
@@ -505,10 +554,6 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
     }
   }, [loading, user, profile, blockReason, pathname, router])
 
-  const filteredNavItems = useMemo(
-    () => filterNavByRole(allNavItems, role),
-    [role]
-  )
   const {
     unread: inboxUnread,
     count: inboxCount,
@@ -516,6 +561,23 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
     muted: notificationsMuted,
     setMuted: setNotificationsMuted,
   } = useInboxNotifications()
+  // Preview cannot load another role's inbox/alerts from the DB — hide badges while previewing.
+  const navBadgeShown = mounted && !previewRole ? inboxCount : 0
+  const filteredNavItems = useMemo(
+    () => filterNavByRole(buildNavItems(role, navBadgeShown), role),
+    [role, navBadgeShown]
+  )
+  const navHrefs = useMemo(() => filteredNavItems.map((n) => n.href), [filteredNavItems])
+
+  // Send a role that opened a page outside its menu to its landing page.
+  // /dev/* preview routes are exempt (they are stripped from production builds).
+  const roleRedirect =
+    !loading && user && profile && !blockReason && role && !pathname.startsWith("/dev/")
+      ? roleRedirectForPath(role, pathname)
+      : null
+  useEffect(() => {
+    if (roleRedirect) router.replace(roleRedirect)
+  }, [roleRedirect, router])
   const bottomNavFiltered = useMemo(() => filterBottomNavForRole(role), [role])
   const timeZone = useOrgTimezone()
   const headerToday = mounted ? formatHeaderToday(timeZone) : "Today"
@@ -527,23 +589,35 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
     () =>
       runSearch(
         { inventory, clients, users },
-        searchQuery
+        searchQuery,
+        searchEntities
       ),
-    [inventory, clients, users, searchQuery]
+    [inventory, clients, users, searchQuery, searchEntities]
   )
+
+  const searchSeeAllHref = useMemo(() => {
+    const q = searchQuery.trim()
+    if (!q) return null
+    if (roleCanAccessPath(role, "/search")) return `/search?q=${encodeURIComponent(q)}`
+    if (searchEntities.includes("products")) return `/stock?q=${encodeURIComponent(q)}`
+    return null
+  }, [searchQuery, role, searchEntities])
 
   function handleSearchSubmit(e?: React.FormEvent) {
     e?.preventDefault()
-    const q = searchQuery.trim()
-    if (q) router.push(`/search?q=${encodeURIComponent(q)}`)
+    if (searchSeeAllHref) router.push(searchSeeAllHref)
     setMobileSearchOpen(false)
   }
   const alertCounts = feed?.counts
   const totalAlertCount = alertCounts?.all ?? 0
   // Use alert count only after mount to avoid hydration mismatch (store may differ server vs client)
-  const alertCount = mounted ? totalAlertCount : 0
-  const headerBellCount = mounted ? alertCount + inboxCount : 0
+  const alertCount = mounted && !previewRole ? totalAlertCount : 0
+  const headerBellCount = mounted && !previewRole ? alertCount + inboxCount : 0
   const showSettings = canAccessSettings(role)
+  // Roles without the alerts page get the notifications page from the bell instead.
+  const alertsLink = roleCanAccessPath(role, "/alerts")
+    ? { href: "/alerts", label: "View all alerts" }
+    : { href: "/notifications", label: "View all notifications" }
 
   async function handleSignOut() {
     await signOut()
@@ -573,6 +647,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
     )
   }
   if (blockReason) return authGateSpinner
+  if (roleRedirect) return authGateSpinner
 
   return (
     <PageBreadcrumbProvider>
@@ -618,10 +693,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
             <>
               <nav className="flex flex-1 flex-col items-center gap-1 overflow-y-auto px-2 py-4" aria-label="Main">
                 {filteredNavItems.map((item) => {
-                  const isActive =
-                    item.href === "/inventory"
-                      ? pathname.startsWith("/inventory")
-                      : pathname === item.href
+                  const isActive = isNavActive(pathname, item.href, navHrefs)
                   const badge = item.badge ?? 0
                   if (item.children && item.children.length > 0) {
                     return (
@@ -702,39 +774,42 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
       </Sheet>
 
       {/* Mobile search sheet */}
-      <Sheet open={mobileSearchOpen} onOpenChange={setMobileSearchOpen}>
-        <SheetContent side="top" className="pt-6 flex flex-col">
-          <SheetHeader>
-            <SheetTitle className="sr-only">Search</SheetTitle>
-          </SheetHeader>
-          <form onSubmit={handleSearchSubmit} className="flex gap-2 pt-2 shrink-0">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input
-                type="search"
-                placeholder="Search inventory, clients, users..."
-                className="pl-9"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                autoFocus
-                aria-label="Search"
-              />
-            </div>
-            <Button type="submit">Search</Button>
-          </form>
-          <p className="text-xs text-muted-foreground mt-2 shrink-0">Press Enter to see all results</p>
-          {searchQuery.trim().length >= 1 && (
-            <div className="mt-4 flex-1 min-h-0 overflow-auto border-t border-border pt-4">
-              <SearchSuggestions
-                query={searchQuery}
-                results={searchSuggestions}
-                compact
-                onSeeAll={() => setMobileSearchOpen(false)}
-              />
-            </div>
-          )}
-        </SheetContent>
-      </Sheet>
+      {showGlobalSearch ? (
+        <Sheet open={mobileSearchOpen} onOpenChange={setMobileSearchOpen}>
+          <SheetContent side="top" className="pt-6 flex flex-col">
+            <SheetHeader>
+              <SheetTitle className="sr-only">Search</SheetTitle>
+            </SheetHeader>
+            <form onSubmit={handleSearchSubmit} className="flex gap-2 pt-2 shrink-0">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <Input
+                  type="search"
+                  placeholder={searchPlaceholder ?? "Search…"}
+                  className="pl-9"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  autoFocus
+                  aria-label="Search"
+                />
+              </div>
+              <Button type="submit">Search</Button>
+            </form>
+            <p className="text-xs text-muted-foreground mt-2 shrink-0">Press Enter to see all results</p>
+            {searchQuery.trim().length >= 1 && (
+              <div className="mt-4 flex-1 min-h-0 overflow-auto border-t border-border pt-4">
+                <SearchSuggestions
+                  query={searchQuery}
+                  results={searchSuggestions}
+                  compact
+                  seeAllHref={searchSeeAllHref}
+                  onSeeAll={() => setMobileSearchOpen(false)}
+                />
+              </div>
+            )}
+          </SheetContent>
+        </Sheet>
+      ) : null}
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
@@ -751,52 +826,57 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
               <span className="sr-only">Open menu</span>
             </Button>
 
-            <Popover open={searchQuery.trim().length >= 1}>
-              <PopoverAnchor asChild>
-                <form
-                  className="relative hidden w-full max-w-xs md:block lg:max-w-sm"
-                  onSubmit={handleSearchSubmit}
+            {showGlobalSearch ? (
+              <Popover open={searchQuery.trim().length >= 1}>
+                <PopoverAnchor asChild>
+                  <form
+                    className="relative hidden w-full max-w-xs md:block lg:max-w-sm"
+                    onSubmit={handleSearchSubmit}
+                  >
+                    <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      type="search"
+                      placeholder={searchPlaceholder ?? "Search…"}
+                      className="h-10 rounded-full border-0 bg-card pl-10 text-foreground shadow-none placeholder:text-muted-foreground"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      aria-label="Search"
+                    />
+                  </form>
+                </PopoverAnchor>
+                <PopoverContent
+                  className="min-w-[280px] w-[min(24rem,90vw)] max-w-[400px] p-2"
+                  align="start"
+                  side="bottom"
+                  sideOffset={4}
+                  onOpenAutoFocus={(e) => e.preventDefault()}
                 >
-                  <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    type="search"
-                    placeholder="Search inventory, clients, users..."
-                    className="h-10 rounded-full border-0 bg-card pl-10 text-foreground shadow-none placeholder:text-muted-foreground"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    aria-label="Search"
+                  <SearchSuggestions
+                    query={searchQuery}
+                    results={searchSuggestions}
+                    seeAllHref={searchSeeAllHref}
+                    onSeeAll={() => setSearchQuery("")}
                   />
-                </form>
-              </PopoverAnchor>
-              <PopoverContent
-                className="min-w-[280px] w-[min(24rem,90vw)] max-w-[400px] p-2"
-                align="start"
-                side="bottom"
-                sideOffset={4}
-                onOpenAutoFocus={(e) => e.preventDefault()}
-              >
-                <SearchSuggestions
-                  query={searchQuery}
-                  results={searchSuggestions}
-                  onSeeAll={() => setSearchQuery("")}
-                />
-              </PopoverContent>
-            </Popover>
+                </PopoverContent>
+              </Popover>
+            ) : null}
           </div>
 
           <p className="hidden shrink-0 text-sm text-muted-foreground xl:block">{headerToday}</p>
 
           <div className="flex shrink-0 items-center gap-2">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="size-10 rounded-full text-muted-foreground hover:bg-accent hover:text-foreground md:hidden"
-              onClick={() => setMobileSearchOpen(true)}
-            >
-              <Search className="w-[18px] h-[18px]" />
-              <span className="sr-only">Search</span>
-            </Button>
+            {showGlobalSearch ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="size-10 rounded-full text-muted-foreground hover:bg-accent hover:text-foreground md:hidden"
+                onClick={() => setMobileSearchOpen(true)}
+              >
+                <Search className="w-[18px] h-[18px]" />
+                <span className="sr-only">Search</span>
+              </Button>
+            ) : null}
 
             <ThemeToggle />
 
@@ -876,7 +956,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                       </div>
                       <div className="border-t border-border px-4 py-2 shrink-0 flex flex-col gap-1">
                         <Button variant="ghost" size="sm" className="w-full justify-center text-foreground" asChild>
-                          <Link href="/alerts">View all alerts</Link>
+                          <Link href={alertsLink.href}>{alertsLink.label}</Link>
                         </Button>
                         {inboxCount > 0 && (
                           <Button variant="ghost" size="sm" className="w-full justify-center text-foreground" asChild>
@@ -1005,7 +1085,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                       </div>
                       <div className="border-t border-border px-4 py-2 shrink-0">
                         <Button variant="ghost" size="sm" className="w-full justify-center text-foreground" asChild>
-                          <Link href="/alerts">View all alerts</Link>
+                          <Link href={alertsLink.href}>{alertsLink.label}</Link>
                         </Button>
                       </div>
                     </Tabs>

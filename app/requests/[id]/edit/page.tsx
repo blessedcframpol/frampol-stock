@@ -5,6 +5,7 @@ import { useParams } from "next/navigation"
 import { DashboardShell } from "@/components/dashboard-shell"
 import { StockRequestForm } from "@/components/stock-request-form"
 import { useAuth } from "@/lib/auth-context"
+import { useEffectiveRole } from "@/lib/dev-role-preview"
 import { canCreateStockRequest } from "@/lib/permissions"
 import { getSupabaseClient } from "@/lib/supabase/client"
 import { fetchStockRequestById, type StockRequestWithRelations } from "@/lib/supabase/stock-requests-db"
@@ -21,7 +22,8 @@ import {
 export default function EditStockRequestPage() {
   const params = useParams()
   const id = typeof params?.id === "string" ? params.id : ""
-  const { user, role } = useAuth()
+  const { user } = useAuth()
+  const role = useEffectiveRole()
   const [row, setRow] = useState<StockRequestWithRelations | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)

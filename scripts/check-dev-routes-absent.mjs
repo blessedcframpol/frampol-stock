@@ -8,7 +8,7 @@ import { fileURLToPath } from "url"
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const NEXT = path.join(ROOT, ".next")
-const NEEDLE = "rq3-issue-preview"
+const NEEDLES = ["rq3-issue-preview", "role-preview"]
 
 if (!fs.existsSync(NEXT)) {
   console.error("FAIL  .next missing — run next build first")
@@ -29,9 +29,9 @@ function walk(dir) {
     if (entry.isDirectory()) {
       // Skip Next caches and leftover `next dev` output — only production artifacts count.
       if (entry.name === "cache" || entry.name === "node_modules" || entry.name === "dev") continue
-      if (entry.name.includes(NEEDLE)) hits.push(full)
+      if (NEEDLES.some((n) => entry.name.includes(n))) hits.push(full)
       walk(full)
-    } else if (entry.name.includes(NEEDLE)) {
+    } else if (NEEDLES.some((n) => entry.name.includes(n))) {
       hits.push(full)
     }
   }
@@ -43,9 +43,9 @@ if (fs.existsSync(serverApp)) walk(serverApp)
 else walk(NEXT)
 
 if (hits.length > 0) {
-  console.error(`FAIL  found ${NEEDLE} in production build output:`)
+  console.error(`FAIL  found dev-only route name in production build output:`)
   for (const h of hits.slice(0, 20)) console.error(`  ${path.relative(ROOT, h)}`)
   process.exit(1)
 }
 
-console.log(`PASS  ${NEEDLE} absent from .next build output`)
+console.log(`PASS  ${NEEDLES.join(", ")} absent from .next build output`)

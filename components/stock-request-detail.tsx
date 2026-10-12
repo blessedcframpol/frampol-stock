@@ -33,6 +33,7 @@ import {
 import { InvoiceChoiceFields } from "@/components/invoice-choice-fields"
 import { RequestStatusPill } from "@/components/request-status-pill"
 import { useAuth } from "@/lib/auth-context"
+import { useEffectiveRole } from "@/lib/dev-role-preview"
 import {
   canCreateStockRequest,
   canFulfillStockRequests,
@@ -151,7 +152,8 @@ function invoiceSummary(row: StockRequestWithRelations): string {
 
 export function StockRequestDetail({ requestId }: { requestId: string }) {
   const router = useRouter()
-  const { user, role } = useAuth()
+  const { user } = useAuth()
+  const role = useEffectiveRole()
   const [bundle, setBundle] = useState<Bundle>(EMPTY_BUNDLE)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)

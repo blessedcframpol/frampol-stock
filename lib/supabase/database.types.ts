@@ -1260,6 +1260,17 @@ export interface Database {
         Args: { p_ids: string[] }
         Returns: { id: string; label: string }[]
       }
+      stock_availability: {
+        Args: { p_query?: string | null }
+        Returns: {
+          product_id: string
+          product_name: string
+          vendor: string | null
+          available_count: number
+          reorder_level: number
+          is_low: boolean
+        }[]
+      }
       client_last_activity: {
         Args: Record<string, never>
         Returns: {
