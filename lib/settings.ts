@@ -149,6 +149,48 @@ export async function updateProductLineSetting(
   announceSettingsUpdate()
 }
 
+/** Admin archive (is_active=false). Blocked while kits are In Stock. Reason audited. */
+export async function archiveProduct(
+  productId: string,
+  reason: string,
+  provided?: SettingsClient
+): Promise<void> {
+  const { error } = await client(provided).rpc("archive_product", {
+    p_product_id: productId,
+    p_reason: reason,
+  })
+  if (error) throw error
+  announceSettingsUpdate()
+}
+
+/** Admin restore archived product. Reason audited. */
+export async function restoreProduct(
+  productId: string,
+  reason: string,
+  provided?: SettingsClient
+): Promise<void> {
+  const { error } = await client(provided).rpc("restore_product", {
+    p_product_id: productId,
+    p_reason: reason,
+  })
+  if (error) throw error
+  announceSettingsUpdate()
+}
+
+/** Admin delete only when nothing references the product. Reason audited. */
+export async function deleteProduct(
+  productId: string,
+  reason: string,
+  provided?: SettingsClient
+): Promise<void> {
+  const { error } = await client(provided).rpc("delete_product", {
+    p_product_id: productId,
+    p_reason: reason,
+  })
+  if (error) throw error
+  announceSettingsUpdate()
+}
+
 export async function fetchLowStockProducts(
   provided?: SettingsClient
 ): Promise<LowStockProduct[]> {

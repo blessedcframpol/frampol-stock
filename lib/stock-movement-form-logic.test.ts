@@ -91,12 +91,31 @@ describe("serial feedback", () => {
     expect(feedback.blockedCount).toBe(1)
     expect(feedback.validSerials).toEqual(["OK"])
     expect(feedback.summary).toContain("can't be sold")
+    expect(feedback.summary).toMatch(/not in stock records/i)
   })
 
-  it("allows unknown serials for Decommissioned", () => {
+  it("stops unknown serials for non-Inbound (including Decommissioned)", () => {
     const feedback = buildSerialFeedback("Decommissioned", "UNKNOWN-1", [])
-    expect(feedback.validSerials).toEqual(["UNKNOWN-1"])
-    expect(feedback.notFoundCount).toBe(0)
+    expect(feedback.validSerials).toEqual([])
+    expect(feedback.notFoundCount).toBe(1)
+    expect(feedback.marks[0]?.detail).toMatch(/Not in stock records/i)
+  })
+
+  it("names product and status when Inbound scans an existing serial", () => {
+    const feedback = buildSerialFeedback("Inbound", "EXIST", [
+      item({ serialNumber: "EXIST", name: "Mini", vendor: "Starlink", status: "Sold" }),
+    ])
+    expect(feedback.validSerials).toEqual([])
+    expect(feedback.blockedCount).toBe(1)
+    expect(feedback.marks[0]?.detail).toMatch(/Mini · Starlink \(Sold\)/)
+  })
+
+  it("attaches kit product labels on Sale ok marks", () => {
+    const feedback = buildSerialFeedback("Sale", "OK", [
+      item({ serialNumber: "OK", name: "Mini", vendor: "Starlink", status: "In Stock", stockPool: "sale" }),
+    ])
+    expect(feedback.validSerials).toEqual(["OK"])
+    expect(feedback.marks[0]?.detail).toBe("Mini · Starlink")
   })
 })
 
@@ -133,13 +152,14 @@ describe("Dispose and dates", () => {
 })
 
 describe("Decommissioned unknown serial", () => {
-  it("requires client when an unknown serial is present", () => {
+  it("blocks submit until the serial is received via Inbound", () => {
     const feedback = buildSerialFeedback("Decommissioned", "UNKNOWN-1", [])
     expect(
       submitBlockMessage(
         baseFields({
           type: "Decommissioned",
-          clientId: "",
+          productName: "",
+          clientId: "client-1",
           intakeCategory: "Client cancelled",
           intakeReason: "Service ended",
           invoiceChoice: "",
@@ -147,7 +167,31 @@ describe("Decommissioned unknown serial", () => {
         feedback,
         { todayYmd: "2026-10-09", hasUnknownSerial: true },
       ),
-    ).toBe("Select a client")
+    ).toMatch(/Not in stock records/i)
+  })
+})
+
+describe("Inbound product required", () => {
+  it("asks for a product only on Inbound", () => {
+    const saleFeedback = buildSerialFeedback("Sale", "OK", [
+      item({ serialNumber: "OK", status: "In Stock", stockPool: "sale" }),
+    ])
+    expect(
+      submitBlockMessage(
+        baseFields({ type: "Sale", productName: "", clientId: "c1", invoiceChoice: "pending" }),
+        saleFeedback,
+        { todayYmd: "2026-10-09" },
+      ),
+    ).toBeNull()
+
+    const inboundFeedback = buildSerialFeedback("Inbound", "NEW-1", [])
+    expect(
+      submitBlockMessage(
+        baseFields({ type: "Inbound", productName: "", invoiceChoice: "" }),
+        inboundFeedback,
+        { todayYmd: "2026-10-09" },
+      ),
+    ).toBe("Select a product")
   })
 })
 

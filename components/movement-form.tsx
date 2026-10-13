@@ -62,6 +62,8 @@ import { uploadDocument, type UploadDocumentKind } from "@/lib/upload-documents"
 import { parseSaleDateOverride, type InboundCreateDefaults } from "@/lib/supabase/movement-utils"
 import { DEFAULT_ORG_TIMEZONE, todayBusinessDate } from "@/lib/business-date.mjs"
 import { fetchAppSettings } from "@/lib/settings"
+import { fetchProductCatalogue, type ProductCatalogueRow } from "@/lib/product-catalogue"
+import { FilterChip } from "@/components/fs/filter-chip"
 import { productRequiresCloudKey, splitDelimitedValues, cloudKeysMapForSerials } from "@/lib/fortigate"
 import type { NotInvoicedKind } from "@/lib/invoices"
 import { useAuth } from "@/lib/auth-context"
@@ -206,9 +208,12 @@ export function MovementForm({
   const [addingProduct, setAddingProduct] = useState(false)
   const [newProductName, setNewProductName] = useState("")
   const [newProductVendor, setNewProductVendor] = useState("General")
+  const [catalogue, setCatalogue] = useState<ProductCatalogueRow[]>([])
+  const [vendorFilter, setVendorFilter] = useState<string>("all")
 
   const cloudKeysRef = useRef<Record<string, string> | undefined>(undefined)
   const serialInputRef = useRef<HTMLTextAreaElement>(null)
+  const isInbound = selectedType === "Inbound"
 
   useEffect(() => {
     let cancelled = false
@@ -227,23 +232,46 @@ export function MovementForm({
     }
   }, [])
 
-  const productOptions = useMemo(() => {
-    const map = new Map<string, { name: string; vendor: string; label: string }>()
-    for (const item of inventory) {
-      const name = item.name.trim()
-      if (!name) continue
-      const v = normalizeInventoryVendor(item.vendor)
-      const key = productVendorKey(name, v)
-      if (!map.has(key)) map.set(key, { name, vendor: v, label: productVendorLabel(name, v) })
+  useEffect(() => {
+    let cancelled = false
+    void fetchProductCatalogue()
+      .then((rows) => {
+        if (!cancelled) setCatalogue(rows)
+      })
+      .catch(() => {
+        if (!cancelled) setCatalogue([])
+      })
+    return () => {
+      cancelled = true
     }
-    return [...map.values()].sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base" }))
-  }, [inventory])
+  }, [])
+
+  const productOptions = useMemo(() => {
+    return catalogue
+      .filter((row) => row.is_active)
+      .map((row) => {
+        const name = row.product_name.trim()
+        const v = normalizeInventoryVendor(row.vendor)
+        return { name, vendor: v, label: productVendorLabel(name, v), id: row.product_id }
+      })
+      .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base" }))
+  }, [catalogue])
+
+  const vendorChipIds = useMemo(() => {
+    const set = new Set<string>()
+    for (const p of productOptions) set.add(p.vendor)
+    return ["all", ...[...set].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))]
+  }, [productOptions])
 
   const filteredProducts = useMemo(() => {
     const q = productSearch.trim().toLowerCase()
-    if (!q) return productOptions
-    return productOptions.filter((p) => p.label.toLowerCase().includes(q))
-  }, [productOptions, productSearch])
+    // Vendor chip narrows the list; search still matches across all vendors.
+    const bySearch = !q
+      ? productOptions
+      : productOptions.filter((p) => p.label.toLowerCase().includes(q))
+    if (q || vendorFilter === "all") return bySearch
+    return bySearch.filter((p) => p.vendor === vendorFilter)
+  }, [productOptions, productSearch, vendorFilter])
 
   const sortedClients = useMemo(() => {
     const collator = new Intl.Collator(undefined, { sensitivity: "base" })
@@ -283,8 +311,9 @@ export function MovementForm({
           ).location ?? undefined
         : undefined
     return buildSerialFeedback(selectedType as TransactionType, serialNumbers, inventory, {
-      expectedProductName: productName.trim() || undefined,
-      expectedVendor: normalizeInventoryVendor(vendor),
+      // Inbound uses the picker; non-Inbound takes product from each kit (server ignores client product_id).
+      expectedProductName: selectedType === "Inbound" ? productName.trim() || undefined : undefined,
+      expectedVendor: selectedType === "Inbound" ? normalizeInventoryVendor(vendor) : undefined,
       fromLocation: origin,
     })
   }, [selectedType, serialNumbers, inventory, productName, vendor])
@@ -359,18 +388,42 @@ export function MovementForm({
   const showDeliveryNote = selectedType === "Sale" || selectedType === "Inbound"
   const showDecommissionDoc = selectedType === "Decommissioned"
   const selectedRequiresCloudKey = useMemo(() => {
-    const name = productName.trim()
-    if (!name) return false
-    const match = inventory.find(
-      (item) =>
-        item.name.trim().toLowerCase() === name.toLowerCase() &&
-        normalizeInventoryVendor(item.vendor) === normalizeInventoryVendor(vendor)
-    )
-    return productRequiresCloudKey(match)
-  }, [inventory, productName, vendor])
+    if (isInbound) {
+      const name = productName.trim()
+      if (!name) return false
+      const fromCatalogue = catalogue.find(
+        (row) =>
+          row.product_name.trim().toLowerCase() === name.toLowerCase() &&
+          normalizeInventoryVendor(row.vendor) === normalizeInventoryVendor(vendor)
+      )
+      if (fromCatalogue) return fromCatalogue.requires_cloud_key
+      const match = inventory.find(
+        (item) =>
+          item.name.trim().toLowerCase() === name.toLowerCase() &&
+          normalizeInventoryVendor(item.vendor) === normalizeInventoryVendor(vendor)
+      )
+      return productRequiresCloudKey(match)
+    }
+    const bySerial = new Map(inventory.map((item) => [item.serialNumber, item]))
+    return serialFeedback.validSerials.some((serial) => productRequiresCloudKey(bySerial.get(serial)))
+  }, [isInbound, catalogue, inventory, productName, vendor, serialFeedback.validSerials])
 
   const showCloudKeys =
     OUTBOUND_LIKE_MOVEMENTS.includes(selectedType as TransactionType) && selectedRequiresCloudKey
+
+  const scannedKitSummary = useMemo(() => {
+    if (isInbound || isEmbed) return null
+    const bySerial = new Map(inventory.map((item) => [item.serialNumber, item]))
+    const labels = new Set<string>()
+    for (const serial of serialFeedback.validSerials) {
+      const item = bySerial.get(serial)
+      if (!item) continue
+      labels.add(productVendorLabel(item.name, item.vendor))
+    }
+    if (labels.size === 0) return null
+    if (labels.size === 1) return [...labels][0]!
+    return `${labels.size} products`
+  }, [isInbound, isEmbed, inventory, serialFeedback.validSerials])
 
   function selectType(value: string) {
     if (!isSelectableMovementType(value)) return
@@ -550,12 +603,6 @@ export function MovementForm({
           vendor: v,
           location: toLocation.trim() || "Warehouse A",
         }
-      } else if (selectedType === "Decommissioned") {
-        inboundDefaults = {
-          name: pn,
-          vendor: v,
-          location: toLocation.trim() || "Warehouse A",
-        }
       }
 
       let movementMetadata: JsonValue = { source }
@@ -705,9 +752,19 @@ export function MovementForm({
         {productVendorLabel(productName, vendor)}
       </p>
     </div>
-  ) : (
+  ) : isInbound ? (
     <div className="flex flex-col gap-2">
       <Label className="text-xs text-muted-foreground">Product · Vendor</Label>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {vendorChipIds.map((id) => (
+          <FilterChip
+            key={id}
+            label={id === "all" ? "All" : id}
+            selected={vendorFilter === id}
+            onSelect={() => setVendorFilter(id)}
+          />
+        ))}
+      </div>
       <Popover open={productOpen} onOpenChange={setProductOpen}>
         <PopoverTrigger asChild>
           <Button
@@ -752,7 +809,7 @@ export function MovementForm({
                   onSelect={() => {
                     setAddingProduct(true)
                     setNewProductName(productSearch.trim())
-                    setNewProductVendor("General")
+                    setNewProductVendor(vendorFilter === "all" ? "General" : vendorFilter)
                     setProductOpen(false)
                   }}
                   className="text-brand"
@@ -809,7 +866,7 @@ export function MovementForm({
         </div>
       )}
     </div>
-  )
+  ) : null
 
   const serialField = isEmbed ? (
     <div>
@@ -843,23 +900,21 @@ export function MovementForm({
       {serialNumbers.trim() ? (
         <p className="text-xs text-muted-foreground">{serialFeedback.summary}</p>
       ) : null}
-      {serialFeedback.marks.some((m) => m.mark !== "ok") ? (
-        <ul className="text-[11px] font-mono space-y-0.5 max-h-24 overflow-auto">
-          {serialFeedback.marks
-            .filter((m) => m.mark !== "ok")
-            .slice(0, 12)
-            .map((m) => (
-              <li
-                key={`${m.serial}-${m.mark}`}
-                className={cn(
-                  m.mark === "blocked" || m.mark === "not_found" || m.mark === "duplicate"
-                    ? "text-warning"
-                    : "text-muted-foreground"
-                )}
-              >
-                {m.serial}: {m.detail ?? m.mark}
-              </li>
-            ))}
+      {serialFeedback.marks.length > 0 ? (
+        <ul className="text-[11px] font-mono space-y-0.5 max-h-32 overflow-auto">
+          {serialFeedback.marks.slice(0, 20).map((m) => (
+            <li
+              key={`${m.serial}-${m.mark}`}
+              className={cn(
+                m.mark === "blocked" || m.mark === "not_found" || m.mark === "duplicate"
+                  ? "text-warning"
+                  : "text-foreground"
+              )}
+            >
+              {m.serial}
+              {m.detail ? `: ${m.detail}` : m.mark === "ok" ? "" : `: ${m.mark}`}
+            </li>
+          ))}
         </ul>
       ) : null}
     </div>
@@ -1417,8 +1472,21 @@ export function MovementForm({
             </div>
             <div className="flex items-center justify-between py-2 border-b border-border">
               <span className="text-sm text-muted-foreground">Product</span>
-              <span className="text-sm text-foreground truncate max-w-[160px]" title={productName}>
-                {productName ? productVendorLabel(productName, vendor) : "—"}
+              <span
+                className="text-sm text-foreground truncate max-w-[160px]"
+                title={
+                  isInbound
+                    ? productName
+                      ? productVendorLabel(productName, vendor)
+                      : undefined
+                    : scannedKitSummary ?? undefined
+                }
+              >
+                {isInbound
+                  ? productName
+                    ? productVendorLabel(productName, vendor)
+                    : "—"
+                  : scannedKitSummary ?? "From kits"}
               </span>
             </div>
             {showClient && (

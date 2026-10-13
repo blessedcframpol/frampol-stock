@@ -16,10 +16,13 @@ import { Button } from "@/components/ui/button"
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
+import { Textarea } from "@/components/ui/textarea"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -52,6 +55,7 @@ import { useInventoryStore } from "@/lib/inventory-store"
 import {
   inStockPoolCounts,
   buildInventoryProducts,
+  canDeleteProduct,
   canEditReorderLevel,
   canExportInventory,
   filterInventoryProducts,
@@ -67,12 +71,16 @@ import {
   type ProductSortKey,
 } from "@/lib/inventory-products"
 import {
+  archiveProduct,
+  deleteProduct,
   fetchAppSettings,
   fetchProductLineSettings,
+  restoreProduct,
   SETTINGS_UPDATED_EVENT,
   updateProductLineSetting,
   type ProductLineSetting,
 } from "@/lib/settings"
+import { getSupabaseClient } from "@/lib/supabase/client"
 import { buildStockTakeUrl } from "@/lib/stock-take"
 import { buildCsvFilename } from "@/lib/utils"
 import { formatCount } from "@/lib/format-display"
@@ -163,6 +171,13 @@ export function InventoryProductsContent() {
   const [addOpen, setAddOpen] = useState(false)
   const [moveOpen, setMoveOpen] = useState(false)
   const [moveItems, setMoveItems] = useState<InventoryItem[]>([])
+  const [productAction, setProductAction] = useState<{
+    row: InventoryProductRow
+    kind: "archive" | "restore" | "delete"
+  } | null>(null)
+  const [actionReason, setActionReason] = useState("")
+  const [actionBusy, setActionBusy] = useState(false)
+  const [deleteAllowed, setDeleteAllowed] = useState(false)
 
   const canEdit = canEditReorderLevel(role)
   const canExport = canExportInventory(role)
@@ -268,23 +283,77 @@ export function InventoryProductsContent() {
     }
   }
 
-  async function toggleActive(row: InventoryProductRow) {
+  async function openProductAction(row: InventoryProductRow, kind: "archive" | "restore" | "delete") {
+    setProductAction({ row, kind })
+    setActionReason("")
+    setDeleteAllowed(false)
+    if (kind === "delete") {
+      try {
+        const sb = getSupabaseClient()
+        const [inv, req] = await Promise.all([
+          sb
+            .from("inventory_items")
+            .select("id", { count: "exact", head: true })
+            .eq("product_id", row.productId),
+          sb
+            .from("stock_request_lines")
+            .select("id", { count: "exact", head: true })
+            .eq("product_id", row.productId),
+        ])
+        setDeleteAllowed(
+          canDeleteProduct({
+            inventoryCount: inv.count ?? 0,
+            requestLineCount: req.count ?? 0,
+          }),
+        )
+      } catch {
+        setDeleteAllowed(false)
+      }
+    }
+  }
+
+  async function confirmProductAction() {
+    if (!productAction) return
+    const reason = actionReason.trim()
+    if (!reason) {
+      toast.error("Enter a reason")
+      return
+    }
+    setActionBusy(true)
     try {
-      await updateProductLineSetting(row.productId, {
-        reorderLevel: row.reorderLevel,
-        isActive: !row.isActive,
-      })
+      const { row, kind } = productAction
+      if (kind === "archive") {
+        if (row.inStockCount > 0) {
+          toast.error(`Cannot archive — ${row.inStockCount} kit(s) still In Stock`)
+          return
+        }
+        await archiveProduct(row.productId, reason)
+        toast.success("Product archived")
+      } else if (kind === "restore") {
+        await restoreProduct(row.productId, reason)
+        toast.success("Product restored")
+      } else {
+        if (!deleteAllowed) {
+          toast.error("This product has history — archive instead")
+          return
+        }
+        await deleteProduct(row.productId, reason)
+        toast.success("Product deleted")
+      }
+      setProductAction(null)
+      setActionReason("")
       await Promise.all([loadLines(), refresh()])
-      toast.success(row.isActive ? "Product marked inactive" : "Product marked active")
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "Could not update the product")
+    } finally {
+      setActionBusy(false)
     }
   }
 
   function exportRows(list: InventoryProductRow[], filenameParts: string[]) {
     const csv: string[][] = [["Product", "Vendor", "In stock", "POC", "Rental", "Reorder at", "Status"]]
     for (const row of list) {
-      const status = !row.isActive ? "Inactive" : row.isLow ? "Low" : ""
+      const status = !row.isActive ? "Archived" : row.isLow ? "Low" : ""
       csv.push([
         row.productName,
         row.vendor,
@@ -359,7 +428,7 @@ export function InventoryProductsContent() {
         count={linesReady ? `${visible.length} of ${showInactive ? rows.length : activeCount}` : "Loading…"}
         secondary={
           <Button type="button" variant="ghost" onClick={() => setShowInactive((current) => !current)} aria-pressed={showInactive}>
-            {showInactive ? "Hide inactive" : "Show inactive"}
+            {showInactive ? "Hide archived" : "Show archived"}
           </Button>
         }
       />
@@ -458,7 +527,7 @@ export function InventoryProductsContent() {
                   <TableCell>
                     <span className="flex items-center gap-1">
                       {row.isLow ? <StatusPill value="Low" /> : null}
-                      {!row.isActive ? <StatusPill value="Inactive" /> : null}
+                      {!row.isActive ? <StatusPill value="Archived" /> : null}
                     </span>
                   </TableCell>
                   {showMenu ? (
@@ -486,9 +555,29 @@ export function InventoryProductsContent() {
                           {actions.exportProduct ? (
                             <DropdownMenuItem onSelect={() => exportProductSerials(row)}>Export product</DropdownMenuItem>
                           ) : null}
-                          {actions.toggleActive ? (
-                            <DropdownMenuItem onSelect={() => void toggleActive(row)}>
-                              {row.isActive ? "Mark inactive" : "Mark active"}
+                          {actions.archive && row.isActive ? (
+                            <DropdownMenuItem
+                              onSelect={() => {
+                                if (row.inStockCount > 0) {
+                                  toast.error(
+                                    `Cannot archive — ${row.inStockCount} kit(s) still In Stock`,
+                                  )
+                                  return
+                                }
+                                void openProductAction(row, "archive")
+                              }}
+                            >
+                              Archive
+                            </DropdownMenuItem>
+                          ) : null}
+                          {actions.archive && !row.isActive ? (
+                            <DropdownMenuItem onSelect={() => void openProductAction(row, "restore")}>
+                              Restore
+                            </DropdownMenuItem>
+                          ) : null}
+                          {actions.archive ? (
+                            <DropdownMenuItem onSelect={() => void openProductAction(row, "delete")}>
+                              Delete…
                             </DropdownMenuItem>
                           ) : null}
                         </DropdownMenuContent>
@@ -501,6 +590,80 @@ export function InventoryProductsContent() {
           </TableBody>
         </Table>
       )}
+
+      <Dialog
+        open={Boolean(productAction)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setProductAction(null)
+            setActionReason("")
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {productAction?.kind === "archive"
+                ? "Archive product"
+                : productAction?.kind === "restore"
+                  ? "Restore product"
+                  : "Delete product"}
+            </DialogTitle>
+            <DialogDescription>
+              {productAction?.kind === "delete" && !deleteAllowed
+                ? `${productAction.row.productName} has history (kits or request lines). Archive it instead of deleting.`
+                : productAction
+                  ? `${productAction.row.productName} · ${productAction.row.vendor}. A reason is required and audited.`
+                  : null}
+            </DialogDescription>
+          </DialogHeader>
+          {productAction?.kind === "delete" && !deleteAllowed ? (
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setProductAction(null)}>
+                Close
+              </Button>
+              <Button
+                type="button"
+                onClick={() => {
+                  if (!productAction) return
+                  setProductAction({ row: productAction.row, kind: "archive" })
+                  setActionReason("")
+                }}
+                disabled={productAction.row.inStockCount > 0}
+              >
+                Archive instead
+              </Button>
+            </DialogFooter>
+          ) : (
+            <>
+              <div className="space-y-2">
+                <Label htmlFor="product-action-reason">Reason</Label>
+                <Textarea
+                  id="product-action-reason"
+                  value={actionReason}
+                  onChange={(e) => setActionReason(e.target.value)}
+                  placeholder="Why is this changing?"
+                  className="min-h-[80px]"
+                />
+              </div>
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setProductAction(null)}>
+                  Cancel
+                </Button>
+                <Button type="button" onClick={() => void confirmProductAction()} disabled={actionBusy}>
+                  {actionBusy
+                    ? "Saving…"
+                    : productAction?.kind === "archive"
+                      ? "Archive"
+                      : productAction?.kind === "restore"
+                        ? "Restore"
+                        : "Delete"}
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <MoveItemsDialog
         open={moveOpen}

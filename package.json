@@ -2,8 +2,11 @@
   "name": "fram-stock",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": "24.x"
+  },
   "scripts": {
-    "dev": "node scripts/restore-dev-routes.mjs && next dev",
+    "dev": "node --require ./scripts/dev/tls-classic.cjs scripts/restore-dev-routes.mjs && node --require ./scripts/dev/tls-classic.cjs ./node_modules/next/dist/bin/next dev",
     "build": "node scripts/run-production-build.mjs",
     "start": "next start",
 
@@ -13,7 +16,7 @@
     "test:watch": "vitest",
     "prepare": "node scripts/install-git-hooks.mjs",
     "guard:truncation": "node scripts/check-truncation-and-migrations.mjs",
-    "verify:all": "node scripts/verify-all.mjs",
+    "verify:all": "node --require ./scripts/dev/tls-classic.cjs scripts/verify-all.mjs",
     "migrate:quick-scans": "tsx --env-file=.env.local scripts/migrate-quick-scans.ts"
   },
   "dependencies": {

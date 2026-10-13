@@ -52,19 +52,25 @@ export function productRowActions(role: AppRole | null | undefined): {
   move: boolean
   stockTake: boolean
   exportProduct: boolean
-  toggleActive: boolean
+  /** Archive / restore / delete — admin only. */
+  archive: boolean
 } {
   return {
     move: canMoveProductGroup(role),
     stockTake: canLaunchStockTake(role),
     exportProduct: canExportInventory(role),
-    toggleActive: canEditReorderLevel(role),
+    archive: canEditReorderLevel(role),
   }
 }
 
 export function hasProductRowMenu(role: AppRole | null | undefined): boolean {
   const actions = productRowActions(role)
-  return actions.move || actions.stockTake || actions.exportProduct || actions.toggleActive
+  return actions.move || actions.stockTake || actions.exportProduct || actions.archive
+}
+
+/** True when no inventory_items or stock_request_lines reference the product. */
+export function canDeleteProduct(refs: { inventoryCount: number; requestLineCount: number }): boolean {
+  return refs.inventoryCount === 0 && refs.requestLineCount === 0
 }
 
 /**

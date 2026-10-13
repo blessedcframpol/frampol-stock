@@ -207,27 +207,44 @@ export function buildSerialFeedback(
     }
     const item = bySerial.get(serial)
     if (!item) {
-      if (type === "Inbound" || type === "Decommissioned") {
+      if (type === "Inbound") {
         if (copies === 1) marks.push({ serial, mark: "ok", detail: "will create" })
         validSerials.push(serial)
       } else {
         notFoundCount += 1
-        if (copies === 1) marks.push({ serial, mark: "not_found", detail: "not found" })
-        else marks[marks.length - 1] = { serial, mark: "not_found", detail: "not found · duplicate in list" }
+        const detail =
+          "Not in stock records. Use Inbound to receive it." +
+          (copies > 1 ? " · duplicate in list" : "")
+        if (copies === 1) marks.push({ serial, mark: "not_found", detail })
+        else marks[marks.length - 1] = { serial, mark: "not_found", detail }
       }
       continue
     }
     if (item.status === "In Stock") inStockCount += 1
+    // Inbound on an existing serial: stop with product + status (do not re-receive).
+    if (type === "Inbound") {
+      blockedCount += 1
+      const product = item.name.trim() || "Unknown product"
+      const vendor = (item.vendor ?? "").trim() || "General"
+      marks.push({
+        serial,
+        mark: "blocked",
+        detail: `Already in records as ${product} · ${vendor} (${item.status})`,
+      })
+      continue
+    }
     const reason = validateMovementForItem(type, item, {
-      expectedProductName: opts.expectedProductName,
-      expectedVendor: opts.expectedVendor,
+      // Non-Inbound: product comes from the kit — do not enforce a picker selection.
+      expectedProductName: undefined,
+      expectedVendor: undefined,
       fromLocation: opts.fromLocation,
     })
     if (reason) {
       blockedCount += 1
       marks.push({ serial, mark: "blocked", detail: reason })
     } else {
-      if (copies === 1) marks.push({ serial, mark: "ok" })
+      const productLabel = `${item.name.trim()} · ${(item.vendor ?? "").trim() || "General"}`
+      if (copies === 1) marks.push({ serial, mark: "ok", detail: productLabel })
       validSerials.push(serial)
     }
   }
@@ -235,7 +252,7 @@ export function buildSerialFeedback(
   const parts = [`${raw.length} serial${raw.length === 1 ? "" : "s"}`]
   if (duplicateCount) parts.push(`${duplicateCount} duplicate`)
   if (inStockCount && type === "Inbound") parts.push(`${inStockCount} already in stock`)
-  if (notFoundCount) parts.push(`${notFoundCount} not found`)
+  if (notFoundCount) parts.push(`${notFoundCount} not in stock records`)
   if (blockedCount) {
     parts.push(type === "Sale" ? `${blockedCount} can't be sold` : `${blockedCount} blocked`)
   }
@@ -311,7 +328,8 @@ export function submitBlockMessage(
   },
 ): string | null {
   if (!isSelectableMovementType(fields.type)) return "Select a movement type"
-  if (!fields.productName.trim()) return "Select a product"
+  // Product picker is required only for Inbound; other movements take product from each kit.
+  if (fields.type === "Inbound" && !fields.productName.trim()) return "Select a product"
 
   const dateProblem = businessDateProblem(fields.businessDate, opts.todayYmd)
   if (dateProblem) return dateProblem
@@ -319,10 +337,11 @@ export function submitBlockMessage(
   if (serialFeedback.duplicateCount > 0) return "Remove duplicate serials"
   if (serialFeedback.blockedCount > 0) {
     if (fields.type === "Sale") return `${serialFeedback.blockedCount} serials can't be sold`
+    if (fields.type === "Inbound") return `${serialFeedback.blockedCount} serials already in records`
     return `${serialFeedback.blockedCount} serials can't move`
   }
-  if (serialFeedback.notFoundCount > 0 && fields.type !== "Inbound" && fields.type !== "Decommissioned") {
-    return `${serialFeedback.notFoundCount} serials not found`
+  if (serialFeedback.notFoundCount > 0 && fields.type !== "Inbound") {
+    return "Not in stock records. Use Inbound to receive it."
   }
   if (serialFeedback.validSerials.length === 0) return "Enter at least one serial"
 

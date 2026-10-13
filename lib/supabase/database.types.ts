@@ -1457,6 +1457,27 @@ export interface Database {
         }
         Returns: Json
       }
+      archive_product: {
+        Args: {
+          p_product_id: string
+          p_reason: string
+        }
+        Returns: Json
+      }
+      restore_product: {
+        Args: {
+          p_product_id: string
+          p_reason: string
+        }
+        Returns: Json
+      }
+      delete_product: {
+        Args: {
+          p_product_id: string
+          p_reason: string
+        }
+        Returns: Json
+      }
       profile_last_sign_ins: {
         Args: Record<string, never>
         Returns: Json
