@@ -4,7 +4,7 @@
  *   node scripts/rehearse-migration.mjs supabase/migrations/20261012063732_fb1_problem_reports.sql scripts/verify-086-fb1-problem-reports.mjs
  *   node scripts/verify-086-fb1-problem-reports.mjs
  */
-import { withHarness } from "./verify-harness.mjs"
+import { runVerifyCli } from "./verify-harness.mjs"
 import { setJwt } from "./verify-harness-fixtures.mjs"
 
 const PREFIX = "H3086"
@@ -211,5 +211,5 @@ export async function runChecks(ctx) {
 
 const isMain = process.argv[1] && process.argv[1].includes("verify-086-fb1-problem-reports")
 if (isMain) {
-  await withHarness({ markers: MARKERS, timeoutMs: 300_000, label: "086-fb1" }, runChecks)
+  runVerifyCli({ markers: MARKERS, timeoutMs: 300_000, label: "086-fb1" }, runChecks)
 }

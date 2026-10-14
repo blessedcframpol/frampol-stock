@@ -4,7 +4,7 @@
  *
  * Usage: node scripts/verify-079-audit-log.mjs
  */
-import { withHarness } from "./verify-harness.mjs"
+import { isPermissionDenied, runVerifyCli } from "./verify-harness.mjs"
 import { dropMovementPrev, setJwt } from "./verify-harness-fixtures.mjs"
 
 const PREFIX = "H3079"
@@ -313,7 +313,7 @@ export async function runChecks(ctx) {
     } catch (error) {
       await db.query(`ROLLBACK TO SAVEPOINT ${sp}`)
       const message = error instanceof Error ? error.message : String(error)
-      if (message.includes("permission denied") || message.includes("append-only")) return null
+      if (isPermissionDenied(error) || message.includes("append-only")) return null
       return message
     }
   })
@@ -330,7 +330,7 @@ export async function runChecks(ctx) {
     } catch (error) {
       await db.query(`ROLLBACK TO SAVEPOINT ${sp}`)
       const message = error instanceof Error ? error.message : String(error)
-      if (message.includes("permission denied") || message.includes("append-only")) return null
+      if (isPermissionDenied(error) || message.includes("append-only")) return null
       return message
     }
   })
@@ -375,20 +375,8 @@ export async function runChecks(ctx) {
   }
 }
 
-async function main() {
-  const { ok, failed, passed } = await withHarness(
-    { markers: MARKERS, timeoutMs: 180_000, label: "verify-079" },
-    runChecks,
-  )
-  console.log(ok ? `\n${passed} passed` : `\n${failed} failed`)
-  process.exitCode = ok ? 0 : 1
-}
-
 const isMain =
   process.argv[1] && process.argv[1].replace(/\\/g, "/").endsWith("verify-079-audit-log.mjs")
 if (isMain) {
-  main().catch((error) => {
-    console.error(error)
-    process.exitCode = 1
-  })
+  runVerifyCli({ markers: MARKERS, timeoutMs: 180_000, label: "verify-079" }, runChecks)
 }

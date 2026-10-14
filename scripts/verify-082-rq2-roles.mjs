@@ -6,7 +6,7 @@
  * Usage: node scripts/verify-082-rq2-roles.mjs
  */
 import { createRequire } from "module"
-import { withHarness, prepareVerifyEnv } from "./verify-harness.mjs"
+import { runVerifyCli, prepareVerifyEnv } from "./verify-harness.mjs"
 import { dropMovementPrev } from "./verify-harness-fixtures.mjs"
 
 const require = createRequire(import.meta.url)
@@ -644,20 +644,8 @@ export async function runChecks(ctx) {
   void adminBId
 }
 
-async function main() {
-  const { ok, failed, passed } = await withHarness(
-    { markers: MARKERS, timeoutMs: 300_000, label: "verify-082" },
-    runChecks,
-  )
-  console.log(ok ? `\n${passed} passed` : `\n${failed} failed (${passed} passed)`)
-  process.exitCode = ok ? 0 : 1
-}
-
 const isMain =
   process.argv[1] && process.argv[1].replace(/\\/g, "/").endsWith("verify-082-rq2-roles.mjs")
 if (isMain) {
-  main().catch((error) => {
-    console.error(error)
-    process.exitCode = 1
-  })
+  runVerifyCli({ markers: MARKERS, timeoutMs: 300_000, label: "verify-082" }, runChecks)
 }

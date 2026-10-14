@@ -7,9 +7,9 @@
  * snapshot (with a printed concurrent-traffic tolerance on production), and
  * audit_log gained no rows since run start that reference marker ids.
  *
- * Usage from a verify script:
- *   import { withHarness } from "./verify-harness.mjs"
- *   await withHarness({ markers: [...], timeoutMs: 120_000 }, async (ctx) => { ... })
+ * Usage from a verify script (suite entry):
+ *   import { runVerifyCli } from "./verify-harness.mjs"
+ *   if (isMain) runVerifyCli({ markers: [...], timeoutMs: 120_000, label: "..." }, runChecks)
  *
  * HTTP / Supabase-client verify scripts must still call prepareVerifyEnv() with
  * no harness flag — production stays blocked for them.
@@ -54,6 +54,86 @@ export function pass(results, name, reason) {
 export function fail(results, name, reason) {
   results[name] = { result: "FAIL", reason }
   console.log(`FAIL  ${name} — ${reason}`)
+}
+
+/** SQLSTATE from a pg Client error (or embedded in message). */
+export function pgErrorCode(error) {
+  if (error && typeof error === "object" && typeof error.code === "string") {
+    return error.code
+  }
+  const message = error instanceof Error ? error.message : String(error ?? "")
+  const match = message.match(/\b(42501|42883|42P01|P\d{4})\b/)
+  return match ? match[1] : null
+}
+
+export function isPermissionDenied(error) {
+  return pgErrorCode(error) === "42501"
+}
+
+/**
+ * Run one statement inside a SAVEPOINT; PASS only when it fails with expected SQLSTATE.
+ * @returns {{ denied: true, code: string, message: string } | { denied: false, reason: string }}
+ */
+export async function queryExpectDenied(db, sql, params, expectedCode = "42501") {
+  const sp = `sp_${Math.random().toString(36).slice(2, 10)}`
+  await db.query(`SAVEPOINT ${sp}`)
+  try {
+    await db.query(sql, params)
+    await db.query(`ROLLBACK TO SAVEPOINT ${sp}`)
+    return { denied: false, reason: `expected SQLSTATE ${expectedCode}, query succeeded` }
+  } catch (error) {
+    await db.query(`ROLLBACK TO SAVEPOINT ${sp}`)
+    const message = error instanceof Error ? error.message : String(error)
+    const code = pgErrorCode(error)
+    if (code === expectedCode) {
+      return { denied: true, code, message }
+    }
+    return { denied: false, reason: `expected SQLSTATE ${expectedCode}, got ${code ?? "none"}: ${message}` }
+  }
+}
+
+/** Footer line parsed by verify-all.mjs — must stay in sync with parseVerifySummary(). */
+export function printVerifySummary(ok, passed, failed) {
+  const total = passed + failed
+  if (ok && failed === 0 && total > 0) {
+    console.log(`\nVERIFY  ${total}/${total} PASS`)
+  } else if (total === 0) {
+    console.log("\nVERIFY  0/0 FAIL (no checks recorded)")
+  } else {
+    console.log(`\nVERIFY  ${passed}/${total} FAIL (${failed} failed)`)
+  }
+}
+
+/** Parse the last VERIFY n/total PASS|FAIL line from script stdout. */
+export function parseVerifySummary(stdout) {
+  const matches = [...stdout.matchAll(/VERIFY\s+(\d+)\/(\d+)\s+(PASS|FAIL)/g)]
+  if (matches.length === 0) {
+    return { valid: false, reason: "missing VERIFY N/N PASS line" }
+  }
+  const last = matches[matches.length - 1]
+  const n = Number(last[1])
+  const total = Number(last[2])
+  const kind = last[3]
+  if (kind !== "PASS") {
+    return { valid: false, reason: `VERIFY ${n}/${total} ${kind}` }
+  }
+  if (n !== total) {
+    return { valid: false, reason: `VERIFY ${n}/${total} PASS (partial)` }
+  }
+  return { valid: true, n, total }
+}
+
+/** Standard CLI entry: harness + summary footer + non-zero exit on any FAIL. */
+export async function runVerifyCli(options, runChecks) {
+  try {
+    const { ok, passed, failed } = await withHarness(options, runChecks)
+    printVerifySummary(ok, passed, failed)
+    process.exitCode = ok && failed === 0 && passed > 0 ? 0 : 1
+  } catch (error) {
+    console.error(error)
+    printVerifySummary(false, 0, 1)
+    process.exitCode = 1
+  }
 }
 
 async function liveTotals(db) {
@@ -246,8 +326,16 @@ export async function withHarness(options, fn) {
     } catch (error) {
       await db.query(`ROLLBACK TO SAVEPOINT ${sp}`)
       const message = error instanceof Error ? error.message : String(error)
+      if (needle === "42501" || needle === "permission_denied") {
+        return isPermissionDenied(error) ? null : `expected SQLSTATE 42501, got ${pgErrorCode(error) ?? "none"}: ${message}`
+      }
       return message.includes(needle) ? null : message
     }
+  }
+
+  async function raisesDenied(sql, params, expectedCode = "42501") {
+    const result = await queryExpectDenied(db, sql, params, expectedCode)
+    return result.denied ? null : result.reason
   }
 
   try {
@@ -268,6 +356,8 @@ export async function withHarness(options, fn) {
       asUser,
       createFixtureUser,
       raises,
+      raisesDenied,
+      queryExpectDenied: (sql, params, expectedCode) => queryExpectDenied(db, sql, params, expectedCode),
       fixtureUsers,
       beforeTotals,
       runStartedAt,

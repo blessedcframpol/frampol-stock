@@ -2,7 +2,7 @@
  * Exact reverse and restore — rollback harness (BEGIN…ROLLBACK, never commits).
  * Usage: node scripts/verify-069-exact-reverse-restore.mjs
  */
-import { withHarness } from "./verify-harness.mjs"
+import { runVerifyCli } from "./verify-harness.mjs"
 
 // Distinct from leftover R3069-* residue still in production (A1 blocked cleanup).
 const PREFIX = "H3069"
@@ -937,19 +937,7 @@ async function readItem(serial) {
 
 }
 
-async function main() {
-  const { ok, failed, passed } = await withHarness(
-    { markers: MARKERS, timeoutMs: 300_000, label: "verify-069" },
-    runChecks,
-  )
-  console.log(ok ? `\n${passed} passed` : `\n${failed} failed`)
-  process.exitCode = ok ? 0 : 1
-}
-
 const isMain = process.argv[1] && process.argv[1].replace(/\\/g, "/").endsWith("verify-069-exact-reverse-restore.mjs")
 if (isMain) {
-  main().catch((error) => {
-    console.error(error)
-    process.exitCode = 1
-  })
+  runVerifyCli({ markers: MARKERS, timeoutMs: 300_000, label: "verify-069" }, runChecks)
 }

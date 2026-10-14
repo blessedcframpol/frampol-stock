@@ -4,7 +4,7 @@
  *
  * Usage: node scripts/verify-074-rental-to-sale.mjs
  */
-import { withHarness } from "./verify-harness.mjs"
+import { runVerifyCli } from "./verify-harness.mjs"
 import { dropMovementPrev, stampTxn, bumpRestoreClock, setJwt } from "./verify-harness-fixtures.mjs"
 
 // Distinct from leftover RS1074-* residue still in production.
@@ -490,19 +490,7 @@ export async function runChecks(ctx) {
   else pass("not_starlink", "a rented kit that is not Starlink is rejected")
 }
 
-async function main() {
-  const { ok, failed, passed } = await withHarness(
-    { markers: MARKERS, timeoutMs: 180_000, label: "verify-074" },
-    runChecks,
-  )
-  console.log(ok ? `\n${passed} passed` : `\n${failed} failed`)
-  process.exitCode = ok ? 0 : 1
-}
-
 const isMain = process.argv[1] && process.argv[1].replace(/\\/g, "/").endsWith("verify-074-rental-to-sale.mjs")
 if (isMain) {
-  main().catch((error) => {
-    console.error(error)
-    process.exitCode = 1
-  })
+  runVerifyCli({ markers: MARKERS, timeoutMs: 180_000, label: "verify-074" }, runChecks)
 }

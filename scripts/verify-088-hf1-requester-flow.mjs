@@ -5,7 +5,7 @@
  *   node scripts/rehearse-migration.mjs supabase/migrations/20261012140354_hf1_requester_atlas_catalogue.sql scripts/verify-088-hf1-requester-flow.mjs
  *   node scripts/verify-088-hf1-requester-flow.mjs
  */
-import { withHarness } from "./verify-harness.mjs"
+import { runVerifyCli } from "./verify-harness.mjs"
 import { dropMovementPrev, stampTxn } from "./verify-harness-fixtures.mjs"
 
 const PREFIX = "H3088"
@@ -277,5 +277,5 @@ export async function runChecks(ctx) {
 
 const isMain = process.argv[1] && process.argv[1].replace(/\\/g, "/").endsWith("verify-088-hf1-requester-flow.mjs")
 if (isMain) {
-  await withHarness({ markers: MARKERS, timeoutMs: 300_000, label: "088-hf1" }, runChecks)
+  runVerifyCli({ markers: MARKERS, timeoutMs: 300_000, label: "088-hf1" }, runChecks)
 }

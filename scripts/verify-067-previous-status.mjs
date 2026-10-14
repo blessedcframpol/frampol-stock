@@ -6,7 +6,7 @@
  */
 import fs from "fs"
 import path from "path"
-import { withHarness } from "./verify-harness.mjs"
+import { runVerifyCli } from "./verify-harness.mjs"
 import { dropMovementPrev } from "./verify-harness-fixtures.mjs"
 
 // Distinct from leftover verify-067-* residue still in production (A1 blocked cleanup).
@@ -417,20 +417,8 @@ export async function runChecks(ctx) {
   }
 }
 
-async function main() {
-  const { ok, failed, passed } = await withHarness(
-    { markers: MARKERS, timeoutMs: 120_000, label: "verify-067" },
-    runChecks,
-  )
-  console.log(ok ? `\n${passed} passed` : `\n${failed} failed`)
-  process.exitCode = ok ? 0 : 1
-}
-
 const isMain =
   process.argv[1] && process.argv[1].replace(/\\/g, "/").endsWith("verify-067-previous-status.mjs")
 if (isMain) {
-  main().catch((error) => {
-    console.error(error)
-    process.exitCode = 1
-  })
+  runVerifyCli({ markers: MARKERS, timeoutMs: 120_000, label: "verify-067" }, runChecks)
 }

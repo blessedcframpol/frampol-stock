@@ -2,11 +2,14 @@
  * Run schema rules, the HTTP probe, then every harness verify script.
  * Prints a pass/fail table. Exit 1 if any fail.
  *
- * Usage: npm run verify:all
+ * Usage:
+ *   npm run verify:all
+ *   node scripts/verify-all.mjs --self-test
  */
 import { spawn } from "child_process"
 import path from "path"
 import { fileURLToPath } from "url"
+import { parseVerifySummary } from "./verify-harness.mjs"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(__dirname, "..")
@@ -46,6 +49,8 @@ const SUITE = [
   { id: "movement", file: "scripts/verify-movement-transitions.mjs" },
 ]
 
+const SELF_TEST_SUITE = [{ id: "canary-fail", file: "scripts/verify-vr1-canary-fail.mjs" }]
+
 function runNode(relPath) {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [path.join(root, relPath)], {
@@ -70,32 +75,77 @@ function runNode(relPath) {
   })
 }
 
-async function main() {
-  console.log(`verify:all — ${SUITE.length} steps\n`)
+/** PASS only when exit 0 and stdout ends with a full VERIFY N/N PASS line. */
+function judgeStep(code, out) {
+  const summary = parseVerifySummary(out)
+  if (code !== 0) {
+    return {
+      pass: false,
+      detail: summary.valid ? `exit ${code} (${summary.n}/${summary.total} PASS)` : `exit ${code}; ${summary.reason}`,
+    }
+  }
+  if (!summary.valid) {
+    return { pass: false, detail: summary.reason }
+  }
+  return { pass: true, detail: `${summary.n}/${summary.total} PASS` }
+}
+
+async function runSuite(suite, title) {
+  console.log(`${title} — ${suite.length} steps\n`)
   const table = []
   let failed = 0
 
-  for (const step of SUITE) {
+  for (const step of suite) {
     console.log(`\n======== ${step.id} (${step.file}) ========`)
     const started = Date.now()
-    const { code } = await runNode(step.file)
+    const { code, out } = await runNode(step.file)
     const ms = Date.now() - started
-    const ok = code === 0
-    if (!ok) failed += 1
-    table.push({ id: step.id, result: ok ? "PASS" : "FAIL", ms, code })
-    console.log(`-------- ${step.id} ${ok ? "PASS" : "FAIL"} (${Math.round(ms / 1000)}s) --------`)
-  }
-
-  console.log("\n\n========== verify:all summary ==========")
-  console.log("id".padEnd(16) + "result".padEnd(8) + "seconds")
-  console.log("-".repeat(40))
-  for (const row of table) {
+    const judged = judgeStep(code, out)
+    if (!judged.pass) failed += 1
+    table.push({
+      id: step.id,
+      result: judged.pass ? "PASS" : "FAIL",
+      ms,
+      code,
+      detail: judged.detail,
+    })
     console.log(
-      row.id.padEnd(16) + row.result.padEnd(8) + String(Math.round(row.ms / 1000)).padStart(6),
+      `-------- ${step.id} ${judged.pass ? "PASS" : "FAIL"} (${Math.round(ms / 1000)}s) — ${judged.detail} --------`,
     )
   }
-  console.log("-".repeat(40))
+
+  console.log(`\n\n========== ${title} summary ==========`)
+  console.log("id".padEnd(16) + "result".padEnd(8) + "seconds".padEnd(8) + "detail")
+  console.log("-".repeat(72))
+  for (const row of table) {
+    console.log(
+      row.id.padEnd(16) +
+        row.result.padEnd(8) +
+        String(Math.round(row.ms / 1000)).padStart(6) +
+        "    " +
+        row.detail,
+    )
+  }
+  console.log("-".repeat(72))
   console.log(`${table.length - failed} passed, ${failed} failed`)
+  return failed
+}
+
+async function main() {
+  const selfTest = process.argv.includes("--self-test")
+  if (selfTest) {
+    const failed = await runSuite(SELF_TEST_SUITE, "verify:all --self-test")
+    if (failed === 0) {
+      console.error("\nSELF-TEST FAIL: canary was expected to fail but did not")
+      process.exitCode = 1
+      return
+    }
+    console.log("\nSELF-TEST PASS: runner reported FAIL for the canary script")
+    process.exitCode = 0
+    return
+  }
+
+  const failed = await runSuite(SUITE, "verify:all")
   process.exitCode = failed === 0 ? 0 : 1
 }
 

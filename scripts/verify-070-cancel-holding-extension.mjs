@@ -3,7 +3,7 @@
  *
  * Usage: node scripts/verify-070-cancel-holding-extension.mjs
  */
-import { withHarness } from "./verify-harness.mjs"
+import { runVerifyCli } from "./verify-harness.mjs"
 import { dropMovementPrev, stampTxn, setJwt } from "./verify-harness-fixtures.mjs"
 
 // Distinct from leftover E1070 / verify-070 residue still in production (A1 blocked cleanup).
@@ -326,20 +326,8 @@ export async function runChecks(ctx) {
   else pass("later_movement", `rejected after ${batchId}`)
 }
 
-async function main() {
-  const { ok, failed, passed } = await withHarness(
-    { markers: MARKERS, timeoutMs: 300_000, label: "verify-070" },
-    runChecks,
-  )
-  console.log(ok ? `\n${passed} passed` : `\n${failed} failed`)
-  process.exitCode = ok ? 0 : 1
-}
-
 const isMain =
   process.argv[1] && process.argv[1].replace(/\\/g, "/").endsWith("verify-070-cancel-holding-extension.mjs")
 if (isMain) {
-  main().catch((error) => {
-    console.error(error)
-    process.exitCode = 1
-  })
+  runVerifyCli({ markers: MARKERS, timeoutMs: 300_000, label: "verify-070" }, runChecks)
 }

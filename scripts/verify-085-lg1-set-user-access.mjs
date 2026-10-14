@@ -4,7 +4,7 @@
  *   node scripts/rehearse-migration.mjs supabase/migrations/20261011183846_lg1_set_user_access.sql scripts/verify-085-lg1-set-user-access.mjs
  *   node scripts/verify-085-lg1-set-user-access.mjs
  */
-import { withHarness } from "./verify-harness.mjs"
+import { runVerifyCli } from "./verify-harness.mjs"
 import { setJwt } from "./verify-harness-fixtures.mjs"
 
 const PREFIX = "H3085"
@@ -198,5 +198,5 @@ export async function runChecks(ctx) {
 
 const isMain = process.argv[1] && process.argv[1].includes("verify-085-lg1-set-user-access")
 if (isMain) {
-  await withHarness({ markers: MARKERS, timeoutMs: 180_000, label: "085-lg1" }, runChecks)
+  runVerifyCli({ markers: MARKERS, timeoutMs: 180_000, label: "085-lg1" }, runChecks)
 }

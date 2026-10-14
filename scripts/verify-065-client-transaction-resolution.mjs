@@ -5,7 +5,7 @@
  * Usage: node scripts/verify-065-client-transaction-resolution.mjs
  */
 import { createRequire } from "module"
-import { withHarness } from "./verify-harness.mjs"
+import { runVerifyCli } from "./verify-harness.mjs"
 
 const require = createRequire(import.meta.url)
 
@@ -329,36 +329,9 @@ export async function runChecks(ctx) {
   let anonBlocked = false
   await db.query(`SET LOCAL ROLE anon`)
   try {
-    const anonErr = await ctx.raises(`SELECT * FROM public.client_sale_dispatch_counts()`, [], "")
-    const anonRowsErr = await ctx.raises(`SELECT * FROM public.client_transactions($1)`, [KUDZANAI], "")
-    // raises returns null when needle found; empty needle means any error counts as blocked
-    anonBlocked = anonErr === null || anonErr.startsWith("expected") === false
-    // Prefer: both calls throw
-    const a = await (async () => {
-      const sp = "sp_anon_a"
-      await db.query(`SAVEPOINT ${sp}`)
-      try {
-        await db.query(`SELECT * FROM public.client_sale_dispatch_counts()`)
-        await db.query(`ROLLBACK TO SAVEPOINT ${sp}`)
-        return false
-      } catch {
-        await db.query(`ROLLBACK TO SAVEPOINT ${sp}`)
-        return true
-      }
-    })()
-    const b = await (async () => {
-      const sp = "sp_anon_b"
-      await db.query(`SAVEPOINT ${sp}`)
-      try {
-        await db.query(`SELECT * FROM public.client_transactions($1)`, [KUDZANAI])
-        await db.query(`ROLLBACK TO SAVEPOINT ${sp}`)
-        return false
-      } catch {
-        await db.query(`ROLLBACK TO SAVEPOINT ${sp}`)
-        return true
-      }
-    })()
-    anonBlocked = a && b
+    const csdcDenied = await ctx.raisesDenied(`SELECT * FROM public.client_sale_dispatch_counts()`)
+    const txnDenied = await ctx.raisesDenied(`SELECT * FROM public.client_transactions($1)`, [KUDZANAI])
+    anonBlocked = csdcDenied === null && txnDenied === null
   } finally {
     await db.query(`RESET ROLE`)
   }
@@ -370,19 +343,7 @@ export async function runChecks(ctx) {
   }
 }
 
-async function main() {
-  const { ok, failed, passed } = await withHarness(
-    { markers: MARKERS, timeoutMs: 120_000, label: "verify-065" },
-    runChecks,
-  )
-  console.log(ok ? `\n${passed} passed` : `\n${failed} failed`)
-  process.exitCode = ok ? 0 : 1
-}
-
 const isMain = process.argv[1] && process.argv[1].replace(/\\/g, "/").endsWith("verify-065-client-transaction-resolution.mjs")
 if (isMain) {
-  main().catch((error) => {
-    console.error(error)
-    process.exitCode = 1
-  })
+  runVerifyCli({ markers: MARKERS, timeoutMs: 120_000, label: "verify-065" }, runChecks)
 }

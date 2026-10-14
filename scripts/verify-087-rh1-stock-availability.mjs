@@ -4,7 +4,7 @@
  *   node scripts/rehearse-migration.mjs supabase/migrations/20261012123409_rh1_stock_availability.sql scripts/verify-087-rh1-stock-availability.mjs
  *   node scripts/verify-087-rh1-stock-availability.mjs
  */
-import { withHarness } from "./verify-harness.mjs"
+import { runVerifyCli } from "./verify-harness.mjs"
 
 const PREFIX = "H3087"
 
@@ -107,5 +107,5 @@ export async function runChecks(ctx) {
 
 const isMain = process.argv[1] && process.argv[1].includes("verify-087-rh1-stock-availability")
 if (isMain) {
-  await withHarness({ markers: MARKERS, timeoutMs: 300_000, label: "087-rh1" }, runChecks)
+  runVerifyCli({ markers: MARKERS, timeoutMs: 300_000, label: "087-rh1" }, runChecks)
 }

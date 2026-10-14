@@ -4,7 +4,7 @@
  *   node scripts/rehearse-migration.mjs supabase/migrations/20261013104900_rq7c_batch_request_context_lockdown.sql scripts/verify-092-rq7c-batch-request-context-lockdown.mjs
  *   node scripts/verify-092-rq7c-batch-request-context-lockdown.mjs
  */
-import { withHarness } from "./verify-harness.mjs"
+import { queryExpectDenied, runVerifyCli } from "./verify-harness.mjs"
 import { dropMovementPrev, stampTxn } from "./verify-harness-fixtures.mjs"
 
 const PREFIX = "H3092"
@@ -148,19 +148,21 @@ export async function runChecks(ctx) {
   await stampTxn(db, clock, ...issuedTxns.rows.map((t) => t.id))
   pass("issue", batchId)
 
-  const anonView = await attempt(
+  await db.query(`SET LOCAL ROLE anon`)
+  const anonView = await queryExpectDenied(
     db,
-    `SET LOCAL ROLE anon; SELECT 1 FROM public.batch_request_context WHERE batch_id = $1`,
+    `SELECT 1 FROM public.batch_request_context WHERE batch_id = $1`,
     [batchId],
   )
-  if (!anonView.ok) pass("anon_view_denied", anonView.error?.slice(0, 80) ?? "denied")
-  else fail("anon_view_denied", "unexpected row")
+  await db.query(`RESET ROLE`)
+  if (anonView.denied) pass("anon_view_denied", `SQLSTATE ${anonView.code}`)
+  else fail("anon_view_denied", anonView.reason)
 
-  const salesView = await asUser(salesId, () =>
-    attempt(db, `SELECT 1 FROM public.batch_request_context WHERE batch_id = $1`, [batchId]),
+  const salesViewErr = await asUser(salesId, async () =>
+    ctx.raisesDenied(`SELECT 1 FROM public.batch_request_context WHERE batch_id = $1`, [batchId]),
   )
-  if (!salesView.ok) pass("sales_view_denied", salesView.error?.slice(0, 80) ?? "denied")
-  else fail("sales_view_denied", "unexpected access")
+  if (salesViewErr === null) pass("sales_view_denied", "SQLSTATE 42501")
+  else fail("sales_view_denied", salesViewErr)
 
   const salesFn = await asUser(salesId, async () => {
     const res = await db.query(
@@ -204,5 +206,5 @@ const isMain =
   process.argv[1] &&
   process.argv[1].replace(/\\/g, "/").endsWith("verify-092-rq7c-batch-request-context-lockdown.mjs")
 if (isMain) {
-  await withHarness({ markers: MARKERS, timeoutMs: 300_000, label: "092-rq7c" }, runChecks)
+  runVerifyCli({ markers: MARKERS, timeoutMs: 300_000, label: "092-rq7c" }, runChecks)
 }

@@ -4,7 +4,7 @@
  *   node scripts/rehearse-migration.mjs supabase/migrations/20261013081238_rq7b_batch_drawer_timeline.sql scripts/verify-091-rq7b-batch-drawer-timeline.mjs
  *   node scripts/verify-091-rq7b-batch-drawer-timeline.mjs
  */
-import { withHarness } from "./verify-harness.mjs"
+import { runVerifyCli } from "./verify-harness.mjs"
 
 const PREFIX = "H3091"
 const NOTES = "harness-091"
@@ -82,5 +82,5 @@ export async function runChecks(ctx) {
 const isMain =
   process.argv[1] && process.argv[1].replace(/\\/g, "/").endsWith("verify-091-rq7b-batch-drawer-timeline.mjs")
 if (isMain) {
-  await withHarness({ markers: MARKERS, timeoutMs: 300_000, label: "091-rq7b" }, runChecks)
+  runVerifyCli({ markers: MARKERS, timeoutMs: 300_000, label: "091-rq7b" }, runChecks)
 }

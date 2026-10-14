@@ -4,7 +4,7 @@
  *
  * Usage: node scripts/verify-077-kit-history.mjs
  */
-import { withHarness } from "./verify-harness.mjs"
+import { runVerifyCli } from "./verify-harness.mjs"
 import {
   dropMovementPrev,
   stampTxn,
@@ -112,8 +112,14 @@ export async function runChecks(ctx) {
   const invoker = await db.query(
     `SELECT prosecdef FROM pg_proc WHERE proname = 'kit_history' AND pg_get_function_identity_arguments(oid) = 'p_item_id text'`,
   )
-  if (invoker.rows[0]?.prosecdef === false) pass("security_invoker", "kit_history runs as the caller")
-  else fail("security_invoker", JSON.stringify(invoker.rows))
+  const gate = await db.query(
+    `SELECT to_regprocedure('public.kit_history_caller_can_read_item(text)') IS NOT NULL AS ok`,
+  )
+  if (invoker.rows[0]?.prosecdef === true && gate.rows[0]?.ok) {
+    pass("security_definer", "kit_history is DEFINER with invoker visibility gate")
+  } else {
+    fail("security_definer", JSON.stringify({ invoker: invoker.rows[0], gate: gate.rows[0] }))
+  }
 
   async function move(serial, type, status, location, extra = {}) {
     const current = await db.query(
@@ -412,36 +418,26 @@ export async function runChecks(ctx) {
     pass("unknown_start", unknown.summary)
   } else fail("unknown_start", JSON.stringify({ summary: unknown.summary, placement: unknownPlacement }))
 
-  // SAVEPOINT: kit_history is SECURITY INVOKER and may hit audit_log (no SELECT for
-  // authenticated). A bare failure must not abort the outer harness transaction.
-  let viewed = null
-  let viewedError = null
-  await ctx.asUser(viewerId, async () => {
-    const sp = `sp_${Math.random().toString(36).slice(2, 10)}`
-    await db.query(`SAVEPOINT ${sp}`)
-    try {
-      const row = await db.query(`SELECT public.kit_history($1) AS history`, [createdItem.itemId])
-      viewed = row.rows[0].history
-      await db.query(`RELEASE SAVEPOINT ${sp}`)
-    } catch (error) {
-      await db.query(`ROLLBACK TO SAVEPOINT ${sp}`)
-      viewedError = error instanceof Error ? error.message : String(error)
-    }
+  const viewed = await ctx.asUser(viewerId, async () => {
+    const row = await db.query(`SELECT public.kit_history($1) AS history`, [createdItem.itemId])
+    return row.rows[0].history
   })
+  const viewerTimeline = viewed?.timeline ?? []
   if (
-    !viewedError &&
     viewed?.summary === expectedSummary &&
-    JSON.stringify(viewed.tags) === JSON.stringify(expectedTags)
+    JSON.stringify(viewed.tags) === JSON.stringify(expectedTags) &&
+    viewerTimeline.length > 0
   ) {
-    pass("viewer_read", "a viewer receives the same summary and tags")
-  } else if (viewedError && /audit_log/i.test(viewedError)) {
-    // kit_history is SECURITY INVOKER and currently touches audit_log; viewers have no SELECT.
-    pass(
-      "viewer_read",
-      "viewer kit_history blocked by audit_log SELECT (admin history checks above already passed)",
-    )
+    pass("viewer_read", `summary, tags, and ${viewerTimeline.length} timeline entries`)
   } else {
-    fail("viewer_read", viewedError ?? JSON.stringify({ summary: viewed?.summary, tags: viewed?.tags }))
+    fail(
+      "viewer_read",
+      JSON.stringify({
+        summary: viewed?.summary,
+        tags: viewed?.tags,
+        timeline_len: viewerTimeline.length,
+      }),
+    )
   }
 
   await dropMovementPrev(db)
@@ -456,20 +452,8 @@ export async function runChecks(ctx) {
   else pass("viewer_readonly", "a viewer cannot record an inspection")
 }
 
-async function main() {
-  const { ok, failed, passed } = await withHarness(
-    { markers: MARKERS, timeoutMs: 300_000, label: "verify-077" },
-    runChecks,
-  )
-  console.log(ok ? `\n${passed} passed` : `\n${failed} failed`)
-  process.exitCode = ok ? 0 : 1
-}
-
 const isMain =
   process.argv[1] && process.argv[1].replace(/\\/g, "/").endsWith("verify-077-kit-history.mjs")
 if (isMain) {
-  main().catch((error) => {
-    console.error(error)
-    process.exitCode = 1
-  })
+  runVerifyCli({ markers: MARKERS, timeoutMs: 300_000, label: "verify-077" }, runChecks)
 }

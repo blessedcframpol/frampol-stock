@@ -3,7 +3,7 @@
  *
  * Usage: node scripts/verify-071-stock-pools.mjs
  */
-import { withHarness } from "./verify-harness.mjs"
+import { runVerifyCli } from "./verify-harness.mjs"
 import { dropMovementPrev, stampTxn, bumpRestoreClock, setJwt } from "./verify-harness-fixtures.mjs"
 
 // Distinct from leftover P1071-* residue still in production.
@@ -472,19 +472,7 @@ export async function runChecks(ctx) {
   }
 }
 
-async function main() {
-  const { ok, failed, passed } = await withHarness(
-    { markers: MARKERS, timeoutMs: 300_000, label: "verify-071" },
-    runChecks,
-  )
-  console.log(ok ? `\n${passed} passed` : `\n${failed} failed`)
-  process.exitCode = ok ? 0 : 1
-}
-
 const isMain = process.argv[1] && process.argv[1].replace(/\\/g, "/").endsWith("verify-071-stock-pools.mjs")
 if (isMain) {
-  main().catch((error) => {
-    console.error(error)
-    process.exitCode = 1
-  })
+  runVerifyCli({ markers: MARKERS, timeoutMs: 300_000, label: "verify-071" }, runChecks)
 }

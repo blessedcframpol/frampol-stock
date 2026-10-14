@@ -4,7 +4,7 @@
  *   node scripts/rehearse-migration.mjs supabase/migrations/20261013111300_nt1_notifications_live.sql scripts/verify-093-nt1-notifications-live.mjs
  *   node scripts/verify-093-nt1-notifications-live.mjs
  */
-import { withHarness } from "./verify-harness.mjs"
+import { runVerifyCli } from "./verify-harness.mjs"
 import { dropMovementPrev, stampTxn } from "./verify-harness-fixtures.mjs"
 
 const PREFIX = "H3093"
@@ -195,5 +195,8 @@ export async function runChecks(ctx) {
   else pass("realtime_publication", "publication absent or table not added (local ok)")
 }
 
-const { ok } = await withHarness({ markers: MARKERS, timeoutMs: 120_000 }, runChecks)
-process.exitCode = ok ? 0 : 1
+const isMain =
+  process.argv[1] && process.argv[1].replace(/\\/g, "/").endsWith("verify-093-nt1-notifications-live.mjs")
+if (isMain) {
+  runVerifyCli({ markers: MARKERS, timeoutMs: 120_000 }, runChecks)
+}

@@ -4,7 +4,7 @@
  *   node scripts/rehearse-migration.mjs supabase/migrations/20261011122815_au1_audit_trail.sql scripts/verify-084-au1-audit-trail.mjs
  *   node scripts/verify-084-au1-audit-trail.mjs
  */
-import { withHarness } from "./verify-harness.mjs"
+import { runVerifyCli } from "./verify-harness.mjs"
 import { setJwt } from "./verify-harness-fixtures.mjs"
 
 const PREFIX = "H3084"
@@ -305,5 +305,5 @@ export async function runChecks(ctx) {
 
 const isMain = process.argv[1] && process.argv[1].includes("verify-084-au1-audit-trail")
 if (isMain) {
-  await withHarness({ markers: MARKERS, timeoutMs: 300_000, label: "084-au1" }, runChecks)
+  runVerifyCli({ markers: MARKERS, timeoutMs: 300_000, label: "084-au1" }, runChecks)
 }

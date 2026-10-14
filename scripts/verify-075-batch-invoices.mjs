@@ -3,7 +3,7 @@
  *
  * Usage: node scripts/verify-075-batch-invoices.mjs
  */
-import { withHarness } from "./verify-harness.mjs"
+import { runVerifyCli } from "./verify-harness.mjs"
 import { dropMovementPrev, setJwt } from "./verify-harness-fixtures.mjs"
 
 const PREFIX = "H3075"
@@ -376,20 +376,8 @@ export async function runChecks(ctx) {
   }
 }
 
-async function main() {
-  const { ok, failed, passed } = await withHarness(
-    { markers: MARKERS, timeoutMs: 180_000, label: "verify-075" },
-    runChecks,
-  )
-  console.log(ok ? `\n${passed} passed` : `\n${failed} failed`)
-  process.exitCode = ok ? 0 : 1
-}
-
 const isMain =
   process.argv[1] && process.argv[1].replace(/\\/g, "/").endsWith("verify-075-batch-invoices.mjs")
 if (isMain) {
-  main().catch((error) => {
-    console.error(error)
-    process.exitCode = 1
-  })
+  runVerifyCli({ markers: MARKERS, timeoutMs: 180_000, label: "verify-075" }, runChecks)
 }

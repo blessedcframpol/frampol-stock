@@ -4,7 +4,7 @@
  *
  * Usage: node scripts/verify-072-rental-rules.mjs
  */
-import { withHarness } from "./verify-harness.mjs"
+import { runVerifyCli } from "./verify-harness.mjs"
 import { dropMovementPrev, stampTxn, setJwt } from "./verify-harness-fixtures.mjs"
 
 // Distinct from leftover P1072-* residue still in production.
@@ -354,19 +354,7 @@ export async function runChecks(ctx) {
   else fail("live_rented_unchanged", JSON.stringify({ before: liveBefore.rows, after: liveAfter.rows }))
 }
 
-async function main() {
-  const { ok, failed, passed } = await withHarness(
-    { markers: MARKERS, timeoutMs: 180_000, label: "verify-072" },
-    runChecks,
-  )
-  console.log(ok ? `\n${passed} passed` : `\n${failed} failed`)
-  process.exitCode = ok ? 0 : 1
-}
-
 const isMain = process.argv[1] && process.argv[1].replace(/\\/g, "/").endsWith("verify-072-rental-rules.mjs")
 if (isMain) {
-  main().catch((error) => {
-    console.error(error)
-    process.exitCode = 1
-  })
+  runVerifyCli({ markers: MARKERS, timeoutMs: 180_000, label: "verify-072" }, runChecks)
 }

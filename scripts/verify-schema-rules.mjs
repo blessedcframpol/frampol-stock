@@ -11,7 +11,7 @@
  *   066 anon EXECUTE, unique live serial, one-open-case, posted lock,
  *   SECURITY DEFINER search_path, invoice placeholder checks.
  */
-import { withHarness } from "./verify-harness.mjs"
+import { runVerifyCli } from "./verify-harness.mjs"
 
 export const MARKERS = [
   { label: "schema_rules_noop", sql: "SELECT 0::int AS n", params: [] },
@@ -281,6 +281,33 @@ export async function runChecks(ctx) {
     )
     if (denied.rowCount === 1) pass("viewer_product_lines_update_denied", "non-admin update denied")
     else fail("viewer_product_lines_update_denied", "policy missing")
+
+    const invUpdate = await db.query(
+      `SELECT policyname, cmd, roles::text AS roles
+       FROM pg_policies
+       WHERE schemaname = 'public' AND tablename = 'inventory_items'
+         AND cmd IN ('UPDATE', 'ALL')
+       ORDER BY policyname`,
+    )
+    const anonUpdate = invUpdate.rows.filter(
+      (r) => r.roles.includes("anon") && (r.cmd === "UPDATE" || r.cmd === "ALL"),
+    )
+    const nonAdminUpdate = invUpdate.rows.filter(
+      (r) =>
+        r.policyname !== "Admin full access inventory_items" &&
+        (r.cmd === "UPDATE" || r.cmd === "ALL"),
+    )
+    if (anonUpdate.length === 0 && nonAdminUpdate.length === 0) {
+      pass(
+        "inventory_items_update_catalog",
+        "only Admin full access inventory_items may UPDATE (no anon/authenticated non-admin UPDATE policy)",
+      )
+    } else {
+      fail(
+        "inventory_items_update_catalog",
+        [...anonUpdate, ...nonAdminUpdate].map((r) => `${r.policyname}(${r.cmd})`).join(", "),
+      )
+    }
   }
 
   // --- Storage bucket private ---
@@ -340,20 +367,8 @@ export async function runChecks(ctx) {
   }
 }
 
-async function main() {
-  const { ok, failed, passed } = await withHarness(
-    { markers: MARKERS, timeoutMs: 60_000, label: "verify-schema-rules" },
-    runChecks,
-  )
-  console.log(ok ? `\n${passed} passed` : `\n${failed} failed`)
-  process.exitCode = ok ? 0 : 1
-}
-
 const isMain =
   process.argv[1] && process.argv[1].replace(/\\/g, "/").endsWith("verify-schema-rules.mjs")
 if (isMain) {
-  main().catch((error) => {
-    console.error(error)
-    process.exitCode = 1
-  })
+  runVerifyCli({ markers: MARKERS, timeoutMs: 60_000, label: "verify-schema-rules" }, runChecks)
 }

@@ -15,6 +15,7 @@
  */
 import { createRequire } from "module"
 import { createClient } from "@supabase/supabase-js"
+import { isPermissionDenied, printVerifySummary } from "./verify-harness.mjs"
 
 const require = createRequire(import.meta.url)
 const { loadEnvLocal, PRODUCTION_SUPABASE_REF, projectRefFromUrl } = require("./verify-env.cjs")
@@ -47,6 +48,13 @@ function wroteNoRows(status, text) {
     return trimmed === "" || trimmed === "[]" || trimmed === "null"
   }
   return false
+}
+
+/** PostgREST / Postgres RPC refusal must be permission denied (42501), not an arbitrary error. */
+function isRpcPermissionDenied(error) {
+  if (!error) return false
+  if (error.code === "42501") return true
+  return isPermissionDenied(error)
 }
 
 async function restDenied(
@@ -117,27 +125,31 @@ async function main() {
   // --- Anon RPC must be denied ---
   {
     const { data, error } = await anon.rpc("apply_stock_movement", {
-      p_upserts: [],
-      p_inserts: [],
+      p_inventory_upserts: [],
+      p_inventory_inserts: [],
       p_transactions: [],
     })
-    if (error && !data) {
-      pass("anon_rpc_denied", error.message.slice(0, 120))
+    if (isRpcPermissionDenied(error) && !data) {
+      pass("anon_apply_stock_movement_denied", `SQLSTATE ${error.code ?? "42501"}`)
+    } else if (error && !data) {
+      fail("anon_apply_stock_movement_denied", `expected 42501, got ${error.code ?? "?"}: ${error.message.slice(0, 120)}`)
     } else {
-      fail("anon_rpc_denied", `unexpected success ${JSON.stringify(data)}`)
+      fail("anon_apply_stock_movement_denied", `unexpected success ${JSON.stringify(data)}`)
     }
   }
 
   {
     const { data, error } = await anon.rpc("client_sale_dispatch_counts")
-    if (error && !data) {
-      pass("anon_csdc_denied", error.message.slice(0, 120))
+    if (isRpcPermissionDenied(error) && !data) {
+      pass("anon_csdc_denied", `SQLSTATE ${error.code ?? "42501"}`)
+    } else if (error && !data) {
+      fail("anon_csdc_denied", `expected 42501, got ${error.code ?? "?"}: ${error.message.slice(0, 120)}`)
     } else {
       fail("anon_csdc_denied", `unexpected success`)
     }
   }
 
-  // --- Anon cannot call set_config / set app.* / PATCH inventory status ---
+  // --- Anon cannot call set_config / set app.* (inventory PATCH catalog is in schema-rules) ---
   await restDenied(rest, {
     apikey: anonKey,
     bearer: anonKey,
@@ -157,17 +169,6 @@ async function main() {
     label: "anon_set_config_alt_denied",
     pass,
     fail,
-  })
-  await restDenied(rest, {
-    apikey: anonKey,
-    bearer: anonKey,
-    path: "/inventory_items?id=eq.probe-must-not-exist",
-    method: "PATCH",
-    body: { status: "Sold" },
-    label: "anon_inventory_status_denied",
-    pass,
-    fail,
-    allowEmptyWrite: true,
   })
 
   // --- Authenticated session (ephemeral user) same refusals ---
@@ -218,17 +219,6 @@ async function main() {
             label: "auth_set_config_alt_denied",
             pass,
             fail,
-          })
-          await restDenied(rest, {
-            apikey: anonKey,
-            bearer: userJwt,
-            path: "/inventory_items?id=eq.probe-must-not-exist",
-            method: "PATCH",
-            body: { status: "Sold" },
-            label: "auth_inventory_status_denied",
-            pass,
-            fail,
-            allowEmptyWrite: true,
           })
         }
       }
@@ -287,8 +277,9 @@ async function main() {
 
   const failed = Object.values(results).filter((r) => r.result === "FAIL")
   const passed = Object.values(results).filter((r) => r.result === "PASS")
-  console.log(`\nPROBE  ${passed.length} passed, ${failed.length} failed`)
-  process.exitCode = failed.length === 0 ? 0 : 1
+  const ok = failed.length === 0 && passed.length > 0
+  printVerifySummary(ok, passed.length, failed.length)
+  process.exitCode = ok ? 0 : 1
 }
 
 main().catch((error) => {

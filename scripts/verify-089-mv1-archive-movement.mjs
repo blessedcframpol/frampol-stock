@@ -5,7 +5,7 @@
  *   node scripts/rehearse-migration.mjs supabase/migrations/20261012175928_mv1_archive_products_movement.sql scripts/verify-089-mv1-archive-movement.mjs
  *   node scripts/verify-089-mv1-archive-movement.mjs
  */
-import { withHarness } from "./verify-harness.mjs"
+import { runVerifyCli } from "./verify-harness.mjs"
 import { dropMovementPrev, setJwt } from "./verify-harness-fixtures.mjs"
 
 const PREFIX = "H3089"
@@ -321,5 +321,5 @@ export async function runChecks(ctx) {
 const isMain =
   process.argv[1] && process.argv[1].replace(/\\/g, "/").endsWith("verify-089-mv1-archive-movement.mjs")
 if (isMain) {
-  await withHarness({ markers: MARKERS, timeoutMs: 300_000, label: "089-mv1" }, runChecks)
+  runVerifyCli({ markers: MARKERS, timeoutMs: 300_000, label: "089-mv1" }, runChecks)
 }

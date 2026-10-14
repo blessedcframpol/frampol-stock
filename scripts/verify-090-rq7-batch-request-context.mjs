@@ -5,7 +5,7 @@
  *   (After RQ7c on the target DB, context uses batch_request_context_for — run verify-092 for lockdown.)
  *   node scripts/verify-090-rq7-batch-request-context.mjs
  */
-import { withHarness } from "./verify-harness.mjs"
+import { runVerifyCli } from "./verify-harness.mjs"
 import { dropMovementPrev, stampTxn } from "./verify-harness-fixtures.mjs"
 
 const PREFIX = "H3090"
@@ -293,6 +293,5 @@ export async function runChecks(ctx) {
 const isMain =
   process.argv[1] && process.argv[1].replace(/\\/g, "/").endsWith("verify-090-rq7-batch-request-context.mjs")
 if (isMain) {
-  const { ok } = await withHarness({ markers: MARKERS, timeoutMs: 300_000, label: "090-rq7" }, runChecks)
-  process.exitCode = ok ? 0 : 1
+  runVerifyCli({ markers: MARKERS, timeoutMs: 300_000, label: "090-rq7" }, runChecks)
 }
