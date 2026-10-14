@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest"
 import type { InventoryItem } from "@/lib/data"
 import {
   activeInStockTotal,
+  archiveBlockMessage,
+  canDeleteProduct,
   inStockPoolCounts,
   buildInventoryProducts,
   canEditReorderLevel,
@@ -125,6 +127,20 @@ describe("inventory product sorting and filters", () => {
     expect(filterInventoryProducts(rows, { query: "", vendor: "all", lowOnly: true, showInactive: false }).map((row) => row.productId)).toEqual(["gen"])
     expect(filterInventoryProducts(rows, { query: "", vendor: "all", lowOnly: false, showInactive: false }).some((row) => row.productId === "off")).toBe(false)
     expect(filterInventoryProducts(rows, { query: "", vendor: "all", lowOnly: false, showInactive: true }).some((row) => row.productId === "off")).toBe(true)
+  })
+})
+
+describe("archive and delete guards", () => {
+  it("blocks archive while kits are In Stock, POC, or Rental", () => {
+    expect(archiveBlockMessage({ inStock: 0, poc: 0, rental: 0 })).toBeNull()
+    expect(archiveBlockMessage({ inStock: 2, poc: 0, rental: 0 })).toMatch(/2 kit\(s\) still In Stock/)
+    expect(archiveBlockMessage({ inStock: 0, poc: 1, rental: 0 })).toMatch(/1 kit\(s\) still on POC/)
+    expect(archiveBlockMessage({ inStock: 1, poc: 1, rental: 2 })).toMatch(/still on Rental/)
+  })
+
+  it("refuses delete when transactions still name the product", () => {
+    expect(canDeleteProduct({ inventoryCount: 0, requestLineCount: 0, transactionNameCount: 0 })).toBe(true)
+    expect(canDeleteProduct({ inventoryCount: 0, requestLineCount: 0, transactionNameCount: 3 })).toBe(false)
   })
 })
 

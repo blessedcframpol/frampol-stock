@@ -906,7 +906,10 @@ export function MovementForm({
             <li
               key={`${m.serial}-${m.mark}`}
               className={cn(
-                m.mark === "blocked" || m.mark === "not_found" || m.mark === "duplicate"
+                m.mark === "blocked" ||
+                  m.mark === "not_found" ||
+                  m.mark === "duplicate" ||
+                  m.mark === "warn"
                   ? "text-warning"
                   : "text-foreground"
               )}

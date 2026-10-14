@@ -92,6 +92,8 @@ export interface InventoryItem {
   cloudKey?: string
   /** From product_lines.requires_cloud_key via inventory join. */
   requiresCloudKey?: boolean
+  /** From product_lines.is_active via inventory join. Absent → treat as active. */
+  productIsActive?: boolean
   notes?: string
   /** Person, client, or project this item is assigned to */
   assignedTo?: string

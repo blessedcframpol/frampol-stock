@@ -154,6 +154,32 @@ export async function runChecks(ctx) {
     }
   }
 
+  // --- Archive blocked with POC kits (MV1b) ---
+  {
+    const pocProduct = `${PREFIX}-poc-block`
+    await db.query(
+      `INSERT INTO public.product_lines (id, product_name, vendor, requires_serial, is_active)
+       VALUES ($1, 'MV1 POC Block', 'Harness', true, true)`,
+      [pocProduct],
+    )
+    await db.query(
+      `INSERT INTO public.inventory_items (
+         id, product_id, serial_number, status, stock_pool, location, date_added
+       ) VALUES ($1, $2, $3, 'POC', 'sale', 'Client Site', $4)`,
+      [nextId("ITEM"), pocProduct, `${PREFIX}-POC-1`, DATE],
+    )
+    await setJwt(db, adminId)
+    const blocked = await attempt(`SELECT public.archive_product($1, $2)`, [
+      pocProduct,
+      "should fail poc",
+    ])
+    if (!blocked.ok && /still on POC/i.test(blocked.error ?? "")) {
+      pass("archive_blocked_with_poc", blocked.error.split("\n")[0])
+    } else {
+      fail("archive_blocked_with_poc", blocked.error ?? "expected POC failure")
+    }
+  }
+
   // --- Delete blocked with history; allowed when clean ---
   {
     await setJwt(db, adminId)
@@ -185,6 +211,30 @@ export async function runChecks(ctx) {
       else fail("delete_clean_ok", "still present")
     } else {
       fail("delete_clean_ok", ok.error)
+    }
+
+    // Delete blocked when transactions.item_name still names the product (MV1b)
+    const namedId = `${PREFIX}-named`
+    const namedName = `MV1 Named Txn ${PREFIX}`
+    await db.query(
+      `INSERT INTO public.product_lines (id, product_name, vendor, requires_serial, is_active)
+       VALUES ($1, $2, 'Harness', true, true)`,
+      [namedId, namedName],
+    )
+    await db.query(
+      `INSERT INTO public.transactions (
+         id, type, serial_number, item_name, client, date
+       ) VALUES ($1, 'Sale', $2, $3, 'Internal', $4)`,
+      [nextId("TXN"), `${PREFIX}-TXN-SERIAL`, namedName, DATE_ISO],
+    )
+    const namedBlocked = await attempt(`SELECT public.delete_product($1, $2)`, [
+      namedId,
+      "has txn name",
+    ])
+    if (!namedBlocked.ok && /transaction/i.test(namedBlocked.error ?? "")) {
+      pass("delete_blocked_with_txn_name", namedBlocked.error.split("\n")[0])
+    } else {
+      fail("delete_blocked_with_txn_name", namedBlocked.error ?? "expected txn-name failure")
     }
   }
 

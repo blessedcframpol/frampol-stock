@@ -1,3 +1,4 @@
+import { loadBatchRequestContext, type BatchRequestContext } from "@/lib/batch-request-context"
 import { getSupabaseClient } from "@/lib/supabase/client"
 
 export type KitPlacementChange = {
@@ -45,6 +46,7 @@ export type KitTimelineEntry = {
   reversal: KitTimelineNote | null
   restore: KitTimelineNote | null
   invoice: KitInvoiceState | null
+  requestContext?: BatchRequestContext | null
 }
 
 export type KitHistoryLink = {
@@ -74,11 +76,15 @@ export function fetchKitHistory(itemId: string): Promise<KitHistory | null> {
   const pending = inflight.get(itemId)
   if (pending) return pending
   const request = Promise.resolve(getSupabaseClient().rpc("kit_history", { p_item_id: itemId }))
-    .then(({ data, error }) => {
+    .then(async ({ data, error }) => {
       inflight.delete(itemId)
       if (error) throw error
       const history = (data ?? { found: false }) as unknown as KitHistory
-      if (history.found) historyCache.set(itemId, history)
+      if (history.found) {
+        const enriched = await attachRequestContext(history)
+        historyCache.set(itemId, enriched)
+        return enriched
+      }
       return history
     })
     .catch((error: unknown) => {
@@ -87,6 +93,34 @@ export function fetchKitHistory(itemId: string): Promise<KitHistory | null> {
     })
   inflight.set(itemId, request)
   return request
+}
+
+async function attachRequestContext(history: KitHistory): Promise<KitHistory> {
+  const timeline = history.timeline ?? []
+  if (timeline.length === 0) return history
+  const supabase = getSupabaseClient()
+  const txnIds = timeline.map((entry) => entry.id).filter(Boolean)
+  const batchByTxn = new Map<string, string>()
+  for (let index = 0; index < txnIds.length; index += 80) {
+    const chunk = txnIds.slice(index, index + 80)
+    const { data, error } = await supabase.from("transactions").select("id, batch_id").in("id", chunk)
+    if (error) throw error
+    for (const row of data ?? []) {
+      batchByTxn.set(row.id, row.batch_id?.trim() || row.id)
+    }
+  }
+  const requestByBatch = await loadBatchRequestContext(supabase, batchByTxn.values())
+  return {
+    ...history,
+    timeline: timeline.map((entry) => {
+      const batchId = batchByTxn.get(entry.id)
+      if (!batchId) return entry
+      return {
+        ...entry,
+        requestContext: requestByBatch.get(batchId) ?? null,
+      }
+    }),
+  }
 }
 
 export async function fetchKitHistoryBySerial(serial: string): Promise<KitHistory | null> {

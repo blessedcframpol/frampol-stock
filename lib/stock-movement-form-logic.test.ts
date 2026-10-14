@@ -27,6 +27,7 @@ function item(partial: Partial<InventoryItem> & Pick<InventoryItem, "serialNumbe
     stockPool: partial.stockPool ?? "sale",
     client: partial.client,
     assignedTo: partial.assignedTo,
+    productIsActive: partial.productIsActive,
   }
 }
 
@@ -116,6 +117,22 @@ describe("serial feedback", () => {
     ])
     expect(feedback.validSerials).toEqual(["OK"])
     expect(feedback.marks[0]?.detail).toBe("Mini · Starlink")
+  })
+
+  it("warns when returning a kit into an archived product", () => {
+    const feedback = buildSerialFeedback("POC Return", "POC1", [
+      item({
+        serialNumber: "POC1",
+        name: "Starlink Business Kit",
+        vendor: "Starlink",
+        status: "POC",
+        productIsActive: false,
+      }),
+    ])
+    expect(feedback.validSerials).toEqual(["POC1"])
+    expect(feedback.archivedProductWarnCount).toBe(1)
+    expect(feedback.marks[0]?.mark).toBe("warn")
+    expect(feedback.marks[0]?.detail).toMatch(/This product is archived/)
   })
 })
 

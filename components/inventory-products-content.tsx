@@ -54,6 +54,7 @@ import { filterOnHandInventory } from "@/lib/inventory-visibility"
 import { useInventoryStore } from "@/lib/inventory-store"
 import {
   inStockPoolCounts,
+  archiveBlockMessage,
   buildInventoryProducts,
   canDeleteProduct,
   canEditReorderLevel,
@@ -82,7 +83,7 @@ import {
 } from "@/lib/settings"
 import { getSupabaseClient } from "@/lib/supabase/client"
 import { buildStockTakeUrl } from "@/lib/stock-take"
-import { buildCsvFilename } from "@/lib/utils"
+import { buildCsvFilename, cn } from "@/lib/utils"
 import { formatCount } from "@/lib/format-display"
 
 const VENDOR_LABELS = ["Starlink", "Fortinet"]
@@ -290,7 +291,7 @@ export function InventoryProductsContent() {
     if (kind === "delete") {
       try {
         const sb = getSupabaseClient()
-        const [inv, req] = await Promise.all([
+        const [inv, req, txn] = await Promise.all([
           sb
             .from("inventory_items")
             .select("id", { count: "exact", head: true })
@@ -299,11 +300,16 @@ export function InventoryProductsContent() {
             .from("stock_request_lines")
             .select("id", { count: "exact", head: true })
             .eq("product_id", row.productId),
+          sb
+            .from("transactions")
+            .select("id", { count: "exact", head: true })
+            .ilike("item_name", row.productName),
         ])
         setDeleteAllowed(
           canDeleteProduct({
             inventoryCount: inv.count ?? 0,
             requestLineCount: req.count ?? 0,
+            transactionNameCount: txn.count ?? 0,
           }),
         )
       } catch {
@@ -323,8 +329,13 @@ export function InventoryProductsContent() {
     try {
       const { row, kind } = productAction
       if (kind === "archive") {
-        if (row.inStockCount > 0) {
-          toast.error(`Cannot archive — ${row.inStockCount} kit(s) still In Stock`)
+        const block = archiveBlockMessage({
+          inStock: row.inStockCount,
+          poc: row.pocCount,
+          rental: row.rentalCount,
+        })
+        if (block) {
+          toast.error(block)
           return
         }
         await archiveProduct(row.productId, reason)
@@ -492,7 +503,7 @@ export function InventoryProductsContent() {
                 <TableRow
                   key={row.productId}
                   tabIndex={0}
-                  className="cursor-pointer"
+                  className={cn("cursor-pointer", !row.isActive && "opacity-60")}
                   onClick={(event) => {
                     const target = event.target as HTMLElement
                     if (target.closest("a, button, input")) return
@@ -505,7 +516,13 @@ export function InventoryProductsContent() {
                   }}
                 >
                   <TableCell>
-                    <Link href={href} className="font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                    <Link
+                      href={href}
+                      className={cn(
+                        "font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                        row.isActive ? "text-foreground" : "text-muted-foreground",
+                      )}
+                    >
                       {row.productName}
                     </Link>
                   </TableCell>
@@ -513,7 +530,7 @@ export function InventoryProductsContent() {
                   <TableCell className={tableNumericClass}>{row.inStockCount}</TableCell>
                   <TableCell className={tableNumericClass}>{outLabel || "—"}</TableCell>
                   <TableCell className={tableNumericClass}>
-                    {canEdit ? (
+                    {canEdit && row.isActive ? (
                       <ReorderEditor
                         key={`${row.productId}:${row.reorderLevel ?? ""}`}
                         row={row}
@@ -558,10 +575,13 @@ export function InventoryProductsContent() {
                           {actions.archive && row.isActive ? (
                             <DropdownMenuItem
                               onSelect={() => {
-                                if (row.inStockCount > 0) {
-                                  toast.error(
-                                    `Cannot archive — ${row.inStockCount} kit(s) still In Stock`,
-                                  )
+                                const block = archiveBlockMessage({
+                                  inStock: row.inStockCount,
+                                  poc: row.pocCount,
+                                  rental: row.rentalCount,
+                                })
+                                if (block) {
+                                  toast.error(block)
                                   return
                                 }
                                 void openProductAction(row, "archive")
@@ -626,10 +646,25 @@ export function InventoryProductsContent() {
                 type="button"
                 onClick={() => {
                   if (!productAction) return
+                  const block = archiveBlockMessage({
+                    inStock: productAction.row.inStockCount,
+                    poc: productAction.row.pocCount,
+                    rental: productAction.row.rentalCount,
+                  })
+                  if (block) {
+                    toast.error(block)
+                    return
+                  }
                   setProductAction({ row: productAction.row, kind: "archive" })
                   setActionReason("")
                 }}
-                disabled={productAction.row.inStockCount > 0}
+                disabled={Boolean(
+                  archiveBlockMessage({
+                    inStock: productAction.row.inStockCount,
+                    poc: productAction.row.pocCount,
+                    rental: productAction.row.rentalCount,
+                  }),
+                )}
               >
                 Archive instead
               </Button>

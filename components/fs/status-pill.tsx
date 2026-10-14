@@ -41,7 +41,7 @@ export const STATUS_PILL_CLASS: Record<string, string> = {
   cancelled: "bg-danger-soft text-danger",
   error: "bg-danger-soft text-danger",
   Inactive: "bg-danger-soft text-danger",
-  Archived: "bg-danger-soft text-danger",
+  Archived: "bg-muted text-muted-foreground",
 
   Disposed: "bg-muted text-muted-foreground",
   Dispose: "bg-muted text-muted-foreground",

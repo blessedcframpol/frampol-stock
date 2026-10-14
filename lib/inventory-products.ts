@@ -68,9 +68,31 @@ export function hasProductRowMenu(role: AppRole | null | undefined): boolean {
   return actions.move || actions.stockTake || actions.exportProduct || actions.archive
 }
 
-/** True when no inventory_items or stock_request_lines reference the product. */
-export function canDeleteProduct(refs: { inventoryCount: number; requestLineCount: number }): boolean {
-  return refs.inventoryCount === 0 && refs.requestLineCount === 0
+/** True when nothing references the product (kits, request lines, or txn item_name). */
+export function canDeleteProduct(refs: {
+  inventoryCount: number
+  requestLineCount: number
+  transactionNameCount?: number
+}): boolean {
+  return (
+    refs.inventoryCount === 0 &&
+    refs.requestLineCount === 0 &&
+    (refs.transactionNameCount ?? 0) === 0
+  )
+}
+
+/** Client-side twin of archive_product's live-kit guard (In Stock / POC / Rental). */
+export function archiveBlockMessage(counts: {
+  inStock: number
+  poc: number
+  rental: number
+}): string | null {
+  const parts: string[] = []
+  if (counts.inStock > 0) parts.push(`${counts.inStock} kit(s) still In Stock`)
+  if (counts.poc > 0) parts.push(`${counts.poc} kit(s) still on POC`)
+  if (counts.rental > 0) parts.push(`${counts.rental} kit(s) still on Rental`)
+  if (parts.length === 0) return null
+  return `Cannot archive — ${parts.join(", ")}`
 }
 
 /**

@@ -160,13 +160,29 @@ export type MovementFormFields = {
   notes: string
 }
 
+/** Return movements that put a kit back under its existing product. */
+export const RETURN_MOVEMENT_TYPES: ReadonlySet<string> = new Set([
+  "POC Return",
+  "Rental Return",
+  "Sale Return",
+  "Decommissioned",
+])
+
+export const ARCHIVED_PRODUCT_RETURN_WARNING =
+  "This product is archived — restore it or move the kit to the right product."
+
 export type SerialFeedbackLine = {
   summary: string
-  marks: Array<{ serial: string; mark: "ok" | "duplicate" | "in_stock" | "not_found" | "blocked"; detail?: string }>
+  marks: Array<{
+    serial: string
+    mark: "ok" | "warn" | "duplicate" | "in_stock" | "not_found" | "blocked"
+    detail?: string
+  }>
   validSerials: string[]
   blockedCount: number
   notFoundCount: number
   duplicateCount: number
+  archivedProductWarnCount: number
 }
 
 /**
@@ -197,6 +213,7 @@ export function buildSerialFeedback(
   let notFoundCount = 0
   let blockedCount = 0
   let inStockCount = 0
+  let archivedProductWarnCount = 0
   const validSerials: string[] = []
 
   for (const serial of unique) {
@@ -244,7 +261,20 @@ export function buildSerialFeedback(
       marks.push({ serial, mark: "blocked", detail: reason })
     } else {
       const productLabel = `${item.name.trim()} · ${(item.vendor ?? "").trim() || "General"}`
-      if (copies === 1) marks.push({ serial, mark: "ok", detail: productLabel })
+      const archivedReturn =
+        RETURN_MOVEMENT_TYPES.has(type) && item.productIsActive === false
+      if (archivedReturn) {
+        archivedProductWarnCount += 1
+        if (copies === 1) {
+          marks.push({
+            serial,
+            mark: "warn",
+            detail: `${productLabel} — ${ARCHIVED_PRODUCT_RETURN_WARNING}`,
+          })
+        }
+      } else if (copies === 1) {
+        marks.push({ serial, mark: "ok", detail: productLabel })
+      }
       validSerials.push(serial)
     }
   }
@@ -253,6 +283,7 @@ export function buildSerialFeedback(
   if (duplicateCount) parts.push(`${duplicateCount} duplicate`)
   if (inStockCount && type === "Inbound") parts.push(`${inStockCount} already in stock`)
   if (notFoundCount) parts.push(`${notFoundCount} not in stock records`)
+  if (archivedProductWarnCount) parts.push(`${archivedProductWarnCount} archived product`)
   if (blockedCount) {
     parts.push(type === "Sale" ? `${blockedCount} can't be sold` : `${blockedCount} blocked`)
   }
@@ -264,6 +295,7 @@ export function buildSerialFeedback(
     blockedCount,
     notFoundCount,
     duplicateCount,
+    archivedProductWarnCount,
   }
 }
 

@@ -9,6 +9,7 @@ export type ProductLineEmbed = {
   product_name: string
   vendor: string
   requires_cloud_key?: boolean
+  is_active?: boolean
 }
 
 export type InventoryItemQueryRow = InventoryRow & {
@@ -16,7 +17,8 @@ export type InventoryItemQueryRow = InventoryRow & {
 }
 
 /** Use on all inventory_items reads that must populate name/vendor for the app. */
-export const INVENTORY_ITEM_SELECT = "*, product_lines(product_name, vendor, requires_cloud_key)"
+export const INVENTORY_ITEM_SELECT =
+  "*, product_lines(product_name, vendor, requires_cloud_key, is_active)"
 
 export function rowToInventoryItem(row: InventoryItemQueryRow | InventoryRow): InventoryItem {
   const pl = "product_lines" in row ? row.product_lines : null
@@ -48,6 +50,7 @@ export function rowToInventoryItem(row: InventoryItemQueryRow | InventoryRow): I
     assignmentHistory: assignmentHistory ?? undefined,
     cloudKey: row.cloud_key ?? undefined,
     requiresCloudKey: pl?.requires_cloud_key === true,
+    productIsActive: pl?.is_active !== false,
     deletedAt: row.deleted_at ? String(row.deleted_at) : undefined,
   }
 }
