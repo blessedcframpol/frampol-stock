@@ -69,6 +69,30 @@ export async function runChecks(ctx) {
     else fail("anon_execute_none", rows.rows.map((r) => r.proname).join(", "))
   }
 
+  // --- Public views: security_invoker or no SELECT for anon/authenticated ---
+  {
+    const rows = await db.query(
+      `SELECT c.relname
+       FROM pg_class c
+       JOIN pg_namespace n ON n.oid = c.relnamespace
+       WHERE n.nspname = 'public'
+         AND c.relkind = 'v'
+         AND NOT (
+           c.reloptions @> ARRAY['security_invoker=true']
+           OR (
+             NOT has_table_privilege('authenticated', c.oid, 'SELECT')
+             AND NOT has_table_privilege('anon', c.oid, 'SELECT')
+           )
+         )
+       ORDER BY 1`,
+    )
+    if (rows.rowCount === 0) {
+      pass("public_views_locked_down", "every view is security_invoker or revoked from anon/authenticated")
+    } else {
+      fail("public_views_locked_down", rows.rows.map((r) => r.relname).join(", "))
+    }
+  }
+
   // --- SECURITY DEFINER must pin search_path ---
   {
     const rows = await db.query(

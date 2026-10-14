@@ -1,3 +1,4 @@
+import { loadBatchRequestContext, type BatchRequestContext } from "@/lib/batch-request-context"
 import { invoiceBatchKey } from "@/lib/invoices"
 import { formatCount } from "@/lib/format-display"
 import { getSupabaseClient } from "@/lib/supabase/client"
@@ -70,7 +71,10 @@ export async function fetchClientSaleDispatchCounts(): Promise<Map<string, Clien
   return counts
 }
 
-export type ResolvedClientTransaction = Transaction & { batchKey: string }
+export type ResolvedClientTransaction = Transaction & {
+  batchKey: string
+  requestContext?: BatchRequestContext | null
+}
 
 /** Every transaction the resolution view assigns to this directory client. */
 export async function fetchClientTransactions(clientId: string): Promise<ResolvedClientTransaction[]> {
@@ -92,9 +96,16 @@ export async function fetchClientTransactions(clientId: string): Promise<Resolve
     if (invoiceError) throw new Error(invoiceError.message)
     for (const row of invoiceRows ?? []) states.set(row.batch_id, invoiceStateFromRow(row))
   }
+  const requestIds = transactions.map((txn) => txn.batchId || txn.id)
+  const requestByBatch = await loadBatchRequestContext(supabase, requestIds)
   return transactions.map((txn) => {
     const invoiceState = states.get(invoiceBatchKey(txn))
-    return invoiceState ? { ...txn, invoiceState } : txn
+    const requestContext = requestByBatch.get(txn.batchId || txn.id) ?? null
+    return {
+      ...txn,
+      ...(invoiceState ? { invoiceState } : {}),
+      requestContext,
+    }
   })
 }
 

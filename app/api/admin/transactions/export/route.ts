@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { apiErrorResponse } from "@/lib/api-error-response"
+import { loadBatchRequestContext } from "@/lib/batch-request-context"
 import { requireAdmin } from "@/lib/require-admin"
 import { buildCsvFilename } from "@/lib/utils"
 import { rowToTransaction } from "@/lib/supabase/inventory-db"
@@ -52,6 +53,10 @@ export async function GET() {
         logLabel: "admin transactions export count",
       })
     }
+    const requestByBatch = await loadBatchRequestContext(
+      supabase,
+      transactions.map((txn) => txn.batchId || txn.id),
+    )
     const rows: string[][] = [
       [
         "ID",
@@ -70,6 +75,9 @@ export async function GET() {
         "Disposal Reason",
         "Authorised By",
         "Batch ID",
+        "Request Number",
+        "Requester",
+        "Atlas Task URL",
         "Delivery Note URL",
         "Notes",
         "Created By",
@@ -79,6 +87,7 @@ export async function GET() {
     ]
 
     for (const txn of transactions) {
+      const request = requestByBatch.get(txn.batchId || txn.id)
       rows.push([
         txn.id,
         txn.date,
@@ -96,6 +105,9 @@ export async function GET() {
         txn.disposalReason ?? "",
         txn.authorisedBy ?? "",
         txn.batchId ?? "",
+        request?.requestNumber ?? "",
+        request?.requesterName ?? "",
+        request?.atlasTaskUrl ?? "",
         txn.deliveryNoteUrl ?? "",
         txn.notes ?? "",
         txn.createdBy ?? "",

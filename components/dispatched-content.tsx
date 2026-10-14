@@ -32,9 +32,9 @@ import { Checkbox } from "@/components/ui/checkbox"
 import type { InventoryItem } from "@/lib/data"
 import { canChangeStockPool, canViewFinancials } from "@/lib/permissions"
 import { toastFromApiErrorBody, toastFromCaughtError } from "@/lib/toast-reportable-error"
-import { BatchLinesDrawer } from "@/components/batch-lines-drawer"
+import { MovementBatchDrawer } from "@/components/movement-batch-drawer"
+import { requestLookupBatchId } from "@/lib/batch-request-context"
 import { DispatchedKitDrawer } from "@/components/dispatched-kit-drawer"
-import { SignedStorageLink } from "@/components/signed-storage-link"
 import {
   DISPATCHED_MOVEMENTS,
   LEDGER_PAGE_SIZE,
@@ -257,7 +257,7 @@ export function DispatchedContent() {
             type="search"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search by serial, product, client, invoice..."
+            placeholder="Search by serial, product, client, invoice, request, or requester..."
             aria-label="Search dispatched items"
           />
         }
@@ -369,6 +369,7 @@ export function DispatchedContent() {
                   <TableHead>Movement</TableHead>
                   <TableHead>Product</TableHead>
                   <TableHead>Client</TableHead>
+                  <TableHead>Requested by</TableHead>
                   <TableHead className="text-right">Items</TableHead>
                   <TableHead>Date out</TableHead>
                   {showFinancials ? <TableHead>Invoice</TableHead> : null}
@@ -404,6 +405,12 @@ export function DispatchedContent() {
                     </TableCell>
                     <TableCell className="max-w-[180px] truncate text-sm text-muted-foreground" title={row.clientDisplay}>
                       {row.clientDisplay}
+                    </TableCell>
+                    <TableCell
+                      className="max-w-[140px] truncate text-sm text-muted-foreground"
+                      title={row.requestedBy || undefined}
+                    >
+                      {row.requestedBy || ""}
                     </TableCell>
                     <TableCell className="text-right text-sm tabular-nums text-foreground">
                       {row.grain === "serial" && row.serialNumber ? (
@@ -451,45 +458,47 @@ export function DispatchedContent() {
         <DispatchedKitDrawer key={itemId} itemId={itemId} onClose={closeKit} onChanged={() => setReload((value) => value + 1)} />
       ) : null}
 
-      <BatchLinesDrawer
-        open={viewing != null}
-        onOpenChange={(open) => {
-          if (!open) setViewing(null)
-        }}
-        title={viewing ? `${viewing.movement ?? "Dispatch"} — ${viewing.productName}` : "Dispatch"}
-        description={
-          viewing ? `${viewing.lines.length} item${viewing.lines.length === 1 ? "" : "s"}` : null
-        }
-        detail={
-          viewing
-            ? {
-                movement: viewing.movement ?? "—",
-                client: viewing.clientDisplay,
-                date: viewing.dateOut ? (
-                  <BusinessDateLabel date={viewing.dateOut} createdAt={viewing.recordedAt} timeZone={timeZone} />
-                ) : (
-                  "—"
-                ),
-                invoice: viewing.invoiceNumber || "—",
-                deliveryNote: viewing.deliveryNoteUrl ? (
-                  <SignedStorageLink path={viewing.deliveryNoteUrl} className="text-brand hover:underline">
-                    View
-                  </SignedStorageLink>
-                ) : (
-                  "—"
-                ),
-                recordedBy: viewing.recordedBy || "—",
-              }
-            : undefined
-        }
-        lines={(viewing?.lines ?? []).map((line) => ({
-          serialNumber: line.serialNumber,
-          status: line.status,
-          assignedTo: line.assignedTo ?? undefined,
-          stockPool: poolBySerial.get(line.serialNumber),
-        }))}
-        showInvoice={showFinancials}
-      />
+      {viewing ? (
+        <MovementBatchDrawer
+          open
+          onOpenChange={(open) => {
+            if (!open) setViewing(null)
+          }}
+          batchKey={viewing.batchKey}
+          timeZone={timeZone}
+          showFinancials={showFinancials}
+          onReload={() => setReload((value) => value + 1)}
+          seed={{
+            batchKey: viewing.batchKey,
+            batchId: requestLookupBatchId(viewing.batchKey) ?? "",
+            movementType: viewing.movement ?? "Sale",
+            date: viewing.dateOut ?? "",
+            recordedAt: viewing.recordedAt ?? undefined,
+            count: viewing.lines.length,
+            productLabel: viewing.productName,
+            clientDisplay: viewing.clientDisplay,
+            deliveryNoteUrl: viewing.deliveryNoteUrl ?? undefined,
+            recordedBy: viewing.recordedBy ?? undefined,
+            lines: viewing.lines.map((line) => ({
+              serialNumber: line.serialNumber,
+              status: line.status,
+              assignedTo: line.assignedTo ?? undefined,
+              stockPool: poolBySerial.get(line.serialNumber),
+            })),
+            request:
+              viewing.requestId && viewing.requestNumber
+                ? {
+                    batchId: requestLookupBatchId(viewing.batchKey) ?? "",
+                    requestId: viewing.requestId,
+                    requestNumber: viewing.requestNumber,
+                    requesterName: viewing.requestedBy ?? "",
+                    atlasTaskUrl: viewing.atlasTaskUrl,
+                  }
+                : null,
+            timeline: [],
+          }}
+        />
+      ) : null}
       <ResolveHoldingsDialog
         open={resolveOpen}
         kits={resolveKits}

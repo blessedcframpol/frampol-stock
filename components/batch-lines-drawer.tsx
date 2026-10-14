@@ -37,6 +37,12 @@ export type BatchDrawerDetail = {
   invoice?: React.ReactNode
   deliveryNote?: React.ReactNode
   recordedBy?: React.ReactNode
+  /** Request link or "Direct — no request". */
+  request?: React.ReactNode
+  requestedBy?: React.ReactNode
+  atlasTask?: React.ReactNode
+  /** When true, show request / requested-by / Atlas even if values are empty. */
+  showRequest?: boolean
   extra?: BatchDrawerFact[]
 }
 
@@ -136,6 +142,15 @@ export function BatchLinesDrawer({
                 </Fact>
               ) : null}
               {showMeta ? <Fact label="Delivery note">{detail.deliveryNote || "—"}</Fact> : null}
+              {showMeta || detail.showRequest ? (
+                <Fact label="Request">{detail.request || "—"}</Fact>
+              ) : null}
+              {showMeta || detail.showRequest ? (
+                <Fact label="Requested by">{detail.requestedBy || "—"}</Fact>
+              ) : null}
+              {showMeta || detail.showRequest ? (
+                <Fact label="Atlas task">{detail.atlasTask || "—"}</Fact>
+              ) : null}
               {showMeta ? <Fact label="Recorded by">{detail.recordedBy || "—"}</Fact> : null}
               {detail.extra?.map((fact) => (
                 <Fact key={fact.label} label={fact.label} span={fact.span}>

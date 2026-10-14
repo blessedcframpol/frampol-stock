@@ -29,6 +29,10 @@ export type DispatchedRow = {
   recordedAt: string | null
   deliveryNoteUrl: string | null
   recordedBy: string | null
+  requestId: string | null
+  requestNumber: string | null
+  requestedBy: string | null
+  atlasTaskUrl: string | null
   lines: DispatchedLine[]
 }
 
@@ -93,6 +97,10 @@ function parseRow(value: Json): DispatchedRow & { createdBy: string | null } {
     recordedAt: typeof value.recordedAt === "string" ? value.recordedAt : null,
     deliveryNoteUrl: typeof value.deliveryNoteUrl === "string" ? value.deliveryNoteUrl : null,
     recordedBy: null,
+    requestId: typeof value.requestId === "string" ? value.requestId : null,
+    requestNumber: typeof value.requestNumber === "string" ? value.requestNumber : null,
+    requestedBy: typeof value.requestedBy === "string" ? value.requestedBy : null,
+    atlasTaskUrl: typeof value.atlasTaskUrl === "string" ? value.atlasTaskUrl : null,
     lines,
     createdBy: typeof value.createdBy === "string" ? value.createdBy : null,
   }

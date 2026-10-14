@@ -57,6 +57,11 @@ export type TransactionBatchSummary = {
   reversedByBatchId?: string | null
   /** Display names of the people who recorded the member rows. */
   recordedBy?: string
+  /** Stock request behind this issued batch, when linked via transactions.request_id. */
+  requestId?: string
+  requestNumber?: string
+  requestedBy?: string
+  atlasTaskUrl?: string | null
   /** Member rows already loaded for this page. */
   lines?: TransactionBatchLine[]
 }

@@ -2,7 +2,12 @@
 
 import { useEffect, useState } from "react"
 import { toast } from "sonner"
+import { batchRequestDrawerFacts } from "@/components/batch-request-facts"
 import { BatchLinesDrawer } from "@/components/batch-lines-drawer"
+import {
+  loadBatchRequestContext,
+  type BatchRequestContext,
+} from "@/lib/batch-request-context"
 import { ChangeGroupDialog } from "@/components/change-group-dialog"
 import { ReturnPoolChoice } from "@/components/return-pool-choice"
 import { PendingInspectionCaseLink } from "@/components/pending-inspection-case-link"
@@ -80,6 +85,7 @@ export function DispatchedKitDrawer({
   const [cancelTarget, setCancelTarget] = useState<HoldingExtensionRow | null>(null)
   const [cancelReason, setCancelReason] = useState("")
   const [cancelling, setCancelling] = useState(false)
+  const [requestContext, setRequestContext] = useState<BatchRequestContext | null | undefined>(undefined)
   const canCancel = canCancelHoldingExtension(role)
 
   useEffect(() => {
@@ -149,6 +155,40 @@ export function DispatchedKitDrawer({
   }, [itemId, extensionReload])
 
   const item = storeItem ?? fetched
+
+  useEffect(() => {
+    let cancelled = false
+    const serial = item?.serialNumber
+    if (!serial) {
+      setRequestContext(undefined)
+      return
+    }
+    void (async () => {
+      const supabase = getSupabaseClient()
+      const { data, error } = await supabase
+        .from("transactions")
+        .select("id, batch_id")
+        .eq("serial_number", serial)
+        .in("type", ["Sale", "POC Out", "Rentals", "Dispose"])
+        .order("date", { ascending: false })
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      if (cancelled) return
+      if (error || !data) {
+        setRequestContext(null)
+        return
+      }
+      const batchId = data.batch_id?.trim() || data.id
+      const map = await loadBatchRequestContext(supabase, [batchId])
+      if (cancelled) return
+      setRequestContext(map.get(batchId) ?? null)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [item?.serialNumber])
+
   const status = statusOverride ?? item?.status ?? ""
   const rentalSale = item
     ? transactions.reduce<(typeof transactions)[number] | null>((best, txn) => {
@@ -265,6 +305,8 @@ export function DispatchedKitDrawer({
                 movement: status || "—",
                 client: item.client || "—",
                 date: returnDate ? formatBusinessDate(returnDate) : "—",
+                showRequest: true,
+                ...batchRequestDrawerFacts(requestContext === undefined ? null : requestContext),
                 extra: [
                   { label: "Due", value: returnDate ? formatReturnAge(returnDate, today) : "—" },
                   ...(rentalDays != null ? [{ label: "Rental days", value: String(rentalDays) }] : []),

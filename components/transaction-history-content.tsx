@@ -15,7 +15,8 @@ import { EmptyState } from "@/components/fs/empty-state"
 import { FilterChip } from "@/components/fs/filter-chip"
 import { ListToolbar, ListToolbarSearch } from "@/components/fs/list-toolbar"
 import { Pagination } from "@/components/fs/pagination"
-import { BatchLinesDrawer, type BatchDrawerLine } from "@/components/batch-lines-drawer"
+import { MovementBatchDrawer } from "@/components/movement-batch-drawer"
+import { requestLookupBatchId } from "@/lib/batch-request-context"
 import { KitSerial } from "@/components/kit-serial"
 import {
   DropdownMenu,
@@ -36,7 +37,6 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { History, Undo2, Loader2, Download, MoreHorizontal } from "lucide-react"
 import { INTERNAL_LOCATIONS, isInternalLocation } from "@/lib/data"
-import { InvoiceRecordPanel } from "@/components/invoice-record-panel"
 import { useInventoryStore } from "@/lib/inventory-store"
 import { fetchTransactionBatchPage, type TransactionBatchSummary } from "@/lib/transaction-batches"
 import {
@@ -439,7 +439,7 @@ export function TransactionHistoryContent() {
             type="search"
             value={pageSearch}
             onChange={(event) => setPageSearch(event.target.value)}
-            placeholder="Search by serial, product, client, invoice, or batch..."
+            placeholder="Search by serial, product, client, invoice, batch, request, or requester..."
             aria-label="Search transaction history"
           />
         }
@@ -508,6 +508,7 @@ export function TransactionHistoryContent() {
                   <TableHead>Movement</TableHead>
                   <TableHead>Product</TableHead>
                   <TableHead>Client</TableHead>
+                  <TableHead>Requested by</TableHead>
                   <TableHead className="text-right">Items</TableHead>
                   {showFinancials ? <TableHead>Invoice</TableHead> : null}
                   <TableHead>Delivery note</TableHead>
@@ -585,6 +586,12 @@ export function TransactionHistoryContent() {
                           entry.clientDisplay
                         )}
                       </TableCell>
+                      <TableCell
+                        className="max-w-[140px] truncate text-sm text-muted-foreground"
+                        title={entry.requestedBy || undefined}
+                      >
+                        {entry.requestedBy || ""}
+                      </TableCell>
                       <TableCell className="text-right text-sm tabular-nums text-foreground">
                         {formatCount(entry.count)}
                       </TableCell>
@@ -643,122 +650,79 @@ export function TransactionHistoryContent() {
             </Table>
       )}
 
-      <BatchLinesDrawer
-        open={!!viewingBatch}
-        onOpenChange={(open) => {
-          if (!open) setViewingBatch(null)
-        }}
-        title={
-          viewingBatch
-            ? viewingBatch.movementType === "Reversal" && viewingBatch.originalMovementType
-              ? `Reversal of ${viewingBatch.originalMovementType} — ${viewingBatch.productLabel}`
-              : `${viewingBatch.movementType ?? "—"} — ${viewingBatch.productLabel}`
-            : "Batch items"
-        }
-        description={
-          viewingBatch
-            ? `${viewingBatch.count} item${viewingBatch.count === 1 ? "" : "s"}`
-            : null
-        }
-        detail={viewingBatch ? {
-          movement:
-            viewingBatch.movementType === "Reversal" && viewingBatch.originalMovementType
-              ? `Reversal of ${viewingBatch.originalMovementType}`
-              : viewingBatch.movementType ?? "—",
-          client: viewingBatch.clientId ? (
-            <Link
-              href={`/clients/${viewingBatch.clientId}`}
-              className="text-brand hover:underline"
-            >
-              {viewingBatch.clientDisplay !== "—" ? viewingBatch.clientDisplay : "View client"}
-            </Link>
-          ) : (
-            viewingBatch.clientDisplay
-          ),
-          date: (
-            <BusinessDateLabel date={viewingBatch.date} createdAt={viewingBatch.recordedAt} timeZone={timeZone} />
-          ),
-          invoice: viewingBatch.invoiceBatchId ? (
-            <InvoiceRecordPanel
-              batchId={viewingBatch.invoiceBatchId}
-              state={viewingBatch.invoiceState}
-              timeZone={timeZone}
-              onChanged={() => setReloadToken((value) => value + 1)}
-            />
-          ) : (
-            viewingBatch.invoiceNumber || "—"
-          ),
-          deliveryNote: viewingBatch.deliveryNoteUrl ? (
-            <SignedStorageLink path={viewingBatch.deliveryNoteUrl} className="text-brand hover:underline">
-              View
-            </SignedStorageLink>
-          ) : (
-            "—"
-          ),
-          recordedBy: viewingBatch.recordedBy || "—",
-          extra: [
-            viewingBatch.fromLocation
-              ? { label: "From", value: viewingBatch.fromLocation }
-              : null,
-            viewingBatch.toLocation ? { label: "To", value: viewingBatch.toLocation } : null,
-            viewingBatch.movementType === "Dispose" && viewingBatch.disposalReasonSummary
-              ? { label: "Disposal reason", value: viewingBatch.disposalReasonSummary }
-              : null,
-            viewingBatch.movementType === "Dispose" && viewingBatch.authorisedBySummary
-              ? { label: "Authorised by", value: viewingBatch.authorisedBySummary }
-              : null,
-            viewingBatch.rentalPeriod
-              ? { label: "Rental", value: viewingBatch.rentalPeriod, span: 2 as const }
-              : null,
-            viewingBatch.rentalDays != null
-              ? { label: "Rental days", value: String(viewingBatch.rentalDays) }
-              : null,
-            viewingBatch.notesSummary
-              ? {
-                  label: viewingBatch.movementType === "Reversal" ? "Reversal reason" : "Notes",
-                  value: viewingBatch.notesSummary,
-                  span: 2 as const,
-                }
-              : null,
-            viewingBatch.movementType === "Reversal" && viewingBatch.reversesBatchId
-              ? {
-                  label: "Reversed batch",
-                  value: <span className="font-mono">{viewingBatch.reversesBatchId}</span>,
-                  span: 2 as const,
-                }
-              : null,
-          ].filter((fact) => fact != null),
-        } : undefined}
-        notice={viewingBatch && viewingBatch.isReversed && viewingBatch.movementType !== "Reversal" ? (
-            <div className="mx-4 mb-3 space-y-1 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
-              <p className="font-medium text-foreground">{viewingBatch.reversalKind === "void" ? "Voided" : "Reversed"}</p>
-              {viewingBatch.reversedAt && (
-                <p className="text-xs text-muted-foreground">
-                  {formatRecordedAt(viewingBatch.reversedAt, null, timeZone)}
-                  {viewingBatch.reversedByName ? ` by ${viewingBatch.reversedByName}` : ""}
-                </p>
-              )}
-              {viewingBatch.reversedByBatchId ? (
-                <button
-                  type="button"
-                  className="text-sm text-brand hover:underline"
-                  onClick={() => {
-                    setPageSearch(viewingBatch.reversedByBatchId ?? "")
-                    setViewingBatch(null)
-                  }}
-                >
-                  View reversal
-                </button>
-              ) : null}
-              {viewingBatch.reversalReason && (
-                <p className="text-muted-foreground whitespace-pre-wrap">{viewingBatch.reversalReason}</p>
-              )}
-            </div>
-          ) : null}
-        lines={viewingBatch ? drawerLines(viewingBatch, poolBySerial) : []}
-        showInvoice={showFinancials}
-        dimmed={viewingBatch?.isReversed}
-      />
+      {viewingBatch ? (
+        <MovementBatchDrawer
+          open
+          onOpenChange={(open) => {
+            if (!open) setViewingBatch(null)
+          }}
+          batchKey={viewingBatch.batchKey}
+          timeZone={timeZone}
+          showFinancials={showFinancials}
+          isReversed={viewingBatch.isReversed}
+          reversalKind={viewingBatch.reversalKind}
+          onReload={() => setReloadToken((value) => value + 1)}
+          onReverse={
+            reversalAffordances({
+              role,
+              isReversed: viewingBatch.isReversed,
+              movementType: viewingBatch.movementType,
+              reverseBatchId: viewingBatch.reverseBatchId,
+              reversesBatchId: viewingBatch.reversesBatchId,
+              reversedByBatchId: viewingBatch.reversedByBatchId,
+            }).showReverse
+              ? () => void openReverse(viewingBatch)
+              : undefined
+          }
+          onRestore={
+            reversalAffordances({
+              role,
+              isReversed: viewingBatch.isReversed,
+              movementType: viewingBatch.movementType,
+              reverseBatchId: viewingBatch.reverseBatchId,
+              reversesBatchId: viewingBatch.reversesBatchId,
+              reversedByBatchId: viewingBatch.reversedByBatchId,
+            }).showRestore
+              ? () => void openRestore(viewingBatch)
+              : undefined
+          }
+          seed={{
+            batchKey: viewingBatch.batchKey,
+            batchId: requestLookupBatchId(viewingBatch.batchKey) ?? viewingBatch.reverseBatchId ?? "",
+            movementType: viewingBatch.movementType,
+            originalMovementType: viewingBatch.originalMovementType,
+            date: viewingBatch.date,
+            recordedAt: viewingBatch.recordedAt,
+            count: viewingBatch.count,
+            productLabel: viewingBatch.productLabel,
+            clientDisplay: viewingBatch.clientDisplay,
+            clientId: viewingBatch.clientId,
+            invoiceState: viewingBatch.invoiceState,
+            invoiceBatchId: viewingBatch.invoiceBatchId,
+            deliveryNoteUrl: viewingBatch.deliveryNoteUrl,
+            notesSummary: viewingBatch.notesSummary,
+            recordedBy: viewingBatch.recordedBy,
+            lines: drawerLines(viewingBatch, poolBySerial).map((line) => ({
+              serialNumber: line.serialNumber,
+              stockPool: line.stockPool,
+            })),
+            request:
+              viewingBatch.requestId && viewingBatch.requestNumber
+                ? {
+                    batchId:
+                      viewingBatch.reverseBatchId ??
+                      requestLookupBatchId(viewingBatch.batchKey) ??
+                      "",
+                    requestId: viewingBatch.requestId,
+                    requestNumber: viewingBatch.requestNumber,
+                    requesterName: viewingBatch.requestedBy ?? "",
+                    atlasTaskUrl: viewingBatch.atlasTaskUrl ?? null,
+                  }
+                : null,
+            timeline: [],
+          }}
+        />
+      ) : null}
 
       <Dialog open={!!reverseTarget} onOpenChange={(open) => { if (!open) closeReverse() }}>
         <DialogContent className="max-w-md">
@@ -943,8 +907,8 @@ export function TransactionHistoryContent() {
 
 function drawerLines(
   batch: TransactionBatchSummary,
-  poolBySerial: Map<string, string | undefined>
-): BatchDrawerLine[] {
+  poolBySerial: Map<string, string | undefined>,
+): { serialNumber: string; stockPool?: string | null }[] {
   const source =
     batch.lines && batch.lines.length > 0
       ? batch.lines

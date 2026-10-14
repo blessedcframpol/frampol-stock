@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { apiErrorResponse } from "@/lib/api-error-response"
 import { getTransactionOrderGroupKey } from "@/lib/client-transactions"
 import { collapseClientLabel, formatClientLabel } from "@/lib/client-label"
+import { loadBatchRequestContext, requestLookupBatchId } from "@/lib/batch-request-context"
 import { loadProfileLabels } from "@/lib/profile-labels"
 import { groupTransactionsIntoBatches, type TransactionBatchLine } from "@/lib/transaction-batches"
 import { displayedInvoice, invoiceBatchKey } from "@/lib/invoices"
@@ -233,6 +234,11 @@ export async function GET(request: Request) {
       if (!names.includes(name)) names.push(name)
       recordedByKey.set(key, names)
     }
+    const requestBatchIds = page.batches.map((batch) => {
+      const summary = byKey.get(batch.batchKey)
+      return requestLookupBatchId(batch.batchKey, summary?.reverseBatchId)
+    })
+    const requestByBatch = await loadBatchRequestContext(supabase, requestBatchIds)
     const batches = page.batches.map((batch) => {
       const summary = byKey.get(batch.batchKey)
       if (!summary) throw new Error(`Batch ${batch.batchKey} was missing after grouping`)
@@ -243,11 +249,17 @@ export async function GET(request: Request) {
       }
       const recordedBy = recordedByKey.get(batch.batchKey)?.join(", ")
       const fromDirectory = summary.clientId ? clientLabels.get(summary.clientId) : undefined
+      const requestKey = requestLookupBatchId(batch.batchKey, summary.reverseBatchId)
+      const request = requestKey ? requestByBatch.get(requestKey) : undefined
       return {
         ...summary,
         clientDisplay: fromDirectory || collapseClientLabel(summary.clientDisplay) || summary.clientDisplay,
         reversedByBatchId: batch.reversedByBatchId,
         recordedBy,
+        requestId: request?.requestId,
+        requestNumber: request?.requestNumber,
+        requestedBy: request?.requesterName,
+        atlasTaskUrl: request?.atlasTaskUrl ?? null,
         lines: linesByKey.get(batch.batchKey) ?? [],
       }
     })

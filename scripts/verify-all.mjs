@@ -39,6 +39,9 @@ const SUITE = [
   { id: "087", file: "scripts/verify-087-rh1-stock-availability.mjs" },
   { id: "088", file: "scripts/verify-088-hf1-requester-flow.mjs" },
   { id: "089", file: "scripts/verify-089-mv1-archive-movement.mjs" },
+  { id: "090", file: "scripts/verify-090-rq7-batch-request-context.mjs" },
+  { id: "091", file: "scripts/verify-091-rq7b-batch-drawer-timeline.mjs" },
+  { id: "092", file: "scripts/verify-092-rq7c-batch-request-context-lockdown.mjs" },
   { id: "movement", file: "scripts/verify-movement-transitions.mjs" },
 ]
 

@@ -75,6 +75,7 @@ import { toast } from "sonner"
 import { toastFromCaughtError } from "@/lib/toast-reportable-error"
 import { isAuthFailure, SESSION_EXPIRED_MESSAGE } from "@/lib/unauthorized"
 import { ledgerTextDiffersFromClient } from "@/lib/client-transactions"
+import { BatchRequestSummary } from "@/components/batch-request-facts"
 import { InvoiceRecordPanel } from "@/components/invoice-record-panel"
 import { displayedInvoice, invoiceBatchKey } from "@/lib/invoices"
 import { formatCount } from "@/lib/format-display"
@@ -809,6 +810,10 @@ export default function ClientDetailPage() {
           <div className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-auto overscroll-y-contain [scrollbar-gutter:stable]">
             {selectedConsignment && (
               <div className="space-y-4 pb-6 pl-2 sm:pl-3 pr-px max-w-full">
+                <div className="flex flex-wrap gap-2 text-sm">
+                  <span className="text-muted-foreground">Request:</span>
+                  <BatchRequestSummary ctx={selectedConsignment.transactions[0]?.requestContext} />
+                </div>
                 {showFinancials && (
                   <div className="flex flex-wrap gap-2 text-sm">
                     <span className="text-muted-foreground">Invoice:</span>
@@ -878,6 +883,12 @@ export default function ClientDetailPage() {
                       createdAt={selectedTransaction.createdAt}
                       timeZone={timeZone}
                     />
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-muted-foreground text-xs font-medium">Request</dt>
+                  <dd className="mt-0.5">
+                    <BatchRequestSummary ctx={selectedTransaction.requestContext} />
                   </dd>
                 </div>
                 {showFinancials && (selectedTransaction.invoiceState || selectedTransaction.type === "Sale" || selectedTransaction.type === "Rentals") ? (

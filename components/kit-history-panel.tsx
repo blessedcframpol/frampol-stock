@@ -9,6 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { BatchRequestSummary } from "@/components/batch-request-facts"
 import { fetchKitHistory, fetchKitHistoryBySerial, type KitHistory } from "@/lib/kit-history"
 import { displayInvoiceNumber } from "@/lib/invoices"
 
@@ -117,6 +118,11 @@ export function KitHistoryPanel({
                       {entry.reversed ? " · Reversed" : ""}
                     </p>
                     {entry.detail ? <p className="mt-1 text-sm text-foreground">{entry.detail}</p> : null}
+                    {"requestContext" in entry ? (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        <BatchRequestSummary ctx={entry.requestContext} />
+                      </p>
+                    ) : null}
                     {entry.invoice ? (
                       <p className="mt-1 text-xs text-muted-foreground">
                         Invoice {entry.invoice.status}
