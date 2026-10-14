@@ -2,12 +2,20 @@
 
 import { usePathname } from "next/navigation"
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react"
+import { toast } from "sonner"
 import {
   fetchUnreadNotifications,
   markNotificationsRead,
   type AppNotificationRow,
 } from "@/lib/supabase/stock-requests-db"
 import { getSupabaseClient } from "@/lib/supabase/client"
+import { useAuth } from "@/lib/auth-context"
+import {
+  announceNotificationsInbox,
+  announceRequestQueuesRefresh,
+  notificationHref,
+  showBrowserNotification,
+} from "@/lib/notifications-live"
 
 export type { AppNotificationRow }
 
@@ -98,15 +106,15 @@ export function useInboxNotifications(): {
   markRead: (ids: string[]) => Promise<void>
 } {
   const pathname = usePathname()
+  const { user } = useAuth()
   const [unread, setUnread] = useState<AppNotificationRow[]>([])
   const [loading, setLoading] = useState(true)
   const { muted, setMuted } = useNotificationsMuted()
-  const previousCount = useRef<number | null>(null)
+  const previousIds = useRef<Set<string> | null>(null)
 
   const refetch = useCallback(async () => {
     const sb = getSb()
-    if (!sb) {
-      await Promise.resolve()
+    if (!sb || !user?.id) {
       setUnread([])
       setLoading(false)
       return
@@ -114,40 +122,18 @@ export function useInboxNotifications(): {
     try {
       const rows = await fetchUnreadNotifications(sb)
       setUnread(rows)
+      announceNotificationsInbox()
     } catch {
       setUnread([])
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [user?.id])
 
   useEffect(() => {
-    let cancelled = false
-    void (async () => {
-      const sb = getSb()
-      if (!sb) {
-        await Promise.resolve()
-        if (!cancelled) {
-          setUnread([])
-          setLoading(false)
-        }
-        return
-      }
-      try {
-        const rows = await fetchUnreadNotifications(sb)
-        if (!cancelled) setUnread(rows)
-      } catch {
-        if (!cancelled) setUnread([])
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [pathname])
+    void refetch()
+  }, [pathname, refetch])
 
-  // New messages arrive while the page is open, so keep checking.
   useEffect(() => {
     const id = window.setInterval(() => {
       if (document.visibilityState === "visible") void refetch()
@@ -156,27 +142,84 @@ export function useInboxNotifications(): {
       if (document.visibilityState === "visible") void refetch()
     }
     document.addEventListener("visibilitychange", onVisible)
+    window.addEventListener("focus", onVisible)
     return () => {
       window.clearInterval(id)
       document.removeEventListener("visibilitychange", onVisible)
+      window.removeEventListener("focus", onVisible)
     }
   }, [refetch])
 
-  // Beep once per increase. The first load only records the baseline.
+  useEffect(() => {
+    const sb = getSb()
+    const uid = user?.id
+    if (!sb || !uid) return
+
+    const channel = sb
+      .channel(`notifications:${uid}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "notifications",
+          filter: `user_id=eq.${uid}`,
+        },
+        () => {
+          void refetch()
+          announceRequestQueuesRefresh()
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "notifications",
+          filter: `user_id=eq.${uid}`,
+        },
+        () => {
+          void refetch()
+        },
+      )
+      .subscribe((status) => {
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          void refetch()
+        }
+      })
+
+    return () => {
+      void sb.removeChannel(channel)
+    }
+  }, [user?.id, refetch])
+
+  // Beep on poll-detected new rows (fallback when realtime is down).
   const count = unread.length
   useEffect(() => {
     if (loading) return
-    const previous = previousCount.current
-    previousCount.current = count
-    if (previous !== null && count > previous && !muted) playNotificationBeep()
-  }, [count, loading, muted])
+    const ids = new Set(unread.map((r) => r.id))
+    const prev = previousIds.current
+    previousIds.current = ids
+    if (prev === null) return
+    const added = unread.filter((r) => !prev.has(r.id))
+    if (added.length === 0) return
+    if (!muted) playNotificationBeep()
+    for (const row of added.slice(0, 3)) {
+      toast.message(row.title, { description: row.body ?? undefined })
+      showBrowserNotification(row.title, row.body ?? undefined, notificationHref(row))
+    }
+    announceRequestQueuesRefresh()
+  }, [unread, loading, muted])
 
-  const markRead = useCallback(async (ids: string[]) => {
-    const sb = getSb()
-    if (!sb || ids.length === 0) return
-    await markNotificationsRead(sb, ids)
-    await refetch()
-  }, [refetch])
+  const markRead = useCallback(
+    async (ids: string[]) => {
+      const sb = getSb()
+      if (!sb || ids.length === 0) return
+      await markNotificationsRead(sb, ids)
+      await refetch()
+    },
+    [refetch],
+  )
 
   return { unread, count, loading, muted, setMuted, refetch, markRead }
 }

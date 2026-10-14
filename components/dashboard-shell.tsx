@@ -20,7 +20,6 @@ import {
   Menu,
   Moon,
   Sun,
-  Clock,
   History,
   FileText,
   Loader2,
@@ -52,7 +51,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Popover, PopoverContent, PopoverTrigger, PopoverAnchor } from "@/components/ui/popover"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useIsClient } from "@/hooks/use-is-client"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useState, useMemo, useEffect } from "react"
@@ -83,7 +81,7 @@ import {
 } from "@/lib/permissions"
 import { useInboxNotifications } from "@/hooks/use-inbox-notifications"
 import { useAlertFeed } from "@/hooks/use-alert-feed"
-import { formatReturnAge } from "@/lib/alerts"
+import { notificationHref } from "@/lib/notifications-live"
 import { useClients } from "@/lib/supabase/clients-db"
 import { useSearchUsers } from "@/lib/supabase/search-users"
 import { runSearch } from "@/lib/search"
@@ -136,13 +134,22 @@ const NAV_ICONS: Record<string, NavIcon> = {
 }
 
 /** Main nav for a role, built from the single role → pages map. */
-function buildNavItems(role: string | null | undefined, notificationBadge = 0): NavItem[] {
+function buildNavItems(
+  role: string | null | undefined,
+  notificationBadge = 0,
+  alertBadge = 0,
+): NavItem[] {
   const r = role as AppRole | null | undefined
   return roleMenuItems(r).map((entry) => ({
     href: entry.href,
     label: entry.label,
     icon: NAV_ICONS[entry.href] ?? MessageSquare,
-    badge: entry.href === "/notifications" ? notificationBadge : undefined,
+    badge:
+      entry.href === "/notifications"
+        ? notificationBadge
+        : entry.href === "/alerts"
+          ? alertBadge
+          : undefined,
     children: entry.href === "/inventory" ? inventoryChildren : undefined,
   }))
 }
@@ -557,15 +564,20 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const {
     unread: inboxUnread,
     count: inboxCount,
+    loading: inboxLoading,
     markRead: markInboxRead,
     muted: notificationsMuted,
     setMuted: setNotificationsMuted,
   } = useInboxNotifications()
+  const alertCounts = feed?.counts
+  const totalAlertCount = alertCounts?.all ?? 0
+  const alertCount = mounted && !previewRole ? totalAlertCount : 0
   // Preview cannot load another role's inbox/alerts from the DB — hide badges while previewing.
   const navBadgeShown = mounted && !previewRole ? inboxCount : 0
+  const alertNavBadge = alertCount
   const filteredNavItems = useMemo(
-    () => filterNavByRole(buildNavItems(role, navBadgeShown), role),
-    [role, navBadgeShown]
+    () => filterNavByRole(buildNavItems(role, navBadgeShown, alertNavBadge), role),
+    [role, navBadgeShown, alertNavBadge]
   )
   const navHrefs = useMemo(() => filteredNavItems.map((n) => n.href), [filteredNavItems])
 
@@ -608,16 +620,8 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
     if (searchSeeAllHref) router.push(searchSeeAllHref)
     setMobileSearchOpen(false)
   }
-  const alertCounts = feed?.counts
-  const totalAlertCount = alertCounts?.all ?? 0
-  // Use alert count only after mount to avoid hydration mismatch (store may differ server vs client)
-  const alertCount = mounted && !previewRole ? totalAlertCount : 0
-  const headerBellCount = mounted && !previewRole ? alertCount + inboxCount : 0
+  const headerBellCount = mounted && !previewRole ? inboxCount : 0
   const showSettings = canAccessSettings(role)
-  // Roles without the alerts page get the notifications page from the bell instead.
-  const alertsLink = roleCanAccessPath(role, "/alerts")
-    ? { href: "/alerts", label: "View all alerts" }
-    : { href: "/notifications", label: "View all notifications" }
 
   async function handleSignOut() {
     await signOut()
@@ -892,18 +896,22 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                   <span className="sr-only">Notifications</span>
                 </Button>
               </PopoverTrigger>
-              <PopoverContent align="end" className="w-[min(100vw-2rem,480px)] p-0 overflow-hidden" sideOffset={8}>
-                <div className="flex flex-col max-h-[min(400px,80vh)] min-w-0">
-                  <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
+              <PopoverContent align="end" className="w-[min(100vw-2rem,400px)] p-0 overflow-hidden" sideOffset={8}>
+                <div className="flex flex-col max-h-[min(420px,80vh)] min-w-0">
+                  <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-border shrink-0">
                     <h3 className="text-sm font-semibold text-foreground">Notifications</h3>
-                    <div className="flex items-center gap-2">
-                      {(alertCount > 0 || inboxCount > 0) && (
-                        <span className="text-xs text-muted-foreground">
-                          {inboxCount > 0 && `${inboxCount} message${inboxCount !== 1 ? "s" : ""}`}
-                          {inboxCount > 0 && alertCount > 0 && " · "}
-                          {alertCount > 0 && `${alertCount} alert${alertCount !== 1 ? "s" : ""}`}
-                        </span>
-                      )}
+                    <div className="flex items-center gap-1">
+                      {inboxCount > 0 ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 text-xs text-muted-foreground hover:text-foreground"
+                          onClick={() => void markInboxRead(inboxUnread.map((n) => n.id))}
+                        >
+                          Mark all read
+                        </Button>
+                      ) : null}
                       <Button
                         type="button"
                         variant="ghost"
@@ -918,178 +926,39 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                       </Button>
                     </div>
                   </div>
-                  {inboxUnread.length > 0 && (
-                    <div className="border-b border-border px-2 py-2 space-y-1 shrink-0 max-h-[140px] overflow-y-auto">
-                      <p className="px-2 text-[11px] font-medium text-muted-foreground uppercase tracking-wide">Messages</p>
-                      {inboxUnread.slice(0, 6).map((n) => {
-                        const meta = n.metadata as {
-                          request_id?: string
-                          href?: string
-                          profile_id?: string
-                        } | null
-                        const href =
-                          (typeof meta?.href === "string" && meta.href.startsWith("/")
-                            ? meta.href
-                            : null) ||
-                          (meta?.request_id ? `/requests/${meta.request_id}` : null) ||
-                          (n.type === "pending_role" ? "/users" : "/requests")
-                        return (
-                          <Link
-                            key={n.id}
-                            href={href}
-                            className="block rounded-md px-2 py-2 text-sm hover:bg-muted/80 min-h-11"
-                            onClick={() => void markInboxRead([n.id])}
-                          >
-                            <span className="font-medium text-foreground">{n.title}</span>
-                            {n.body && <span className="block text-xs text-muted-foreground mt-0.5">{n.body}</span>}
-                          </Link>
-                        )
-                      })}
-                    </div>
-                  )}
-                  {alertCount === 0 ? (
-                    <>
-                      <div className="px-4 py-8 text-center text-sm text-muted-foreground flex-1">
-                        {inboxCount > 0
-                          ? "No inventory alerts. See request messages above."
-                          : "No alerts or messages. You're all set."}
+                  <div className="overflow-y-auto flex-1 min-h-0 py-1">
+                    {inboxLoading ? (
+                      <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
+                        <Loader2 className="size-4 animate-spin" />
+                        Loading…
                       </div>
-                      <div className="border-t border-border px-4 py-2 shrink-0 flex flex-col gap-1">
-                        <Button variant="ghost" size="sm" className="w-full justify-center text-foreground" asChild>
-                          <Link href={alertsLink.href}>{alertsLink.label}</Link>
-                        </Button>
-                        {inboxCount > 0 && (
-                          <Button variant="ghost" size="sm" className="w-full justify-center text-foreground" asChild>
-                            <Link href="/requests">View requests</Link>
-                          </Button>
-                        )}
-                      </div>
-                    </>
-                  ) : (
-                    <Tabs defaultValue="all" className="flex flex-col flex-1 min-h-0">
-                      <TabsList className="w-full min-w-0 justify-start rounded-none border-b border-border bg-transparent p-0 h-auto gap-0 mx-0 mt-2 shrink-0 overflow-x-auto flex-nowrap [&::-webkit-scrollbar]:h-1 px-2 sm:px-4">
-                        <TabsTrigger value="all" className="rounded-none border-b-2 border-transparent data-[state=active]:border-brand data-[state=active]:bg-transparent px-2 sm:px-3 py-2 gap-1 shrink-0">
-                          All
-                          <Badge variant="secondary" className="h-5 min-w-5 px-1 text-[10px] font-semibold">
-                            {alertCount}
-                          </Badge>
-                        </TabsTrigger>
-                        <TabsTrigger value="lowStock" className="rounded-none border-b-2 border-transparent data-[state=active]:border-brand data-[state=active]:bg-transparent px-2 sm:px-3 py-2 gap-1 shrink-0">
-                          Low stock
-                          {(alertCounts?.lowStock ?? 0) > 0 && (
-                            <Badge variant="secondary" className="h-5 min-w-5 px-1 text-[10px] font-semibold">
-                              {alertCounts?.lowStock}
-                            </Badge>
-                          )}
-                        </TabsTrigger>
-                        <TabsTrigger value="overdue" className="rounded-none border-b-2 border-transparent data-[state=active]:border-brand data-[state=active]:bg-transparent px-2 sm:px-3 py-2 gap-1 shrink-0">
-                          Overdue
-                          {(alertCounts?.overdue ?? 0) > 0 && (
-                            <Badge variant="secondary" className="h-5 min-w-5 px-1 text-[10px] font-semibold">
-                              {alertCounts?.overdue}
-                            </Badge>
-                          )}
-                        </TabsTrigger>
-                        <TabsTrigger value="dueSoon" className="rounded-none border-b-2 border-transparent data-[state=active]:border-brand data-[state=active]:bg-transparent px-2 sm:px-3 py-2 gap-1 shrink-0">
-                          Due soon
-                          {(alertCounts?.dueSoon ?? 0) > 0 && (
-                            <Badge variant="secondary" className="h-5 min-w-5 px-1 text-[10px] font-semibold">
-                              {alertCounts?.dueSoon}
-                            </Badge>
-                          )}
-                        </TabsTrigger>
-                      </TabsList>
-                      <div className="overflow-y-auto flex-1 min-h-0 py-2">
-                        <TabsContent value="all" className="mt-0 flex flex-col gap-2">
-                          {(feed?.lowStock.length ?? 0) > 0 && (
-                            <div className="px-4 py-1">
-                              <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1.5 mb-1">
-                                <Package className="w-3.5 h-3.5" />
-                                Low stock
-                              </p>
-                              <ul className="space-y-0.5">
-                                {feed?.lowStock.slice(0, 4).map((a) => (
-                                  <li key={a.productId} className="text-sm text-foreground py-1.5 px-2 rounded-md hover:bg-muted/50">
-                                    <span className="font-medium truncate block">{a.product}</span>
-                                    <span className="text-xs text-muted-foreground">{a.inStock} in stock (reorder at {a.reorderAt})</span>
-                                  </li>
-                                ))}
-                                {(feed?.lowStock.length ?? 0) > 4 && (
-                                  <li className="text-xs text-muted-foreground px-2 py-1">+{(feed?.lowStock.length ?? 0) - 4} more</li>
-                                )}
-                              </ul>
-                            </div>
-                          )}
-                          {(feed?.overdue.length ?? 0) > 0 && (
-                            <div className="px-4 py-1">
-                              <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1.5 mb-1">
-                                <Clock className="w-3.5 h-3.5" />
-                                Overdue returns
-                              </p>
-                              <ul className="space-y-0.5">
-                                {feed?.overdue.slice(0, 3).map((item) => (
-                                  <li key={item.id} className="text-sm text-foreground py-1.5 px-2 rounded-md hover:bg-muted/50 font-mono text-xs">
-                                    {item.serialNumber} <span className="text-muted-foreground font-sans">· {formatReturnAge(item.returnDate, feed.today)}</span>
-                                  </li>
-                                ))}
-                                {(feed?.overdue.length ?? 0) > 3 && (
-                                  <li className="text-xs text-muted-foreground px-2 py-1">+{(feed?.overdue.length ?? 0) - 3} more</li>
-                                )}
-                              </ul>
-                            </div>
-                          )}
-                          {(feed?.dueSoon.length ?? 0) > 0 && (
-                            <div className="px-4 py-1">
-                              <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1.5 mb-1">
-                                <Clock className="w-3.5 h-3.5" />
-                                Due soon
-                              </p>
-                              <ul className="space-y-0.5">
-                                {feed?.dueSoon.slice(0, 3).map((item) => (
-                                  <li key={item.id} className="text-sm text-foreground py-1.5 px-2 rounded-md hover:bg-muted/50 font-mono text-xs">
-                                    {item.serialNumber} <span className="text-muted-foreground font-sans">· {formatReturnAge(item.returnDate, feed.today)}</span>
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-                          )}
-                        </TabsContent>
-                        <TabsContent value="lowStock" className="mt-0">
-                          <ul className="space-y-0.5 px-4">
-                            {feed?.lowStock.map((a) => (
-                              <li key={a.productId} className="text-sm text-foreground py-2 px-2 rounded-md hover:bg-muted/50 border-b border-border/50 last:border-0">
-                                <span className="font-medium truncate block">{a.product}</span>
-                                <span className="text-xs text-muted-foreground">{a.inStock} in stock (reorder at {a.reorderAt})</span>
-                              </li>
-                            ))}
-                          </ul>
-                        </TabsContent>
-                        <TabsContent value="overdue" className="mt-0">
-                          <ul className="space-y-0.5 px-4">
-                            {feed?.overdue.map((item) => (
-                              <li key={item.id} className="text-sm text-foreground py-2 px-2 rounded-md hover:bg-muted/50 font-mono text-xs border-b border-border/50 last:border-0">
-                                {item.serialNumber} <span className="text-muted-foreground font-sans">· {formatReturnAge(item.returnDate, feed.today)}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        </TabsContent>
-                        <TabsContent value="dueSoon" className="mt-0">
-                          <ul className="space-y-0.5 px-4">
-                            {feed?.dueSoon.map((item) => (
-                              <li key={item.id} className="text-sm text-foreground py-2 px-2 rounded-md hover:bg-muted/50 font-mono text-xs border-b border-border/50 last:border-0">
-                                {item.serialNumber} <span className="text-muted-foreground font-sans">· {formatReturnAge(item.returnDate, feed.today)}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        </TabsContent>
-                      </div>
-                      <div className="border-t border-border px-4 py-2 shrink-0">
-                        <Button variant="ghost" size="sm" className="w-full justify-center text-foreground" asChild>
-                          <Link href={alertsLink.href}>{alertsLink.label}</Link>
-                        </Button>
-                      </div>
-                    </Tabs>
-                  )}
+                    ) : inboxUnread.length === 0 ? (
+                      <p className="px-4 py-10 text-center text-sm text-muted-foreground">No unread notifications.</p>
+                    ) : (
+                      <ul className="px-1">
+                        {inboxUnread.slice(0, 12).map((n) => (
+                          <li key={n.id}>
+                            <Link
+                              href={notificationHref(n)}
+                              className="flex min-h-11 flex-col gap-0.5 rounded-md px-3 py-2.5 text-sm hover:bg-muted/80"
+                              onClick={() => void markInboxRead([n.id])}
+                            >
+                              <span className="flex items-start gap-2 font-medium text-foreground">
+                                <span className="mt-1.5 size-2 shrink-0 rounded-full bg-brand" aria-hidden />
+                                {n.title}
+                              </span>
+                              {n.body ? <span className="pl-4 text-xs text-muted-foreground">{n.body}</span> : null}
+                            </Link>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                  <div className="border-t border-border px-4 py-2 shrink-0">
+                    <Button variant="ghost" size="sm" className="w-full justify-center text-foreground" asChild>
+                      <Link href="/notifications">View all notifications</Link>
+                    </Button>
+                  </div>
                 </div>
               </PopoverContent>
             </Popover>

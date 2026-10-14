@@ -107,6 +107,8 @@ export function SettingsContent() {
   const [settingsLoading, setSettingsLoading] = useState(true)
   const [savingKey, setSavingKey] = useState<string | null>(null)
   const [newEmail, setNewEmail] = useState("")
+  const [issuerDefaultEmail, setIssuerDefaultEmail] = useState("")
+  const [issuerFortinetEmail, setIssuerFortinetEmail] = useState("")
 
   const loadSettings = useCallback(async () => {
     try {
@@ -225,6 +227,34 @@ export function SettingsContent() {
   async function removeEmail(email: string) {
     const next = (settings?.lowStockRecipients ?? []).filter((value) => value !== email)
     await saveAppSettings({ lowStockRecipients: next }, "Email removed")
+  }
+
+  async function addIssuerEmail(kind: "default" | "fortinet") {
+    const raw = kind === "default" ? issuerDefaultEmail : issuerFortinetEmail
+    const trimmed = raw.trim().toLowerCase()
+    if (!trimmed) return
+    const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    if (!re.test(trimmed)) {
+      toast.error("Enter a valid email address")
+      return
+    }
+    const key =
+      kind === "default" ? "stockRequestIssuerRecipientsDefault" : "stockRequestIssuerRecipientsFortinet"
+    const current = settings?.[key] ?? []
+    if (current.includes(trimmed)) {
+      toast.error("That email is already in the list")
+      return
+    }
+    await saveAppSettings({ [key]: [...current, trimmed] }, "Issuer recipient added")
+    if (kind === "default") setIssuerDefaultEmail("")
+    else setIssuerFortinetEmail("")
+  }
+
+  async function removeIssuerEmail(kind: "default" | "fortinet", email: string) {
+    const key =
+      kind === "default" ? "stockRequestIssuerRecipientsDefault" : "stockRequestIssuerRecipientsFortinet"
+    const next = (settings?.[key] ?? []).filter((value) => value !== email)
+    await saveAppSettings({ [key]: next }, "Issuer recipient removed")
   }
 
   async function toggleEmailsEnabled(checked: boolean) {
@@ -501,6 +531,84 @@ export function SettingsContent() {
                   <EmptyState message="No recipients yet." />
                 )}
               </div>
+            </div>
+          </SettingsSection>
+
+          <SettingsSection
+            title="Stock request issuers"
+            description="When someone submits or resubmits a request, these portal users get a notification. All-Fortinet lines use the Fortinet list; everything else uses the default list."
+          >
+            <div className="flex flex-col gap-8">
+              {(
+                [
+                  {
+                    kind: "default" as const,
+                    label: "Default issuers (non-Fortinet)",
+                    list: settings?.stockRequestIssuerRecipientsDefault ?? [],
+                    draft: issuerDefaultEmail,
+                    setDraft: setIssuerDefaultEmail,
+                  },
+                  {
+                    kind: "fortinet" as const,
+                    label: "Fortinet issuers",
+                    list: settings?.stockRequestIssuerRecipientsFortinet ?? [],
+                    draft: issuerFortinetEmail,
+                    setDraft: setIssuerFortinetEmail,
+                  },
+                ] as const
+              ).map(({ kind, label, list, draft, setDraft }) => (
+                <div key={kind} className="space-y-3">
+                  <Label className="text-sm font-medium text-muted-foreground">{label}</Label>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <Input
+                      type="email"
+                      placeholder="email@example.com"
+                      className="h-11 flex-1 rounded-lg border-input bg-background"
+                      value={draft}
+                      onChange={(e) => setDraft(e.target.value)}
+                      onKeyDown={(e) =>
+                        e.key === "Enter" && (e.preventDefault(), void addIssuerEmail(kind))
+                      }
+                      disabled={!isAdmin || settingsLoading}
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      className="h-11 shrink-0 rounded-lg"
+                      onClick={() => void addIssuerEmail(kind)}
+                      disabled={!isAdmin || settingsLoading || savingKey === "app-settings"}
+                    >
+                      <Plus className="mr-1 size-4" />
+                      Add
+                    </Button>
+                  </div>
+                  {list.length > 0 ? (
+                    <ul className="space-y-2">
+                      {list.map((email) => (
+                        <li
+                          key={email}
+                          className="flex items-center justify-between gap-2 rounded-lg border border-border/60 bg-muted/30 px-3 py-2.5 text-sm"
+                        >
+                          <span className="text-foreground">{email}</span>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="text-muted-foreground hover:text-destructive"
+                            onClick={() => void removeIssuerEmail(kind, email)}
+                            disabled={!isAdmin || savingKey === "app-settings"}
+                          >
+                            <Trash2 className="size-4" />
+                          </Button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <EmptyState message="No recipients yet." />
+                  )}
+                </div>
+              ))}
             </div>
           </SettingsSection>
         </TabsContent>

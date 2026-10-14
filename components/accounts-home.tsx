@@ -1,7 +1,8 @@
 "use client"
 
 import Link from "next/link"
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
+import { useRequestQueuesRefresh } from "@/hooks/use-request-queues-refresh"
 import { Truck } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -35,27 +36,23 @@ export function AccountsHome({ onShowNotInvoiced }: { onShowNotInvoiced?: () => 
   const [open, setOpen] = useState<StockRequestWithRelations[] | null>(null)
   const [names, setNames] = useState<Map<string, string>>(new Map())
 
-  useEffect(() => {
-    let cancelled = false
-    void (async () => {
-      try {
-        const sb = getSupabaseClient()
-        const rows = await fetchLatestOpenRequests(sb, OPEN_REQUEST_LIMIT)
-        if (cancelled) return
-        setOpen(rows)
-        const labels = await loadProfileLabels(
-          sb,
-          rows.map((r) => r.created_by)
-        )
-        if (!cancelled) setNames(labels)
-      } catch {
-        if (!cancelled) setOpen([])
-      }
-    })()
-    return () => {
-      cancelled = true
+  const refresh = useCallback(async () => {
+    try {
+      const sb = getSupabaseClient()
+      const rows = await fetchLatestOpenRequests(sb, OPEN_REQUEST_LIMIT)
+      setOpen(rows)
+      const labels = await loadProfileLabels(sb, rows.map((r) => r.created_by))
+      setNames(labels)
+    } catch {
+      setOpen([])
     }
   }, [])
+
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
+
+  useRequestQueuesRefresh(refresh)
 
   const displayStatuses = useRequestDisplayStatuses(open ?? [])
 

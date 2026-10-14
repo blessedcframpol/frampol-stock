@@ -10,6 +10,8 @@ export type AppSettings = {
   defaultReorderLevel: number
   lowStockEmailsEnabled: boolean
   lowStockRecipients: string[]
+  stockRequestIssuerRecipientsDefault: string[]
+  stockRequestIssuerRecipientsFortinet: string[]
   timezone: string
   updatedAt: string
   updatedBy: string | null
@@ -56,7 +58,7 @@ export async function fetchAppSettings(provided?: SettingsClient): Promise<AppSe
   const { data, error } = await client(provided)
     .from("app_settings")
     .select(
-      "default_reorder_level, low_stock_emails_enabled, low_stock_recipients, timezone, updated_at, updated_by"
+      "default_reorder_level, low_stock_emails_enabled, low_stock_recipients, stock_request_issuer_recipients_default, stock_request_issuer_recipients_fortinet, timezone, updated_at, updated_by"
     )
     .eq("id", true)
     .single()
@@ -65,6 +67,8 @@ export async function fetchAppSettings(provided?: SettingsClient): Promise<AppSe
     defaultReorderLevel: data.default_reorder_level,
     lowStockEmailsEnabled: data.low_stock_emails_enabled,
     lowStockRecipients: data.low_stock_recipients,
+    stockRequestIssuerRecipientsDefault: data.stock_request_issuer_recipients_default,
+    stockRequestIssuerRecipientsFortinet: data.stock_request_issuer_recipients_fortinet,
     timezone: data.timezone,
     updatedAt: data.updated_at,
     updatedBy: data.updated_by,
@@ -75,7 +79,12 @@ export async function updateAppSettings(
   updates: Partial<
     Pick<
       AppSettings,
-      "defaultReorderLevel" | "lowStockEmailsEnabled" | "lowStockRecipients" | "timezone"
+      | "defaultReorderLevel"
+      | "lowStockEmailsEnabled"
+      | "lowStockRecipients"
+      | "stockRequestIssuerRecipientsDefault"
+      | "stockRequestIssuerRecipientsFortinet"
+      | "timezone"
     >
   >,
   provided?: SettingsClient
@@ -90,6 +99,12 @@ export async function updateAppSettings(
   if (updates.lowStockRecipients !== undefined) {
     row.low_stock_recipients = updates.lowStockRecipients
   }
+  if (updates.stockRequestIssuerRecipientsDefault !== undefined) {
+    row.stock_request_issuer_recipients_default = updates.stockRequestIssuerRecipientsDefault
+  }
+  if (updates.stockRequestIssuerRecipientsFortinet !== undefined) {
+    row.stock_request_issuer_recipients_fortinet = updates.stockRequestIssuerRecipientsFortinet
+  }
   if (updates.timezone !== undefined) row.timezone = updates.timezone
 
   const { data, error } = await client(provided)
@@ -97,7 +112,7 @@ export async function updateAppSettings(
     .update(row)
     .eq("id", true)
     .select(
-      "default_reorder_level, low_stock_emails_enabled, low_stock_recipients, timezone, updated_at, updated_by"
+      "default_reorder_level, low_stock_emails_enabled, low_stock_recipients, stock_request_issuer_recipients_default, stock_request_issuer_recipients_fortinet, timezone, updated_at, updated_by"
     )
     .single()
   if (error) throw error
@@ -106,6 +121,8 @@ export async function updateAppSettings(
     defaultReorderLevel: data.default_reorder_level,
     lowStockEmailsEnabled: data.low_stock_emails_enabled,
     lowStockRecipients: data.low_stock_recipients,
+    stockRequestIssuerRecipientsDefault: data.stock_request_issuer_recipients_default,
+    stockRequestIssuerRecipientsFortinet: data.stock_request_issuer_recipients_fortinet,
     timezone: data.timezone,
     updatedAt: data.updated_at,
     updatedBy: data.updated_by,

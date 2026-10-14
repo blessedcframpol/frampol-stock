@@ -9,17 +9,14 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { useInboxNotifications } from "@/hooks/use-inbox-notifications"
 import { getSupabaseClient } from "@/lib/supabase/client"
-import { fetchAllNotifications, type AppNotificationRow } from "@/lib/supabase/stock-requests-db"
+import { fetchAllNotifications } from "@/lib/supabase/stock-requests-db"
+import {
+  browserNotificationsAsked,
+  NOTIFICATIONS_INBOX_EVENT,
+  notificationHref,
+  requestBrowserNotificationPermission,
+} from "@/lib/notifications-live"
 import { cn } from "@/lib/utils"
-
-function notificationHref(n: AppNotificationRow): string {
-  const meta = n.metadata as { request_id?: string; href?: string } | null
-  if (typeof meta?.href === "string" && meta.href.startsWith("/") && !meta.href.startsWith("//")) {
-    return meta.href
-  }
-  if (meta?.request_id) return `/requests/${meta.request_id}`
-  return n.type === "pending_role" ? "/users" : "/requests"
-}
 
 function formatWhen(iso: string): string {
   const d = new Date(iso)
@@ -30,9 +27,11 @@ function formatWhen(iso: string): string {
 /** Everything the portal has told this user, newest first. */
 export function NotificationsContent() {
   const { markRead } = useInboxNotifications()
-  const [rows, setRows] = useState<AppNotificationRow[]>([])
+  const [rows, setRows] = useState<Awaited<ReturnType<typeof fetchAllNotifications>>>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [browserPerm, setBrowserPerm] = useState<NotificationPermission | "unsupported">("default")
+  const [showBrowserPrompt, setShowBrowserPrompt] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -46,23 +45,27 @@ export function NotificationsContent() {
   }, [])
 
   useEffect(() => {
+    if (typeof window === "undefined" || !("Notification" in window)) {
+      setBrowserPerm("unsupported")
+      setShowBrowserPrompt(false)
+      return
+    }
+    setBrowserPerm(Notification.permission)
+    setShowBrowserPrompt(!browserNotificationsAsked() && Notification.permission === "default")
+  }, [])
+
+  useEffect(() => {
     let cancelled = false
-    void fetchAllNotifications(getSupabaseClient(), 50)
-      .then((data) => {
-        if (cancelled) return
-        setRows(data)
-        setError(null)
-      })
-      .catch((caught: unknown) => {
-        if (!cancelled) setError(caught instanceof Error ? caught.message : "Could not load notifications")
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
+    void load().finally(() => {
+      if (!cancelled) setLoading(false)
+    })
+    const onInbox = () => void load()
+    window.addEventListener(NOTIFICATIONS_INBOX_EVENT, onInbox)
     return () => {
       cancelled = true
+      window.removeEventListener(NOTIFICATIONS_INBOX_EVENT, onInbox)
     }
-  }, [])
+  }, [load])
 
   const unreadIds = rows.filter((r) => !r.read_at).map((r) => r.id)
 
@@ -90,6 +93,27 @@ export function NotificationsContent() {
           ) : null
         }
       />
+
+      {showBrowserPrompt && browserPerm === "default" ? (
+        <div className="flex flex-col gap-3 rounded-lg border border-border bg-muted/30 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-muted-foreground">
+            Get desktop alerts when this tab is in the background (optional).
+          </p>
+          <Button
+            type="button"
+            variant="secondary"
+            className="min-h-11 shrink-0 sm:min-h-9"
+            onClick={() => {
+              void requestBrowserNotificationPermission().then((perm) => {
+                setBrowserPerm(perm === "unsupported" ? "unsupported" : perm)
+                setShowBrowserPrompt(false)
+              })
+            }}
+          >
+            Enable browser notifications
+          </Button>
+        </div>
+      ) : null}
 
       {error ? (
         <div

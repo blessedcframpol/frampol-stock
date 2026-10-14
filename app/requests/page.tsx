@@ -2,11 +2,13 @@
 
 import { DashboardShell } from "@/components/dashboard-shell"
 import { StockRequestsList } from "@/components/stock-requests-list"
+import { useRequestQueuesRefresh } from "@/hooks/use-request-queues-refresh"
 import { useStockRequests } from "@/lib/supabase/stock-requests-db"
 import { AlertCircle, Loader2 } from "lucide-react"
 
 export default function RequestsPage() {
-  const { list, loading, error, refetch } = useStockRequests()
+  const { list, loading, error, refetch, softRefetch } = useStockRequests()
+  useRequestQueuesRefresh(softRefetch, !loading && !error)
 
   return (
     <DashboardShell>

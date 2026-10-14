@@ -657,6 +657,7 @@ export function useStockRequests(): {
   loading: boolean
   error: Error | null
   refetch: () => Promise<void>
+  softRefetch: () => Promise<void>
 } {
   const [list, setList] = useState<StockRequestWithRelations[]>([])
   const [loading, setLoading] = useState(true)
@@ -687,6 +688,15 @@ export function useStockRequests(): {
     }
   }, [fetchList])
 
+  const softRefetch = useCallback(async () => {
+    try {
+      const result = await fetchList()
+      if (result.ok) setList(result.rows)
+    } catch {
+      // Keep the current list on background refresh failures.
+    }
+  }, [fetchList])
+
   useEffect(() => {
     let cancelled = false
     void (async () => {
@@ -712,5 +722,5 @@ export function useStockRequests(): {
     }
   }, [fetchList])
 
-  return { list, loading, error, refetch }
+  return { list, loading, error, refetch, softRefetch }
 }

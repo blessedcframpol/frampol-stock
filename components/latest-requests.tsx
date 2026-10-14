@@ -1,7 +1,8 @@
 "use client"
 
 import Link from "next/link"
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
+import { useRequestQueuesRefresh } from "@/hooks/use-request-queues-refresh"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { RequestStatusPill } from "@/components/request-status-pill"
 import { Button } from "@/components/ui/button"
@@ -36,32 +37,27 @@ export function LatestRequests() {
   const [names, setNames] = useState<Map<string, string>>(new Map())
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    let cancelled = false
-    async function run() {
-      try {
-        const sb = getSupabaseClient()
-        // Pull enough open rows so admin "To issue" can sort oldest-first after status resolve.
-        const data = await fetchLatestOpenRequests(sb, isAdmin ? 40 : PREVIEW_COUNT)
-        if (!cancelled) setLatest(data)
-        if (isAdmin && data.length) {
-          const labels = await fetchProfileLabels(
-            sb,
-            data.map((r) => r.created_by)
-          )
-          if (!cancelled) setNames(labels)
-        }
-      } catch {
-        if (!cancelled) setLatest([])
-      } finally {
-        if (!cancelled) setLoading(false)
+  const refresh = useCallback(async () => {
+    try {
+      const sb = getSupabaseClient()
+      const data = await fetchLatestOpenRequests(sb, isAdmin ? 40 : PREVIEW_COUNT)
+      setLatest(data)
+      if (isAdmin && data.length) {
+        const labels = await fetchProfileLabels(sb, data.map((r) => r.created_by))
+        setNames(labels)
       }
-    }
-    void run()
-    return () => {
-      cancelled = true
+    } catch {
+      setLatest([])
+    } finally {
+      setLoading(false)
     }
   }, [isAdmin])
+
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
+
+  useRequestQueuesRefresh(refresh)
 
   const displayStatuses = useRequestDisplayStatuses(latest)
 

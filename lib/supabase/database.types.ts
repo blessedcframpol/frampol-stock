@@ -11,6 +11,8 @@ export interface Database {
           low_stock_recipients: string[]
           audit_report_recipients: string[]
           problem_report_recipients: string[]
+          stock_request_issuer_recipients_default: string[]
+          stock_request_issuer_recipients_fortinet: string[]
           timezone: string
           internal_client_id: string | null
           updated_at: string
@@ -23,6 +25,8 @@ export interface Database {
           low_stock_recipients?: string[]
           audit_report_recipients?: string[]
           problem_report_recipients?: string[]
+          stock_request_issuer_recipients_default?: string[]
+          stock_request_issuer_recipients_fortinet?: string[]
           timezone?: string
           internal_client_id?: string | null
           updated_at?: string
@@ -35,6 +39,8 @@ export interface Database {
           low_stock_recipients?: string[]
           audit_report_recipients?: string[]
           problem_report_recipients?: string[]
+          stock_request_issuer_recipients_default?: string[]
+          stock_request_issuer_recipients_fortinet?: string[]
           timezone?: string
           internal_client_id?: string | null
           updated_at?: string
@@ -1130,6 +1136,16 @@ export interface Database {
       }
     }
     Views: {
+      batch_request_context: {
+        Row: {
+          batch_id: string
+          request_id: string
+          request_number: string
+          requester_name: string
+          atlas_task_url: string | null
+        }
+        Relationships: []
+      }
       batch_invoice_list: {
         Row: {
           batch_id: string
@@ -1247,6 +1263,20 @@ export interface Database {
       [_ in never]: never
     }
     Functions: {
+      batch_request_context_for: {
+        Args: { p_batch_ids: string[] }
+        Returns: {
+          batch_id: string
+          request_id: string
+          request_number: string
+          requester_name: string
+          atlas_task_url: string | null
+        }[]
+      }
+      batch_movement_history: {
+        Args: { p_batch_id: string }
+        Returns: Json
+      }
       transaction_batch_page: {
         Args: {
           p_limit: number
