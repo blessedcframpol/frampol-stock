@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react"
 import { AlertCircle, Copy, Loader2, Pencil } from "lucide-react"
 import { toast } from "sonner"
 import { InvoiceChoiceFields } from "@/components/invoice-choice-fields"
+import { AtlasLinkPendingPill } from "@/components/atlas-link-pending-pill"
 import { RequestStatusPill } from "@/components/request-status-pill"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -140,6 +141,16 @@ export function RequesterNeedsYou({
   // Invoice pending on the request itself — not display status "awaiting_invoice".
   // That display status only appears after units are issued; requesters still need to
   // add a number while the request is being reviewed / partially issued.
+  const atlasPending = useMemo(
+    () =>
+      mine.filter((r) => {
+        if (!r.atlas_link_pending) return false
+        const state = r.review_state
+        return state !== "cancelled" && state !== "closed"
+      }),
+    [mine],
+  )
+
   const awaitingInvoice = useMemo(
     () =>
       mine.filter((r) => {
@@ -196,7 +207,7 @@ export function RequesterNeedsYou({
   }, [candidateKey])
 
   const issuedGroups = issued.key === candidateKey ? issued.groups : []
-  const needsCount = rejected.length + awaitingInvoice.length
+  const needsCount = rejected.length + awaitingInvoice.length + atlasPending.length
 
   return (
     <>
@@ -228,6 +239,24 @@ export function RequesterNeedsYou({
                     <Pencil className="size-3.5" />
                     Edit and resubmit
                   </Link>
+                </Button>
+              </div>
+            ))}
+
+            {atlasPending.map((r) => (
+              <div key={`atlas-${r.id}`} className="flex flex-col gap-3 rounded-lg border border-border px-4 py-3 text-sm">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Link href={`/requests/${r.id}`} className="font-medium hover:underline">
+                    {r.request_number} · {clientOf(r)}
+                  </Link>
+                  <AtlasLinkPendingPill />
+                  <RequestStatusPill status={displayStatuses[r.id]} />
+                </div>
+                <p className="text-muted-foreground">
+                  Add the Atlas task link when you have it — stock can still be issued in the meantime.
+                </p>
+                <Button asChild size="sm" className="min-h-11 shrink-0 sm:min-h-9">
+                  <Link href={`/requests/${r.id}`}>Add Atlas link</Link>
                 </Button>
               </div>
             ))}

@@ -10,11 +10,21 @@ export type AppSettings = {
   defaultReorderLevel: number
   lowStockEmailsEnabled: boolean
   lowStockRecipients: string[]
-  stockRequestIssuerRecipientsDefault: string[]
-  stockRequestIssuerRecipientsFortinet: string[]
+  problemReportRecipientIds: string[]
+  auditReportRecipientIds: string[]
+  problemReportRecipientMigrationSkipped: string[]
+  auditReportRecipientMigrationSkipped: string[]
+  atlasLinkRequired: boolean
   timezone: string
   updatedAt: string
   updatedBy: string | null
+}
+
+export type ActiveStaffProfile = {
+  id: string
+  email: string
+  displayName: string | null
+  role: string
 }
 
 export type ProductLineSetting = {
@@ -58,7 +68,7 @@ export async function fetchAppSettings(provided?: SettingsClient): Promise<AppSe
   const { data, error } = await client(provided)
     .from("app_settings")
     .select(
-      "default_reorder_level, low_stock_emails_enabled, low_stock_recipients, stock_request_issuer_recipients_default, stock_request_issuer_recipients_fortinet, timezone, updated_at, updated_by"
+      "default_reorder_level, low_stock_emails_enabled, low_stock_recipients, problem_report_recipient_ids, audit_report_recipient_ids, problem_report_recipient_migration_skipped, audit_report_recipient_migration_skipped, atlas_link_required, timezone, updated_at, updated_by"
     )
     .eq("id", true)
     .single()
@@ -67,8 +77,11 @@ export async function fetchAppSettings(provided?: SettingsClient): Promise<AppSe
     defaultReorderLevel: data.default_reorder_level,
     lowStockEmailsEnabled: data.low_stock_emails_enabled,
     lowStockRecipients: data.low_stock_recipients,
-    stockRequestIssuerRecipientsDefault: data.stock_request_issuer_recipients_default,
-    stockRequestIssuerRecipientsFortinet: data.stock_request_issuer_recipients_fortinet,
+    problemReportRecipientIds: data.problem_report_recipient_ids ?? [],
+    auditReportRecipientIds: data.audit_report_recipient_ids ?? [],
+    problemReportRecipientMigrationSkipped: data.problem_report_recipient_migration_skipped ?? [],
+    auditReportRecipientMigrationSkipped: data.audit_report_recipient_migration_skipped ?? [],
+    atlasLinkRequired: data.atlas_link_required ?? true,
     timezone: data.timezone,
     updatedAt: data.updated_at,
     updatedBy: data.updated_by,
@@ -82,8 +95,8 @@ export async function updateAppSettings(
       | "defaultReorderLevel"
       | "lowStockEmailsEnabled"
       | "lowStockRecipients"
-      | "stockRequestIssuerRecipientsDefault"
-      | "stockRequestIssuerRecipientsFortinet"
+      | "problemReportRecipientIds"
+      | "auditReportRecipientIds"
       | "timezone"
     >
   >,
@@ -99,11 +112,11 @@ export async function updateAppSettings(
   if (updates.lowStockRecipients !== undefined) {
     row.low_stock_recipients = updates.lowStockRecipients
   }
-  if (updates.stockRequestIssuerRecipientsDefault !== undefined) {
-    row.stock_request_issuer_recipients_default = updates.stockRequestIssuerRecipientsDefault
+  if (updates.problemReportRecipientIds !== undefined) {
+    row.problem_report_recipient_ids = updates.problemReportRecipientIds
   }
-  if (updates.stockRequestIssuerRecipientsFortinet !== undefined) {
-    row.stock_request_issuer_recipients_fortinet = updates.stockRequestIssuerRecipientsFortinet
+  if (updates.auditReportRecipientIds !== undefined) {
+    row.audit_report_recipient_ids = updates.auditReportRecipientIds
   }
   if (updates.timezone !== undefined) row.timezone = updates.timezone
 
@@ -112,7 +125,7 @@ export async function updateAppSettings(
     .update(row)
     .eq("id", true)
     .select(
-      "default_reorder_level, low_stock_emails_enabled, low_stock_recipients, stock_request_issuer_recipients_default, stock_request_issuer_recipients_fortinet, timezone, updated_at, updated_by"
+      "default_reorder_level, low_stock_emails_enabled, low_stock_recipients, problem_report_recipient_ids, audit_report_recipient_ids, problem_report_recipient_migration_skipped, audit_report_recipient_migration_skipped, atlas_link_required, timezone, updated_at, updated_by"
     )
     .single()
   if (error) throw error
@@ -121,12 +134,45 @@ export async function updateAppSettings(
     defaultReorderLevel: data.default_reorder_level,
     lowStockEmailsEnabled: data.low_stock_emails_enabled,
     lowStockRecipients: data.low_stock_recipients,
-    stockRequestIssuerRecipientsDefault: data.stock_request_issuer_recipients_default,
-    stockRequestIssuerRecipientsFortinet: data.stock_request_issuer_recipients_fortinet,
+    problemReportRecipientIds: data.problem_report_recipient_ids ?? [],
+    auditReportRecipientIds: data.audit_report_recipient_ids ?? [],
+    problemReportRecipientMigrationSkipped: data.problem_report_recipient_migration_skipped ?? [],
+    auditReportRecipientMigrationSkipped: data.audit_report_recipient_migration_skipped ?? [],
+    atlasLinkRequired: data.atlas_link_required ?? true,
     timezone: data.timezone,
     updatedAt: data.updated_at,
     updatedBy: data.updated_by,
   }
+}
+
+/** Active portal users for report-recipient pickers (admin settings). */
+export async function setAtlasLinkRequired(
+  required: boolean,
+  reason: string,
+  provided?: SettingsClient,
+): Promise<void> {
+  const { error } = await client(provided).rpc("set_atlas_link_required", {
+    p_required: required,
+    p_reason: reason,
+  })
+  if (error) throw error
+  announceSettingsUpdate()
+}
+
+export async function fetchActiveStaffProfiles(provided?: SettingsClient): Promise<ActiveStaffProfile[]> {
+  const { data, error } = await client(provided)
+    .from("profiles")
+    .select("id, email, display_name, role")
+    .eq("active", true)
+    .order("display_name", { ascending: true, nullsFirst: false })
+    .order("email", { ascending: true })
+  if (error) throw error
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    email: row.email,
+    displayName: row.display_name,
+    role: row.role,
+  }))
 }
 
 export async function fetchProductLineSettings(

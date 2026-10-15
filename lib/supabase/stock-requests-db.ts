@@ -308,6 +308,14 @@ export async function submitRequest(sb: SB, input: SubmitRequestInput): Promise<
   return data as string
 }
 
+export async function setRequestAtlasLink(sb: SB, requestId: string, url: string): Promise<void> {
+  const { error } = await sb.rpc("set_request_atlas_link", {
+    p_request_id: requestId,
+    p_url: url.trim(),
+  })
+  if (error) throw error
+}
+
 export async function approveNotInvoiced(sb: SB, requestId: string): Promise<void> {
   const { error } = await sb.rpc("approve_not_invoiced", { p_request_id: requestId })
   if (error) throw error
@@ -597,6 +605,76 @@ export async function fetchProfileLabels(sb: SB, ids: string[]): Promise<Map<str
 }
 
 /** Only notes and quotation_url may be written directly; everything else goes through RPCs. */
+export type RequestIssueLock = {
+  userId: string | null
+  since: string | null
+  displayName: string | null
+  heldByMe: boolean
+  needsTakeover: boolean
+}
+
+export type FreshIssueLockRow = {
+  requestId: string
+  activeUserId: string | null
+  activeSince: string | null
+}
+
+function parseRequestIssueLock(data: unknown): RequestIssueLock {
+  const row = (data ?? {}) as Record<string, unknown>
+  return {
+    userId: typeof row.user_id === "string" ? row.user_id : null,
+    since: typeof row.since === "string" ? row.since : null,
+    displayName: typeof row.display_name === "string" ? row.display_name : null,
+    heldByMe: row.held_by_me === true,
+    needsTakeover: row.needs_takeover === true,
+  }
+}
+
+export async function beginRequestIssue(sb: SB, requestId: string): Promise<RequestIssueLock> {
+  const { data, error } = await sb.rpc("begin_request_issue", { p_request_id: requestId })
+  if (error) throw error
+  return parseRequestIssueLock(data)
+}
+
+export async function takeOverRequestIssue(sb: SB, requestId: string): Promise<RequestIssueLock> {
+  const { data, error } = await sb.rpc("take_over_request_issue", { p_request_id: requestId })
+  if (error) throw error
+  return parseRequestIssueLock(data)
+}
+
+export async function fetchFreshIssueLocks(sb: SB, requestIds: string[]): Promise<Map<string, FreshIssueLockRow>> {
+  const out = new Map<string, FreshIssueLockRow>()
+  const unique = [...new Set(requestIds)]
+  if (unique.length === 0) return out
+  const { data, error } = await sb.rpc("stock_request_fresh_issue_locks", {
+    p_request_ids: unique,
+  })
+  if (error) throw error
+  for (const row of data ?? []) {
+    const r = row as {
+      request_id: string
+      issue_lock_active_user_id: string | null
+      issue_lock_active_since: string | null
+    }
+    out.set(r.request_id, {
+      requestId: r.request_id,
+      activeUserId: r.issue_lock_active_user_id,
+      activeSince: r.issue_lock_active_since,
+    })
+  }
+  return out
+}
+
+export async function touchRequestIssue(sb: SB, requestId: string): Promise<void> {
+  const { error } = await sb.rpc("touch_request_issue", { p_request_id: requestId })
+  if (error) throw error
+}
+
+export async function endRequestIssue(sb: SB, requestId: string): Promise<void> {
+  const { error } = await sb.rpc("end_request_issue", { p_request_id: requestId })
+  if (error) throw error
+}
+
 export async function updateRequestDetails(
   sb: SB,
   requestId: string,

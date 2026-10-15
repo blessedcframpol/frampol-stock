@@ -4,7 +4,12 @@
  * give feedback while the form is being filled in.
  */
 
-export { atlasTaskUrlProblem, ATLAS_TASK_URL_EXAMPLE, ATLAS_TASK_LINK_HINT } from "@/lib/atlas-task-url"
+export {
+  atlasTaskUrlProblem,
+  atlasTaskUrlProblemWhenRequired,
+  ATLAS_TASK_URL_EXAMPLE,
+  ATLAS_TASK_LINK_HINT,
+} from "@/lib/atlas-task-url"
 
 export const REQUEST_TYPES = ["Sale", "POC Out", "Rentals"] as const
 export type RequestType = (typeof REQUEST_TYPES)[number]

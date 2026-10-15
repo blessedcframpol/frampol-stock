@@ -25,10 +25,13 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import {
+  fetchActiveStaffProfiles,
   fetchAppSettings,
   fetchProductLineSettings,
+  setAtlasLinkRequired,
   updateAppSettings,
   updateProductLineSetting,
+  type ActiveStaffProfile,
   type AppSettings,
   type ProductLineSetting,
 } from "@/lib/settings"
@@ -38,6 +41,15 @@ import { AuditLogPanel } from "@/components/audit-log-panel"
 import { useInventoryStore } from "@/lib/inventory-store"
 import { cn } from "@/lib/utils"
 import { displayInitials } from "@/lib/format-display"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Textarea } from "@/components/ui/textarea"
 import { Mail, Plus, Trash2, Info, UsersRound, ArrowRight } from "lucide-react"
 import { PageHeader } from "@/components/page-nav"
 import { toast } from "sonner"
@@ -107,15 +119,21 @@ export function SettingsContent() {
   const [settingsLoading, setSettingsLoading] = useState(true)
   const [savingKey, setSavingKey] = useState<string | null>(null)
   const [newEmail, setNewEmail] = useState("")
-  const [issuerDefaultEmail, setIssuerDefaultEmail] = useState("")
-  const [issuerFortinetEmail, setIssuerFortinetEmail] = useState("")
+  const [staffProfiles, setStaffProfiles] = useState<ActiveStaffProfile[]>([])
+  const [pickProblemUser, setPickProblemUser] = useState("")
+  const [pickAuditUser, setPickAuditUser] = useState("")
+  const [atlasToggleOpen, setAtlasToggleOpen] = useState(false)
+  const [atlasToggleNext, setAtlasToggleNext] = useState(true)
+  const [atlasToggleReason, setAtlasToggleReason] = useState("")
 
   const loadSettings = useCallback(async () => {
     try {
-      const [nextSettings, nextProducts] = await Promise.all([
+      const [nextSettings, nextProducts, staff] = await Promise.all([
         fetchAppSettings(),
         fetchProductLineSettings(),
+        isAdmin ? fetchActiveStaffProfiles() : Promise.resolve([] as ActiveStaffProfile[]),
       ])
+      setStaffProfiles(staff)
       setSettings(nextSettings)
       setDefaultDraft(String(nextSettings.defaultReorderLevel))
       setProducts(nextProducts)
@@ -141,10 +159,16 @@ export function SettingsContent() {
   useEffect(() => {
     if (!canAccessSettings(role)) return
     let cancelled = false
-    void Promise.all([fetchAppSettings(), fetchProductLineSettings()])
-      .then(([nextSettings, nextProducts]) => {
+    const admin = canManageUsers(role)
+    void Promise.all([
+      fetchAppSettings(),
+      fetchProductLineSettings(),
+      admin ? fetchActiveStaffProfiles() : Promise.resolve([] as ActiveStaffProfile[]),
+    ])
+      .then(([nextSettings, nextProducts, staff]) => {
         if (cancelled) return
         setSettings(nextSettings)
+        setStaffProfiles(staff)
         setDefaultDraft(String(nextSettings.defaultReorderLevel))
         setProducts(nextProducts)
         setProductDrafts(
@@ -229,32 +253,51 @@ export function SettingsContent() {
     await saveAppSettings({ lowStockRecipients: next }, "Email removed")
   }
 
-  async function addIssuerEmail(kind: "default" | "fortinet") {
-    const raw = kind === "default" ? issuerDefaultEmail : issuerFortinetEmail
-    const trimmed = raw.trim().toLowerCase()
-    if (!trimmed) return
-    const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-    if (!re.test(trimmed)) {
-      toast.error("Enter a valid email address")
-      return
-    }
-    const key =
-      kind === "default" ? "stockRequestIssuerRecipientsDefault" : "stockRequestIssuerRecipientsFortinet"
-    const current = settings?.[key] ?? []
-    if (current.includes(trimmed)) {
-      toast.error("That email is already in the list")
-      return
-    }
-    await saveAppSettings({ [key]: [...current, trimmed] }, "Issuer recipient added")
-    if (kind === "default") setIssuerDefaultEmail("")
-    else setIssuerFortinetEmail("")
+  function staffLabel(id: string): string {
+    const p = staffProfiles.find((row) => row.id === id)
+    if (!p) return id
+    return p.displayName?.trim() || p.email
   }
 
-  async function removeIssuerEmail(kind: "default" | "fortinet", email: string) {
-    const key =
-      kind === "default" ? "stockRequestIssuerRecipientsDefault" : "stockRequestIssuerRecipientsFortinet"
-    const next = (settings?.[key] ?? []).filter((value) => value !== email)
-    await saveAppSettings({ [key]: next }, "Issuer recipient removed")
+  async function addReportRecipient(kind: "problem" | "audit", userId: string) {
+    if (!userId) return
+    const key = kind === "problem" ? "problemReportRecipientIds" : "auditReportRecipientIds"
+    const current = settings?.[key] ?? []
+    if (current.includes(userId)) {
+      toast.error("That user is already in the list")
+      return
+    }
+    await saveAppSettings({ [key]: [...current, userId] }, "Recipient added")
+    if (kind === "problem") setPickProblemUser("")
+    else setPickAuditUser("")
+  }
+
+  async function removeReportRecipient(kind: "problem" | "audit", userId: string) {
+    const key = kind === "problem" ? "problemReportRecipientIds" : "auditReportRecipientIds"
+    const next = (settings?.[key] ?? []).filter((value) => value !== userId)
+    await saveAppSettings({ [key]: next }, "Recipient removed")
+  }
+
+  async function confirmAtlasLinkToggle() {
+    const reason = atlasToggleReason.trim()
+    if (reason.length < 10) {
+      toast.error("Enter a reason of at least 10 characters")
+      return
+    }
+    setSavingKey("atlas-link-required")
+    try {
+      await setAtlasLinkRequired(atlasToggleNext, reason)
+      const next = await fetchAppSettings()
+      setSettings(next)
+      toast.success(
+        atlasToggleNext ? "Atlas link required again on new requests" : "Atlas outage mode enabled",
+      )
+      setAtlasToggleOpen(false)
+    } catch (e) {
+      toastFromCaughtError(e, "Could not update Atlas setting")
+    } finally {
+      setSavingKey(null)
+    }
   }
 
   async function toggleEmailsEnabled(checked: boolean) {
@@ -439,6 +482,31 @@ export function SettingsContent() {
           </SettingsSection>
 
           <SettingsSection
+            title="Atlas task links on requests"
+            description="When Atlas is unavailable, turn off the requirement so requesters can submit without a link and add it later."
+          >
+            <div className="flex flex-col justify-between gap-4 rounded-xl border border-border/60 bg-muted/20 p-4 sm:flex-row sm:items-center">
+              <div>
+                <p className="text-sm font-medium text-foreground">Require Atlas task link on submit</p>
+                <p className="text-xs text-muted-foreground">
+                  {settings?.atlasLinkRequired ?? true
+                    ? "Requesters must paste a valid Atlas URL to submit."
+                    : "Outage mode — blank links are allowed (marked pending)."}
+                </p>
+              </div>
+              <Switch
+                checked={settings?.atlasLinkRequired ?? true}
+                onCheckedChange={(checked) => {
+                  setAtlasToggleNext(checked)
+                  setAtlasToggleReason("")
+                  setAtlasToggleOpen(true)
+                }}
+                disabled={!isAdmin || settingsLoading || savingKey === "atlas-link-required"}
+              />
+            </div>
+          </SettingsSection>
+
+          <SettingsSection
             title="Your access"
             description="Summary of how you appear in Fram-Stock."
           >
@@ -534,83 +602,118 @@ export function SettingsContent() {
             </div>
           </SettingsSection>
 
-          <SettingsSection
-            title="Stock request issuers"
-            description="When someone submits or resubmits a request, these portal users get a notification. All-Fortinet lines use the Fortinet list; everything else uses the default list."
-          >
-            <div className="flex flex-col gap-8">
-              {(
-                [
-                  {
-                    kind: "default" as const,
-                    label: "Default issuers (non-Fortinet)",
-                    list: settings?.stockRequestIssuerRecipientsDefault ?? [],
-                    draft: issuerDefaultEmail,
-                    setDraft: setIssuerDefaultEmail,
-                  },
-                  {
-                    kind: "fortinet" as const,
-                    label: "Fortinet issuers",
-                    list: settings?.stockRequestIssuerRecipientsFortinet ?? [],
-                    draft: issuerFortinetEmail,
-                    setDraft: setIssuerFortinetEmail,
-                  },
-                ] as const
-              ).map(({ kind, label, list, draft, setDraft }) => (
-                <div key={kind} className="space-y-3">
-                  <Label className="text-sm font-medium text-muted-foreground">{label}</Label>
-                  <div className="flex flex-col gap-2 sm:flex-row">
-                    <Input
-                      type="email"
-                      placeholder="email@example.com"
-                      className="h-11 flex-1 rounded-lg border-input bg-background"
-                      value={draft}
-                      onChange={(e) => setDraft(e.target.value)}
-                      onKeyDown={(e) =>
-                        e.key === "Enter" && (e.preventDefault(), void addIssuerEmail(kind))
-                      }
-                      disabled={!isAdmin || settingsLoading}
-                    />
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="secondary"
-                      className="h-11 shrink-0 rounded-lg"
-                      onClick={() => void addIssuerEmail(kind)}
-                      disabled={!isAdmin || settingsLoading || savingKey === "app-settings"}
-                    >
-                      <Plus className="mr-1 size-4" />
-                      Add
-                    </Button>
-                  </div>
-                  {list.length > 0 ? (
-                    <ul className="space-y-2">
-                      {list.map((email) => (
-                        <li
-                          key={email}
-                          className="flex items-center justify-between gap-2 rounded-lg border border-border/60 bg-muted/30 px-3 py-2.5 text-sm"
-                        >
-                          <span className="text-foreground">{email}</span>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            className="text-muted-foreground hover:text-destructive"
-                            onClick={() => void removeIssuerEmail(kind, email)}
-                            disabled={!isAdmin || savingKey === "app-settings"}
-                          >
-                            <Trash2 className="size-4" />
-                          </Button>
-                        </li>
+          {(settings?.problemReportRecipientMigrationSkipped.length ?? 0) > 0 ||
+          (settings?.auditReportRecipientMigrationSkipped.length ?? 0) > 0 ? (
+            <SettingsSection
+              title="Recipient migration — unmatched emails"
+              description="These addresses were on the old email lists but had no active portal profile when settings moved to user pickers. Add replacements below."
+            >
+              <div className="space-y-3 text-sm">
+                {(settings?.problemReportRecipientMigrationSkipped.length ?? 0) > 0 ? (
+                  <div>
+                    <p className="font-medium text-foreground">Problem reports</p>
+                    <ul className="mt-1 list-inside list-disc text-muted-foreground">
+                      {settings!.problemReportRecipientMigrationSkipped.map((email) => (
+                        <li key={`problem-${email}`}>{email}</li>
                       ))}
                     </ul>
-                  ) : (
-                    <EmptyState message="No recipients yet." />
-                  )}
+                  </div>
+                ) : null}
+                {(settings?.auditReportRecipientMigrationSkipped.length ?? 0) > 0 ? (
+                  <div>
+                    <p className="font-medium text-foreground">Audit reports</p>
+                    <ul className="mt-1 list-inside list-disc text-muted-foreground">
+                      {settings!.auditReportRecipientMigrationSkipped.map((email) => (
+                        <li key={`audit-${email}`}>{email}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+              </div>
+            </SettingsSection>
+          ) : null}
+
+          {(
+            [
+              {
+                kind: "problem" as const,
+                title: "Problem report notifications",
+                description:
+                  "Active users notified when someone submits a problem report. Inactive users are skipped even if listed.",
+                ids: settings?.problemReportRecipientIds ?? [],
+                pick: pickProblemUser,
+                setPick: setPickProblemUser,
+              },
+              {
+                kind: "audit" as const,
+                title: "Audit report notifications",
+                description:
+                  "Active users notified for the daily audit digest and weekly exceptions summary.",
+                ids: settings?.auditReportRecipientIds ?? [],
+                pick: pickAuditUser,
+                setPick: setPickAuditUser,
+              },
+            ] as const
+          ).map(({ kind, title, description, ids, pick, setPick }) => (
+            <SettingsSection key={kind} title={title} description={description}>
+              <div className="space-y-3">
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Select value={pick} onValueChange={setPick} disabled={!isAdmin || settingsLoading}>
+                    <SelectTrigger className="h-11 flex-1 rounded-lg">
+                      <SelectValue placeholder="Choose an active user…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {staffProfiles.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.displayName?.trim() || p.email}
+                          <span className="text-muted-foreground"> · {p.role}</span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    className="h-11 shrink-0 rounded-lg"
+                    onClick={() => void addReportRecipient(kind, pick)}
+                    disabled={!isAdmin || !pick || savingKey === "app-settings"}
+                  >
+                    <Plus className="mr-1 size-4" />
+                    Add
+                  </Button>
                 </div>
-              ))}
-            </div>
-          </SettingsSection>
+                {ids.length > 0 ? (
+                  <ul className="space-y-2">
+                    {ids.map((id) => (
+                      <li
+                        key={id}
+                        className="flex items-center justify-between gap-2 rounded-lg border border-border/60 bg-muted/30 px-3 py-2.5 text-sm"
+                      >
+                        <span className="text-foreground">{staffLabel(id)}</span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="text-muted-foreground hover:text-destructive"
+                          onClick={() => void removeReportRecipient(kind, id)}
+                          disabled={!isAdmin || savingKey === "app-settings"}
+                        >
+                          <Trash2 className="size-4" />
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <EmptyState message="No recipients — all active admins are notified by default." />
+                )}
+              </div>
+            </SettingsSection>
+          ))}
+          <p className="px-1 pb-6 text-sm text-muted-foreground">
+            New and resubmitted stock requests notify every active admin automatically (Fortinet requests also notify
+            active accounts). No separate issuer list is required.
+          </p>
         </TabsContent>
 
         <TabsContent
@@ -826,6 +929,44 @@ export function SettingsContent() {
           </SettingsSection>
         </TabsContent>
       </Tabs>
+
+      <Dialog open={atlasToggleOpen} onOpenChange={setAtlasToggleOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {atlasToggleNext ? "Require Atlas links again?" : "Allow requests without Atlas?"}
+            </DialogTitle>
+            <DialogDescription>
+              {atlasToggleNext
+                ? "New submissions will need a valid Atlas task URL again. Requesters with pending links are notified."
+                : "Requesters can submit with a blank link; those requests stay valid until a link is added."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="atlas-toggle-reason">Reason (audited)</Label>
+            <Textarea
+              id="atlas-toggle-reason"
+              value={atlasToggleReason}
+              onChange={(e) => setAtlasToggleReason(e.target.value)}
+              rows={3}
+              placeholder="Why are you changing this?"
+              disabled={savingKey === "atlas-link-required"}
+            />
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setAtlasToggleOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={() => void confirmAtlasLinkToggle()}
+              disabled={savingKey === "atlas-link-required"}
+            >
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

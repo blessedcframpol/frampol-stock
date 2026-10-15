@@ -55,8 +55,15 @@ import {
   type IssueScanSlot,
 } from "@/lib/issue-scan"
 import {
+  ISSUE_LOCK_IDLE_RELEASE_MS,
+  ISSUE_LOCK_TOUCH_INTERVAL_MS,
+  formatIssueLockAge,
+} from "@/lib/issue-lock"
+import {
+  beginRequestIssue,
   cancelRequest,
   closeOutstanding,
+  endRequestIssue,
   fetchIssuedCountsByLineId,
   fetchIssuedSerialsForRequest,
   fetchProfileLabels,
@@ -65,8 +72,11 @@ import {
   issueUnits,
   previewIssueScan,
   rejectRequest,
+  takeOverRequestIssue,
+  touchRequestIssue,
   type IssueUnitsResult,
   type RejectReasonCode,
+  type RequestIssueLock,
   type StockRequestWithRelations,
 } from "@/lib/supabase/stock-requests-db"
 import {
@@ -185,8 +195,16 @@ export function StockRequestFulfill({
   const processingRef = useRef(false)
   const slotsRef = useRef(slots)
   const modeRef = useRef(mode)
+  const lastIssueActivityRef = useRef(Date.now())
+  const lockHeldRef = useRef(false)
+  const [issueLock, setIssueLock] = useState<RequestIssueLock | null>(null)
+  const [takeoverBusy, setTakeoverBusy] = useState(false)
   slotsRef.current = slots
   modeRef.current = mode
+
+  const bumpIssueLockActivity = useCallback(() => {
+    lastIssueActivityRef.current = Date.now()
+  }, [])
 
   const refresh = useCallback(
     async (isCancelled: () => boolean = () => false) => {
@@ -257,6 +275,49 @@ export function StockRequestFulfill({
   }, [allowed, refresh])
 
   useEffect(() => {
+    if (!allowed || previewOnly || !requestId) return
+    const sb = getSupabaseClient()
+    lastIssueActivityRef.current = Date.now()
+    void beginRequestIssue(sb, requestId)
+      .then((lock) => {
+        setIssueLock(lock)
+        lockHeldRef.current = lock.heldByMe && !lock.needsTakeover
+      })
+      .catch(() => {})
+    const touch = window.setInterval(() => {
+      if (!lockHeldRef.current) return
+      const idleMs = Date.now() - lastIssueActivityRef.current
+      if (idleMs >= ISSUE_LOCK_IDLE_RELEASE_MS) {
+        lockHeldRef.current = false
+        void endRequestIssue(sb, requestId).catch(() => {})
+        return
+      }
+      void touchRequestIssue(sb, requestId).catch(() => {})
+    }, ISSUE_LOCK_TOUCH_INTERVAL_MS)
+    return () => {
+      window.clearInterval(touch)
+      lockHeldRef.current = false
+      void endRequestIssue(sb, requestId).catch(() => {})
+    }
+  }, [allowed, previewOnly, requestId])
+
+  async function handleTakeOverIssueLock() {
+    if (previewOnly) return
+    setTakeoverBusy(true)
+    try {
+      const lock = await takeOverRequestIssue(getSupabaseClient(), requestId)
+      setIssueLock(lock)
+      lockHeldRef.current = true
+      lastIssueActivityRef.current = Date.now()
+      toast.success("You took over issuing on this request.")
+    } catch (e) {
+      toastFromCaughtError(e, "Could not take over")
+    } finally {
+      setTakeoverBusy(false)
+    }
+  }
+
+  useEffect(() => {
     if (!loading && !issuedView) inputRef.current?.focus()
   }, [loading, issuedView, mode, cloudKeyPrompt])
 
@@ -271,6 +332,7 @@ export function StockRequestFulfill({
       if (!request || issuedView) return
       const value = raw.trim()
       if (!value) return
+      bumpIssueLockActivity()
 
       if (modeRef.current === "cloud_key") {
         const applied = applyCloudKeyToAwaiting(slotsRef.current, value)
@@ -326,7 +388,15 @@ export function StockRequestFulfill({
         if (!muted) playIssueScanError()
       }
     },
-    [request, issuedView, muted, previewOnly, previewRequestByProductId, previewFallbackRequestId]
+    [
+      request,
+      issuedView,
+      muted,
+      previewOnly,
+      previewRequestByProductId,
+      previewFallbackRequestId,
+      bumpIssueLockActivity,
+    ]
   )
 
   const drainQueue = useCallback(async () => {
@@ -355,6 +425,9 @@ export function StockRequestFulfill({
   }
 
   function onScanKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key.length === 1 || e.key === "Backspace" || e.key === "Delete") {
+      bumpIssueLockActivity()
+    }
     if (e.key === "Enter" || e.key === "Tab") {
       e.preventDefault()
       // Use the live input value — React state can lag a keyboard-wedge Enter.
@@ -365,6 +438,7 @@ export function StockRequestFulfill({
   }
 
   function onScanChange(e: React.ChangeEvent<HTMLInputElement>) {
+    bumpIssueLockActivity()
     const { complete, rest } = consumeScanBuffer(e.target.value)
     setScanBuffer(rest)
     pushScans(complete)
@@ -390,6 +464,7 @@ export function StockRequestFulfill({
     setConfirmPartial(false)
     setBusy(true)
     setIssueResult(null)
+    bumpIssueLockActivity()
     try {
       const res = await issueUnits(
         getSupabaseClient(),
@@ -545,6 +620,25 @@ export function StockRequestFulfill({
         }
       />
       <PageBreadcrumbs items={crumbs} />
+
+      {issueLock?.needsTakeover && issueLock.displayName && issueLock.since ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-950 dark:text-amber-100">
+          <AlertCircle className="size-4 shrink-0" />
+          <span>
+            {issueLock.displayName} is issuing this ({formatIssueLockAge(issueLock.since)}) —{" "}
+          </span>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="h-8"
+            disabled={previewOnly || takeoverBusy}
+            onClick={() => void handleTakeOverIssueLock()}
+          >
+            {takeoverBusy ? <Loader2 className="size-4 animate-spin" /> : "Take over?"}
+          </Button>
+        </div>
+      ) : null}
 
       <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
         <RequestStatusPill status={displayStatus} />

@@ -45,8 +45,13 @@ export function parseAtlasTaskUrl(value: string | null | undefined): ParsedAtlas
 
 /** Null when acceptable. Empty → required; bad shape → fixed user-facing copy. */
 export function atlasTaskUrlProblem(value: string): string | null {
+  return atlasTaskUrlProblemWhenRequired(value, true)
+}
+
+/** When Atlas link is optional (outage mode), empty is OK; invalid shape is still rejected. */
+export function atlasTaskUrlProblemWhenRequired(value: string, required: boolean): string | null {
   const trimmed = value.trim()
-  if (!trimmed) return "Atlas task link is required"
+  if (!trimmed) return required ? "Atlas task link is required" : null
   if (!parseAtlasTaskUrl(trimmed)) return ATLAS_TASK_LINK_HINT
   return null
 }

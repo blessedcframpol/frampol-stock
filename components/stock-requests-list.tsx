@@ -45,6 +45,7 @@ import { formatClientLabel } from "@/lib/client-label"
 import { PageHeader } from "@/components/page-nav"
 import { ToIssueQueue } from "@/components/to-issue-queue"
 import { RequesterNeedsYou } from "@/components/requester-needs-you"
+import { AtlasLinkPendingPill } from "@/components/atlas-link-pending-pill"
 
 type SortKey = "newest" | "oldest" | "status" | "client"
 
@@ -56,6 +57,7 @@ const SORT_LABELS: Record<SortKey, string> = {
 }
 
 const ALL = "all"
+const ATLAS_PENDING = "atlas_pending"
 
 function clientLabel(r: StockRequestWithRelations): string {
   return r.client ? formatClientLabel(r.client) : r.client_id
@@ -121,7 +123,9 @@ export function StockRequestsList({
 
   const visible = useMemo(() => {
     const rows = requests.filter((r) => {
-      if (statusFilter !== ALL && displayStatuses[r.id] !== statusFilter) return false
+      if (statusFilter === ATLAS_PENDING && !r.atlas_link_pending) return false
+      if (statusFilter !== ALL && statusFilter !== ATLAS_PENDING && displayStatuses[r.id] !== statusFilter)
+        return false
       if (isAdmin && userFilter !== ALL && r.created_by !== userFilter) return false
       if (numberQuery.trim() && !matchesRequestNumber(r.request_number, numberQuery)) return false
       return true
@@ -265,6 +269,7 @@ export function StockRequestsList({
                     {DISPLAY_STATUS_LABELS[s]}
                   </SelectItem>
                 ))}
+                <SelectItem value={ATLAS_PENDING}>Atlas link pending</SelectItem>
               </SelectContent>
             </Select>
             {isAdmin ? (
@@ -316,6 +321,9 @@ export function StockRequestsList({
                         <div className="flex min-w-0 items-start justify-between gap-3">
                           <div className="min-w-0">
                             <p className="font-medium tabular-nums text-foreground">{r.request_number}</p>
+                            {r.atlas_link_pending ? (
+                              <AtlasLinkPendingPill className="mt-1" />
+                            ) : null}
                             <p className="truncate text-sm text-muted-foreground">{clientLabel(r)}</p>
                           </div>
                           <RequestStatusPill status={displayStatuses[r.id]} />
@@ -353,7 +361,8 @@ export function StockRequestsList({
                       {visible.map((r) => (
                         <TableRow key={r.id}>
                           <TableCell className="font-medium whitespace-nowrap tabular-nums">
-                            {r.request_number}
+                            <div>{r.request_number}</div>
+                            {r.atlas_link_pending ? <AtlasLinkPendingPill className="mt-1" /> : null}
                           </TableCell>
                           <TableCell className="font-medium max-w-[12rem] truncate">
                             {clientLabel(r)}

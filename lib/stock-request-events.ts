@@ -84,6 +84,13 @@ export function describeRequestEvent(event: RequestEventLike): RequestEventView 
       const kind = text(p.not_invoiced_kind)
       return { title: "00000 approved", detail: kind }
     }
+    case "issue_lock_takeover": {
+      return { title: "Issue screen taken over", detail: null }
+    }
+    case "atlas_link_set": {
+      const url = text(p.atlas_task_url)
+      return { title: "Atlas task link added", detail: url }
+    }
     default:
       return { title: event.event_type.replaceAll("_", " "), detail: null }
   }

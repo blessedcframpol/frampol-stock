@@ -43,10 +43,11 @@ import {
 } from "@/lib/supabase/stock-requests-db"
 import { clientCommandItemValue, filterClientsForPicker } from "@/lib/search"
 import { invoiceChoiceProblem, type InvoiceChoice, type NotInvoicedKind } from "@/lib/invoices"
+import { fetchAppSettings } from "@/lib/settings"
 import {
   ATLAS_TASK_URL_EXAMPLE,
   REQUEST_TYPES,
-  atlasTaskUrlProblem,
+  atlasTaskUrlProblemWhenRequired,
   clientIsAutomatic,
   requestLinesProblem,
   requestTypeNeedsReturnDate,
@@ -183,6 +184,20 @@ export function StockRequestForm({
   const [newClientEmail, setNewClientEmail] = useState("")
   const [newClientPhone, setNewClientPhone] = useState("")
   const [sites, setSites] = useState<ClientSite[]>([{ address: "" }])
+  const [atlasLinkRequired, setAtlasLinkRequired] = useState(true)
+
+  useEffect(() => {
+    if (!canCreate) return
+    let cancelled = false
+    void fetchAppSettings()
+      .then((s) => {
+        if (!cancelled) setAtlasLinkRequired(s.atlasLinkRequired)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [canCreate])
 
   const productOptions = useMemo<ProductOption[]>(() => {
     const byId = new Map<string, ProductOption>()
@@ -207,7 +222,7 @@ export function StockRequestForm({
   const clientAuto = clientIsAutomatic(invoiceChoice, notInvoicedKind)
   const needsReturnDate = requestTypeNeedsReturnDate(type)
 
-  const atlasProblem = atlasTaskUrlProblem(atlasUrl)
+  const atlasProblem = atlasTaskUrlProblemWhenRequired(atlasUrl, atlasLinkRequired)
   const returnProblem = returnDateProblem(type, returnDate, today)
   const linesProblem = requestLinesProblem(type, toFormLines(lines))
   const invoiceProblem = invoiceChoiceProblem(invoiceChoice, invoiceNumber, notInvoicedReason, notInvoicedKind)
@@ -344,6 +359,18 @@ export function StockRequestForm({
         </div>
       ) : null}
 
+      {!atlasLinkRequired && mode === "create" ? (
+        <div
+          role="status"
+          className="flex gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-950 dark:text-amber-100"
+        >
+          <AlertCircle className="size-5 shrink-0" />
+          <p>
+            Atlas is down — you can submit without a task link and add it later.
+          </p>
+        </div>
+      ) : null}
+
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base font-semibold">
@@ -458,7 +485,9 @@ export function StockRequestForm({
           </div>
 
           <div className="flex flex-col gap-2">
-            <Label htmlFor="rq-atlas">Atlas task link</Label>
+            <Label htmlFor="rq-atlas">
+              Atlas task link{!atlasLinkRequired ? " (optional while Atlas is down)" : ""}
+            </Label>
             <Input
               id="rq-atlas"
               value={atlasUrl}

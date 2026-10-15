@@ -49,8 +49,9 @@ export async function runChecks(ctx) {
   )
   await db.query(
     `UPDATE public.app_settings
-     SET problem_report_recipients = ARRAY['harness-086-blessed@test.local']
-     WHERE id IS TRUE`
+     SET problem_report_recipient_ids = ARRAY[$1::uuid]
+     WHERE id IS TRUE`,
+    [blessed],
   )
 
   const roles = ["admin", "sales", "accounts", "technicians", "viewer"]

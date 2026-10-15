@@ -46,6 +46,8 @@ const SUITE = [
   { id: "091", file: "scripts/verify-091-rq7b-batch-drawer-timeline.mjs" },
   { id: "092", file: "scripts/verify-092-rq7c-batch-request-context-lockdown.mjs" },
   { id: "093", file: "scripts/verify-093-nt1-notifications-live.mjs" },
+  { id: "094", file: "scripts/verify-094-nt1c-issue-lock-advisory.mjs" },
+  { id: "095", file: "scripts/verify-095-at1-atlas-outage.mjs" },
   { id: "movement", file: "scripts/verify-movement-transitions.mjs" },
 ]
 

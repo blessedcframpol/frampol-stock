@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
@@ -17,10 +17,14 @@ import { useAuth } from "@/lib/auth-context"
 import { getSupabaseClient } from "@/lib/supabase/client"
 import {
   approveNotInvoiced,
+  fetchFreshIssueLocks,
+  fetchProfileLabels,
   rejectRequest,
   type RejectReasonCode,
   type StockRequestWithRelations,
 } from "@/lib/supabase/stock-requests-db"
+import { AtlasLinkPendingPill } from "@/components/atlas-link-pending-pill"
+import { formatIssueLockAge } from "@/lib/issue-lock"
 import { useRequestDisplayStatuses } from "@/hooks/use-request-display-statuses"
 import { REJECT_REASON_LABELS, requestItemsSummary } from "@/lib/stock-request-statuses"
 import { formatClientLabel } from "@/lib/client-label"
@@ -58,8 +62,65 @@ type Props = {
 export function ToIssueQueue({ requests, requesterName, onChanged }: Props) {
   const { user } = useAuth()
   const timeZone = useOrgTimezone()
+  const [freshLocks, setFreshLocks] = useState<
+    Map<string, { userId: string; since: string }>
+  >(new Map())
+  const [lockLabels, setLockLabels] = useState<Map<string, string>>(new Map())
   const today = todayBusinessDate(timeZone)
   const displayStatuses = useRequestDisplayStatuses(requests)
+
+  const toIssueIds = useMemo(
+    () =>
+      [...requests]
+        .filter((r) => {
+          const s = displayStatuses[r.id]
+          return s === "being_reviewed" || s === "partially_issued"
+        })
+        .map((r) => r.id),
+    [requests, displayStatuses],
+  )
+
+  useEffect(() => {
+    if (toIssueIds.length === 0) {
+      setFreshLocks(new Map())
+      return
+    }
+    let cancelled = false
+    const load = () => {
+      void fetchFreshIssueLocks(getSupabaseClient(), toIssueIds).then((map) => {
+        if (cancelled) return
+        const next = new Map<string, { userId: string; since: string }>()
+        for (const id of toIssueIds) {
+          const row = map.get(id)
+          if (row?.activeUserId && row.activeSince) {
+            next.set(id, { userId: row.activeUserId, since: row.activeSince })
+          }
+        }
+        setFreshLocks(next)
+      })
+    }
+    load()
+    const timer = window.setInterval(load, 30_000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [toIssueIds])
+
+  useEffect(() => {
+    const ids = [...new Set([...freshLocks.values()].map((v) => v.userId))]
+    if (ids.length === 0) {
+      setLockLabels(new Map())
+      return
+    }
+    let cancelled = false
+    void fetchProfileLabels(getSupabaseClient(), ids).then((map) => {
+      if (!cancelled) setLockLabels(map)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [freshLocks])
 
   const toIssue = useMemo(() => {
     return [...requests]
@@ -148,7 +209,21 @@ export function ToIssueQueue({ requests, requesterName, onChanged }: Props) {
                   return (
                     <TableRow key={r.id}>
                       <TableCell className="font-medium whitespace-nowrap tabular-nums">
-                        {r.request_number}
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span>{r.request_number}</span>
+                          {r.atlas_link_pending ? <AtlasLinkPendingPill /> : null}
+                        </div>
+                        {(() => {
+                          const lock = freshLocks.get(r.id)
+                          if (!lock || lock.userId === user?.id) return null
+                          const label = lockLabels.get(lock.userId)
+                          if (!label) return null
+                          return (
+                            <p className="mt-0.5 text-xs font-normal text-amber-700 dark:text-amber-400">
+                              Being issued by {label} ({formatIssueLockAge(lock.since)})
+                            </p>
+                          )
+                        })()}
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground whitespace-nowrap">{r.type}</TableCell>
                       <TableCell className="font-medium">

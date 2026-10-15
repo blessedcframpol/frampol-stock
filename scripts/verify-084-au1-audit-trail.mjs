@@ -44,8 +44,9 @@ export async function runChecks(ctx) {
   // Seed recipient to the fixture admin so digest/weekly notify inside the txn.
   await db.query(
     `UPDATE public.app_settings
-     SET audit_report_recipients = ARRAY['harness-084-admin@test.local']
-     WHERE id IS TRUE`
+     SET audit_report_recipient_ids = ARRAY[$1::uuid]
+     WHERE id IS TRUE`,
+    [adminId],
   )
 
   // --- Coverage: every public table audited or excluded ---

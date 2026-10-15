@@ -9,10 +9,11 @@ export interface Database {
           default_reorder_level: number
           low_stock_emails_enabled: boolean
           low_stock_recipients: string[]
-          audit_report_recipients: string[]
-          problem_report_recipients: string[]
-          stock_request_issuer_recipients_default: string[]
-          stock_request_issuer_recipients_fortinet: string[]
+          problem_report_recipient_ids: string[]
+          audit_report_recipient_ids: string[]
+          problem_report_recipient_migration_skipped: string[]
+          audit_report_recipient_migration_skipped: string[]
+          atlas_link_required: boolean
           timezone: string
           internal_client_id: string | null
           updated_at: string
@@ -23,10 +24,11 @@ export interface Database {
           default_reorder_level?: number
           low_stock_emails_enabled?: boolean
           low_stock_recipients?: string[]
-          audit_report_recipients?: string[]
-          problem_report_recipients?: string[]
-          stock_request_issuer_recipients_default?: string[]
-          stock_request_issuer_recipients_fortinet?: string[]
+          problem_report_recipient_ids?: string[]
+          audit_report_recipient_ids?: string[]
+          problem_report_recipient_migration_skipped?: string[]
+          audit_report_recipient_migration_skipped?: string[]
+          atlas_link_required?: boolean
           timezone?: string
           internal_client_id?: string | null
           updated_at?: string
@@ -37,10 +39,11 @@ export interface Database {
           default_reorder_level?: number
           low_stock_emails_enabled?: boolean
           low_stock_recipients?: string[]
-          audit_report_recipients?: string[]
-          problem_report_recipients?: string[]
-          stock_request_issuer_recipients_default?: string[]
-          stock_request_issuer_recipients_fortinet?: string[]
+          problem_report_recipient_ids?: string[]
+          audit_report_recipient_ids?: string[]
+          problem_report_recipient_migration_skipped?: string[]
+          audit_report_recipient_migration_skipped?: string[]
+          atlas_link_required?: boolean
           timezone?: string
           internal_client_id?: string | null
           updated_at?: string
@@ -232,6 +235,7 @@ export interface Database {
           return_date: string | null
           atlas_task_url: string | null
           atlas_task_id: string | null
+          atlas_link_pending: boolean
           quotation_url: string | null
           notes: string | null
           submitted_at: string
@@ -254,6 +258,8 @@ export interface Database {
           cancel_reason: string | null
           cancelled_by: string | null
           cancelled_at: string | null
+          issue_lock_user_id: string | null
+          issue_lock_since: string | null
           created_at: string
           updated_at: string
         }
@@ -267,6 +273,7 @@ export interface Database {
           return_date?: string | null
           atlas_task_url?: string | null
           atlas_task_id?: string | null
+          atlas_link_pending?: boolean
           quotation_url?: string | null
           notes?: string | null
           submitted_at?: string
@@ -289,6 +296,8 @@ export interface Database {
           cancel_reason?: string | null
           cancelled_by?: string | null
           cancelled_at?: string | null
+          issue_lock_user_id?: string | null
+          issue_lock_since?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -302,6 +311,7 @@ export interface Database {
           return_date?: string | null
           atlas_task_url?: string | null
           atlas_task_id?: string | null
+          atlas_link_pending?: boolean
           quotation_url?: string | null
           notes?: string | null
           submitted_at?: string
@@ -324,6 +334,8 @@ export interface Database {
           cancel_reason?: string | null
           cancelled_by?: string | null
           cancelled_at?: string | null
+          issue_lock_user_id?: string | null
+          issue_lock_since?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -1590,6 +1602,38 @@ export interface Database {
       ensure_product_line: {
         Args: { p_product_name: string; p_vendor: string }
         Returns: string
+      }
+      begin_request_issue: {
+        Args: { p_request_id: string }
+        Returns: Json
+      }
+      touch_request_issue: {
+        Args: { p_request_id: string }
+        Returns: undefined
+      }
+      end_request_issue: {
+        Args: { p_request_id: string }
+        Returns: undefined
+      }
+      take_over_request_issue: {
+        Args: { p_request_id: string }
+        Returns: Json
+      }
+      stock_request_fresh_issue_locks: {
+        Args: { p_request_ids: string[] }
+        Returns: {
+          request_id: string
+          issue_lock_active_user_id: string | null
+          issue_lock_active_since: string | null
+        }[]
+      }
+      set_atlas_link_required: {
+        Args: { p_required: boolean; p_reason: string }
+        Returns: undefined
+      }
+      set_request_atlas_link: {
+        Args: { p_request_id: string; p_url: string }
+        Returns: undefined
       }
       submit_request: {
         Args: { p_payload: Json }

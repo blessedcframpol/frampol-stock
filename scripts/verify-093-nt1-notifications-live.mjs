@@ -1,7 +1,7 @@
 /**
- * NT1 — issuer notifications, inbox RLS, request queues data after submit/issue.
+ * NT1 / NT1b — request notifications (role-based submit), inbox RLS, issue → requester only.
  *
- *   node scripts/rehearse-migration.mjs supabase/migrations/20261013111300_nt1_notifications_live.sql scripts/verify-093-nt1-notifications-live.mjs
+ *   node scripts/rehearse-migration.mjs supabase/migrations/20261014120000_nt1b_role_request_notifications.sql scripts/verify-093-nt1-notifications-live.mjs
  *   node scripts/verify-093-nt1-notifications-live.mjs
  */
 import { runVerifyCli } from "./verify-harness.mjs"
@@ -34,20 +34,12 @@ export async function runChecks(ctx) {
   const { db, pass, fail, asUser } = ctx
   await db.query(`SET LOCAL statement_timeout = '120s'`)
 
-  const issuerEmail = `${EMAIL}issuer@test.local`
-  const otherEmail = `${EMAIL}other-admin@test.local`
-
-  const issuerId = await ctx.createFixtureUser("admin", issuerEmail)
-  const otherAdminId = await ctx.createFixtureUser("admin", otherEmail)
+  const adminA = await ctx.createFixtureUser("admin", `${EMAIL}admin-a@test.local`)
+  const adminB = await ctx.createFixtureUser("admin", `${EMAIL}admin-b@test.local`)
+  const inactiveAdmin = await ctx.createFixtureUser("admin", `${EMAIL}inactive-admin@test.local`)
+  await db.query(`UPDATE public.profiles SET active = false WHERE id = $1`, [inactiveAdmin])
   const salesId = await ctx.createFixtureUser("sales", `${EMAIL}sales@test.local`)
-
-  await db.query(
-    `UPDATE public.app_settings
-     SET stock_request_issuer_recipients_default = ARRAY[$1]::text[],
-         stock_request_issuer_recipients_fortinet = ARRAY[$1]::text[]
-     WHERE id IS TRUE`,
-    [issuerEmail],
-  )
+  const accountsId = await ctx.createFixtureUser("accounts", `${EMAIL}accounts@test.local`)
 
   const client = await db.query(
     `INSERT INTO public.clients (id, name, company, email)
@@ -107,43 +99,26 @@ export async function runChecks(ctx) {
   }
   pass("submit_sales", requestId)
 
-  const issuerInbox = await asUser(issuerId, async () => {
-    const res = await db.query(
-      `SELECT id, type, read_at, user_id::text AS uid
-       FROM public.notifications
-       WHERE type = 'request_submitted'
-         AND metadata->>'request_id' = $1`,
-      [requestId],
-    )
-    return res.rows
-  })
-  if (issuerInbox.length === 1 && issuerInbox[0].uid === issuerId) {
-    pass("issuer_notification", "request_submitted")
+  const adminNotes = await db.query(
+    `SELECT user_id::text AS uid FROM public.notifications
+     WHERE type = 'request_submitted' AND metadata->>'request_id' = $1`,
+    [requestId],
+  )
+  const adminUids = new Set(adminNotes.rows.map((r) => r.uid))
+  if (adminUids.has(adminA) && adminUids.has(adminB) && !adminUids.has(inactiveAdmin) && !adminUids.has(salesId)) {
+    pass("submit_notify_admins", `n=${adminUids.size}`)
   } else {
-    fail("issuer_notification", JSON.stringify(issuerInbox))
+    fail("submit_notify_admins", JSON.stringify(adminNotes.rows))
   }
 
-  const otherInbox = await asUser(otherAdminId, async () => {
-    const res = await db.query(
-      `SELECT id FROM public.notifications WHERE type = 'request_submitted' AND metadata->>'request_id' = $1`,
-      [requestId],
-    )
-    return res.rows
-  })
-  if (otherInbox.length === 0) pass("issuer_isolation", "other admin sees none")
-  else fail("issuer_isolation", `n=${otherInbox.length}`)
-
   const salesSeesIssuerRows = await asUser(salesId, async () => {
-    const res = await db.query(
-      `SELECT id FROM public.notifications WHERE user_id = $1::uuid`,
-      [issuerId],
-    )
+    const res = await db.query(`SELECT id FROM public.notifications WHERE user_id = $1::uuid`, [adminA])
     return res.rows
   })
   if (salesSeesIssuerRows.length === 0) pass("notifications_rls", "cannot read other user rows")
   else fail("notifications_rls", `saw ${salesSeesIssuerRows.length}`)
 
-  const toIssue = await asUser(issuerId, async () => {
+  const toIssue = await asUser(adminA, async () => {
     const res = await db.query(
       `SELECT id, review_state FROM public.stock_requests
        WHERE id = $1 AND review_state IN ('submitted', 'partially_issued')`,
@@ -154,9 +129,78 @@ export async function runChecks(ctx) {
   if (toIssue.length === 1) pass("to_issue_row", toIssue[0].review_state)
   else fail("to_issue_row", JSON.stringify(toIssue))
 
+  const lockA = await asUser(adminA, async () => {
+    const row = await db.query(`SELECT public.begin_request_issue($1::uuid) AS v`, [requestId])
+    return row.rows[0].v
+  })
+  if (lockA?.held_by_me === true && lockA?.user_id === adminA) pass("issue_lock_begin", "held")
+  else fail("issue_lock_begin", JSON.stringify(lockA))
+
+  const lockView = await asUser(adminB, async () => {
+    const row = await db.query(
+      `SELECT issue_lock_active_user_id::text AS uid
+       FROM public.stock_request_fresh_issue_locks(ARRAY[$1::uuid])`,
+      [requestId],
+    )
+    return row.rows[0]?.uid
+  })
+  if (lockView === adminA) pass("issue_lock_visible", adminA)
+  else fail("issue_lock_visible", lockView ?? "null")
+
+  await asUser(adminA, async () => {
+    await db.query(`SELECT public.end_request_issue($1::uuid)`, [requestId])
+  })
+
+  const fortinet = await db.query(
+    `SELECT id FROM public.product_lines
+     WHERE is_active IS TRUE AND lower(coalesce(vendor, '')) = 'fortinet'
+     ORDER BY product_name LIMIT 1`,
+  )
+  if (fortinet.rows.length >= 1) {
+    const fortinetProductId = fortinet.rows[0].id
+    const fortSerial = `${PREFIX}-F-${stamp()}`
+    await db.query(
+      `INSERT INTO public.inventory_items (
+         id, product_id, serial_number, status, stock_pool, location, date_added
+       ) VALUES (
+         gen_random_uuid(), $1, $2, 'In Stock', 'sale', 'Warehouse A', current_date::text
+       )`,
+      [fortinetProductId, fortSerial],
+    )
+    const fortSubmit = await asUser(salesId, () =>
+      attempt(`SELECT public.submit_request($1::jsonb)::text AS id`, [
+        JSON.stringify({
+          client_id: clientId,
+          type: "Sale",
+          atlas_task_url: MY_TASKS,
+          invoice_choice: "number",
+          invoice_number: `INV-${NOTES}-F`,
+          lines: [{ product_id: fortinetProductId, quantity: 1 }],
+          notes: `${NOTES} fortinet`,
+        }),
+      ]),
+    )
+    const fortRequestId = fortSubmit.rows[0]?.id
+    if (fortSubmit.ok && fortRequestId) {
+      const acctNote = await db.query(
+        `SELECT 1 FROM public.notifications
+         WHERE type = 'request_submitted'
+           AND metadata->>'request_id' = $1
+           AND user_id = $2::uuid`,
+        [fortRequestId, accountsId],
+      )
+      if (acctNote.rowCount === 1) pass("fortinet_notify_accounts", "accounts inbox")
+      else fail("fortinet_notify_accounts", "missing")
+    } else {
+      fail("fortinet_submit", fortSubmit.error ?? "no id")
+    }
+  } else {
+    pass("fortinet_notify_accounts", "skipped (no Fortinet product in catalog)")
+  }
+
   await dropMovementPrev(db)
   const clock = { tick: 0, baseIso: "2026-10-12T00:00:00.000Z" }
-  const issue = await asUser(issuerId, () =>
+  const issue = await asUser(adminA, () =>
     attempt(`SELECT public.issue_units($1::uuid, $2::jsonb) AS result`, [
       requestId,
       JSON.stringify([{ serial }]),
@@ -187,6 +231,14 @@ export async function runChecks(ctx) {
     fail("requester_issued_notification", JSON.stringify(requesterNote))
   }
 
+  const adminIssueNote = await db.query(
+    `SELECT 1 FROM public.notifications
+     WHERE type = 'request_units_issued' AND metadata->>'request_id' = $1 AND user_id = $2::uuid`,
+    [requestId, adminA],
+  )
+  if (adminIssueNote.rowCount === 0) pass("issue_notifies_requester_only", "admins not pinged on issue")
+  else fail("issue_notifies_requester_only", "admin got issue notification")
+
   const pub = await db.query(
     `SELECT 1 FROM pg_publication_tables
      WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'notifications'`,
@@ -198,5 +250,5 @@ export async function runChecks(ctx) {
 const isMain =
   process.argv[1] && process.argv[1].replace(/\\/g, "/").endsWith("verify-093-nt1-notifications-live.mjs")
 if (isMain) {
-  runVerifyCli({ markers: MARKERS, timeoutMs: 120_000 }, runChecks)
+  runVerifyCli({ markers: MARKERS, timeoutMs: 180_000, label: "093-nt1b" }, runChecks)
 }

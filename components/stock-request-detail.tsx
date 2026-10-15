@@ -30,7 +30,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { AtlasLinkPendingPill } from "@/components/atlas-link-pending-pill"
 import { InvoiceChoiceFields } from "@/components/invoice-choice-fields"
+import { Input } from "@/components/ui/input"
 import { RequestStatusPill } from "@/components/request-status-pill"
 import { useAuth } from "@/lib/auth-context"
 import { useEffectiveRole } from "@/lib/dev-role-preview"
@@ -53,12 +55,14 @@ import {
   fetchRequestEvents,
   fetchStockRequestById,
   rejectRequest,
+  setRequestAtlasLink,
   setRequestInvoice,
   type IssuedSerialRow,
   type RejectReasonCode,
   type StockRequestEvent,
   type StockRequestWithRelations,
 } from "@/lib/supabase/stock-requests-db"
+import { atlasTaskUrlProblem } from "@/lib/atlas-task-url"
 import { invoiceChoiceProblem, type InvoiceChoice, type NotInvoicedKind } from "@/lib/invoices"
 import { describeRequestEvent } from "@/lib/stock-request-events"
 import {
@@ -178,6 +182,8 @@ export function StockRequestDetail({ requestId }: { requestId: string }) {
   const [invNumber, setInvNumber] = useState("")
   const [invReason, setInvReason] = useState("")
   const [invKind, setInvKind] = useState<NotInvoicedKind | "">("")
+  const [atlasUrl, setAtlasUrl] = useState("")
+  const [atlasBusy, setAtlasBusy] = useState(false)
 
   const applyBundle = useCallback(async (opts?: { isCancelled?: () => boolean }) => {
     const isCancelled = opts?.isCancelled ?? (() => false)
@@ -269,6 +275,11 @@ export function StockRequestDetail({ requestId }: { requestId: string }) {
     (isOwner || canInvoiceStockRequests(role))
   const canBilling =
     canInvoiceStockRequests(role) && Boolean(row) && state !== "cancelled" && state !== "rejected"
+  const canAddAtlasLink =
+    Boolean(row?.atlas_link_pending) &&
+    state !== "cancelled" &&
+    state !== "closed" &&
+    (isOwner || isAdmin)
 
   async function run(action: () => Promise<void>, success: string, failure: string): Promise<boolean> {
     setBusy(true)
@@ -426,6 +437,7 @@ export function StockRequestDetail({ requestId }: { requestId: string }) {
                 {row.request_number} · {row.type} request
               </h1>
               <RequestStatusPill status={displayStatus} />
+              {row.atlas_link_pending ? <AtlasLinkPendingPill /> : null}
             </div>
             <p className="text-sm text-muted-foreground mt-1">
               {row.client ? formatClientLabel(row.client) : row.client_id} · Created{" "}
@@ -507,6 +519,15 @@ export function StockRequestDetail({ requestId }: { requestId: string }) {
         </p>
       ) : null}
 
+      {row.atlas_link_pending ? (
+        <div
+          role="status"
+          className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-950 dark:text-amber-100"
+        >
+          Atlas task link is still missing. Stock can be issued while you add the link.
+        </div>
+      ) : null}
+
       <Card>
         <CardContent className="grid gap-3 pt-6 text-sm sm:grid-cols-2">
           <div>
@@ -526,7 +547,7 @@ export function StockRequestDetail({ requestId }: { requestId: string }) {
               <p className="text-xs text-muted-foreground mt-0.5">{row.not_invoiced_reason}</p>
             ) : null}
           </div>
-          <div>
+          <div className="sm:col-span-2">
             <p className="text-xs text-muted-foreground">Atlas task</p>
             {row.atlas_task_url ? (
               <a
@@ -538,6 +559,45 @@ export function StockRequestDetail({ requestId }: { requestId: string }) {
                 Open in Atlas
                 <ExternalLink className="size-3.5" />
               </a>
+            ) : canAddAtlasLink ? (
+              <div className="mt-2 flex flex-col gap-2 max-w-xl">
+                <Input
+                  value={atlasUrl}
+                  onChange={(e) => setAtlasUrl(e.target.value)}
+                  placeholder="https://ai.frampolafrica.com:10801/my-tasks?…&task=…"
+                  autoComplete="off"
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  className="w-fit min-h-11 sm:min-h-9"
+                  disabled={atlasBusy}
+                  onClick={() => {
+                    const problem = atlasTaskUrlProblem(atlasUrl)
+                    if (problem) {
+                      toast.error(problem)
+                      return
+                    }
+                    setAtlasBusy(true)
+                    void (async () => {
+                      try {
+                        await setRequestAtlasLink(getSupabaseClient(), row.id, atlasUrl)
+                        toast.success("Atlas link saved.")
+                        setAtlasUrl("")
+                        await applyBundle()
+                        router.refresh()
+                      } catch (e) {
+                        toastFromCaughtError(e, "Could not save Atlas link")
+                      } finally {
+                        setAtlasBusy(false)
+                      }
+                    })()
+                  }}
+                >
+                  {atlasBusy ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
+                  Save Atlas link
+                </Button>
+              </div>
             ) : (
               <p className="text-muted-foreground">—</p>
             )}
