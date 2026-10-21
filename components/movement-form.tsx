@@ -652,17 +652,24 @@ export function MovementForm({
         saleTransactionDateIso: businessDate.trim() || undefined,
         movementMetadata,
         clientDirectory,
-        expectedProductName: pn,
-        expectedVendor: v,
+        // Inbound only: picker product/vendor. Non-Inbound takes both from each scanned kit.
+        expectedProductName: selectedType === "Inbound" ? pn || undefined : undefined,
+        expectedVendor: selectedType === "Inbound" ? v : undefined,
       })
 
       cloudKeysRef.current = undefined
 
       if (result.success.length > 0) {
+        const productLabel =
+          selectedType === "Inbound"
+            ? pn
+            : scannedKitSummary?.includes("products")
+              ? `${result.success.length} kits`
+              : scannedKitSummary ?? pn
         toast.success(
           result.success.length === 1
-            ? `Recorded: ${result.success[0]} (${pn})`
-            : `Recorded ${result.success.length} item(s) (${pn})`
+            ? `Recorded: ${result.success[0]} (${productLabel})`
+            : `Recorded ${result.success.length} item(s) (${productLabel})`
         )
         embedMode?.onClose?.()
         resetAfterSuccess()

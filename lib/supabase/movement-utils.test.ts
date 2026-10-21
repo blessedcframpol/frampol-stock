@@ -283,6 +283,94 @@ describe("validateMovementForItem", () => {
         })
       ).toMatch(/Vendor mismatch/)
     })
+    it("HF2: without expectedVendor, Starlink kit is not compared to General", () => {
+      expect(
+        validateMovementForItem("Sale", item({ status: "In Stock", vendor: "Starlink" }), {})
+      ).toBeNull()
+    })
+  })
+})
+
+/** HF2 — non-Inbound movements must not enforce a leftover Inbound vendor chip. */
+describe("HF2 vendor expectations on outbound movements", () => {
+  const vendors = ["Starlink", "Fortinet", "Ubiquiti", "General"] as const
+  const types: TransactionType[] = ["Sale", "POC Out", "Rentals", "Dispose", "Transfer"]
+
+  for (const vendor of vendors) {
+    for (const type of types) {
+      if (type === "Rentals" && vendor !== "Starlink") continue
+      it(`${type} allows ${vendor} kit without expectedVendor (after Inbound chip leftover)`, () => {
+        const inv = [
+          item({
+            status: "In Stock",
+            vendor,
+            name: `${vendor} Kit`,
+            stockPool: type === "Rentals" ? "sale" : "sale",
+          }),
+        ]
+        const result = computeMovementResult(inv, {
+          serialNumbers: ["SN-1"],
+          clientDisplay: "Client - Co",
+          clientId: "c1",
+          type,
+          // Simulate form state left on "General" after switching away from Inbound —
+          // callers must omit expectedVendor for non-Inbound (movement-form does).
+          expectedVendor: undefined,
+          expectedProductName: undefined,
+          fromLocation: type === "Transfer" ? "Warehouse A" : undefined,
+          toLocation: type === "Transfer" ? "Warehouse B" : undefined,
+          disposalReason: type === "Dispose" ? "End of life kit retired after inspection" : undefined,
+          authorisedBy: type === "Dispose" ? "Admin User" : undefined,
+          returnDate: type === "POC Out" || type === "Rentals" ? "2026-12-01" : undefined,
+          invoiceChoice: type === "Sale" || type === "Rentals" ? "pending" : undefined,
+        })
+        expect(result.rejected).toEqual([])
+        expect(result.success).toEqual(["SN-1"])
+      })
+    }
+  }
+
+  it("Sale still rejects when expectedVendor is wrongly set to General against Starlink", () => {
+    const inv = [item({ status: "In Stock", vendor: "Starlink" })]
+    const result = computeMovementResult(inv, {
+      serialNumbers: ["SN-1"],
+      clientDisplay: "Client - Co",
+      clientId: "c1",
+      type: "Sale",
+      expectedVendor: "General",
+      invoiceChoice: "pending",
+    })
+    expect(result.success).toEqual([])
+    expect(result.rejected[0]?.reason).toMatch(/Vendor mismatch/)
+  })
+
+  it("mixed-vendor batch Sale succeeds when expectations are omitted", () => {
+    const inv = [
+      item({ id: "1", serialNumber: "SN-SL", status: "In Stock", vendor: "Starlink", name: "SL Kit" }),
+      item({ id: "2", serialNumber: "SN-FG", status: "In Stock", vendor: "Fortinet", name: "FG Kit" }),
+      item({ id: "3", serialNumber: "SN-UB", status: "In Stock", vendor: "Ubiquiti", name: "UB Kit" }),
+      item({ id: "4", serialNumber: "SN-GN", status: "In Stock", vendor: "General", name: "GN Kit" }),
+    ]
+    const result = computeMovementResult(inv, {
+      serialNumbers: ["SN-SL", "SN-FG", "SN-UB", "SN-GN"],
+      clientDisplay: "Client - Co",
+      clientId: "c1",
+      type: "Sale",
+      invoiceChoice: "pending",
+    })
+    expect(result.rejected).toEqual([])
+    expect(result.success).toEqual(["SN-SL", "SN-FG", "SN-UB", "SN-GN"])
+  })
+
+  it("Inbound still enforces expectedVendor", () => {
+    const inv = [item({ status: "In Stock", vendor: "Starlink" })]
+    // Existing serial inbound is blocked for other reasons; check validateMovementForItem directly.
+    expect(
+      validateMovementForItem("Inbound", item({ status: "In Stock", vendor: "Starlink" }), {
+        expectedVendor: "General",
+      })
+    ).toMatch(/Vendor mismatch/)
+    expect(inv[0]?.vendor).toBe("Starlink")
   })
 })
 

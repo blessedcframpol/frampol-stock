@@ -119,6 +119,32 @@ describe("serial feedback", () => {
     expect(feedback.marks[0]?.detail).toBe("Mini · Starlink")
   })
 
+  it("HF2: Sale ignores leftover Inbound expectedVendor=General against Starlink kit", () => {
+    const feedback = buildSerialFeedback(
+      "Sale",
+      "KIT1",
+      [item({ serialNumber: "KIT1", name: "Standard Kit v4", vendor: "Starlink", status: "In Stock", stockPool: "sale" })],
+      { expectedVendor: "General", expectedProductName: "Something from Inbound picker" },
+    )
+    expect(feedback.blockedCount).toBe(0)
+    expect(feedback.validSerials).toEqual(["KIT1"])
+    expect(feedback.marks[0]?.detail).toBe("Standard Kit v4 · Starlink")
+  })
+
+  it("HF2: mixed-vendor batch is all valid on Sale (product from kits)", () => {
+    const inventory = [
+      item({ serialNumber: "A", vendor: "Starlink", name: "SL", status: "In Stock", stockPool: "sale" }),
+      item({ serialNumber: "B", vendor: "Fortinet", name: "FG", status: "In Stock", stockPool: "sale" }),
+      item({ serialNumber: "C", vendor: "Ubiquiti", name: "UB", status: "In Stock", stockPool: "sale" }),
+      item({ serialNumber: "D", vendor: "General", name: "GN", status: "In Stock", stockPool: "sale" }),
+    ]
+    const feedback = buildSerialFeedback("Sale", "A, B, C, D", inventory, {
+      expectedVendor: "General",
+    })
+    expect(feedback.validSerials).toEqual(["A", "B", "C", "D"])
+    expect(feedback.blockedCount).toBe(0)
+  })
+
   it("warns when returning a kit into an archived product", () => {
     const feedback = buildSerialFeedback("POC Return", "POC1", [
       item({
