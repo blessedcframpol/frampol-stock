@@ -24,3 +24,6 @@ _tmp-*
 
 .env
 .env.production
+
+.env.test
+tmp/
