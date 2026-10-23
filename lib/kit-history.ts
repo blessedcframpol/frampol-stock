@@ -1,5 +1,9 @@
 import { loadBatchRequestContext, type BatchRequestContext } from "@/lib/batch-request-context"
 import { getSupabaseClient } from "@/lib/supabase/client"
+import { fetchAllPages } from "@/lib/supabase/postgrest-page"
+
+/** Max ids per `.in()` so the request URL stays under PostgREST/proxy limits. */
+const TXN_ID_CHUNK = 500
 
 export type KitPlacementChange = {
   from: string
@@ -99,13 +103,23 @@ async function attachRequestContext(history: KitHistory): Promise<KitHistory> {
   const timeline = history.timeline ?? []
   if (timeline.length === 0) return history
   const supabase = getSupabaseClient()
-  const txnIds = timeline.map((entry) => entry.id).filter(Boolean)
+  // Timeline entry ids that are transaction ids (case/audit synthetic ids are skipped by the join).
+  const txnIds = [...new Set(timeline.map((entry) => entry.id).filter(Boolean))]
   const batchByTxn = new Map<string, string>()
-  for (let index = 0; index < txnIds.length; index += 80) {
-    const chunk = txnIds.slice(index, index + 80)
-    const { data, error } = await supabase.from("transactions").select("id, batch_id").in("id", chunk)
-    if (error) throw error
-    for (const row of data ?? []) {
+  for (let index = 0; index < txnIds.length; index += TXN_ID_CHUNK) {
+    const chunk = txnIds.slice(index, index + TXN_ID_CHUNK)
+    // Scoped by id list (not a full-table scan). fetchAllPages + unique order so >1000 ids
+    // in one chunk cannot truncate mid-page.
+    const rows = await fetchAllPages((from, to) =>
+      supabase
+        .from("transactions")
+        .select("id, batch_id")
+        .in("id", chunk)
+        .order("created_at", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, to),
+    )
+    for (const row of rows) {
       batchByTxn.set(row.id, row.batch_id?.trim() || row.id)
     }
   }

@@ -421,6 +421,63 @@ export async function runChecks(ctx) {
     pass("unknown_start", unknown.summary)
   } else fail("unknown_start", JSON.stringify({ summary: unknown.summary, placement: unknownPlacement }))
 
+  // HF3 — one kit with more than PostgREST's 1,000-row page: timeline must be complete.
+  const pageSerial = `${PREFIX}-pagecap`
+  const pageItemId = nextId("ITEM")
+  const pageCount = 1005
+  await db.query(`SET LOCAL session_replication_role = replica`)
+  await db.query(
+    `INSERT INTO public.inventory_items (
+       id, product_id, serial_number, status, date_added, location, stock_pool
+     ) VALUES ($1, $2, $3, 'In Stock', $4, 'Warehouse A', 'sale')`,
+    [pageItemId, starId, pageSerial, D35],
+  )
+  await db.query(
+    `INSERT INTO public.transactions (
+       id, type, serial_number, item_name, client, date, batch_id, created_at
+     )
+     SELECT
+       $1 || i::text,
+       'Inbound',
+       $2,
+       $3,
+       'Internal',
+       '2026-01-01T00:00:00.000Z',
+       $4 || i::text,
+       timestamptz '2026-01-01 00:00:00+00' + (i || ' milliseconds')::interval
+     FROM generate_series(1, $5) AS i`,
+    [`TXN-${PREFIX}-page-`, pageSerial, starName, `BATCH-${PREFIX}-page-`, pageCount],
+  )
+  await db.query(`SET LOCAL session_replication_role = origin`)
+  const pageHistory = (await db.query(`SELECT public.kit_history($1) AS history`, [pageItemId])).rows[0]
+    .history
+  const pageTimeline = pageHistory?.timeline ?? []
+  const pageTxnEntries = pageTimeline.filter((entry) => String(entry.id ?? "").startsWith(`TXN-${PREFIX}-page-`))
+  const pageIds = pageTxnEntries.map((entry) => entry.id)
+  const pageUnique = new Set(pageIds)
+  const pageOrdered = pageTxnEntries.every((entry, index) => {
+    if (index === 0) return true
+    const prev = pageTxnEntries[index - 1]
+    const prevAt = new Date(prev.sort_at).getTime()
+    const at = new Date(entry.sort_at).getTime()
+    if (prevAt !== at) return prevAt >= at
+    return String(prev.id) >= String(entry.id)
+  })
+  if (pageTxnEntries.length === pageCount && pageUnique.size === pageCount && pageOrdered) {
+    pass("page_cap_1005", `${pageCount} timeline txns, newest first, no duplicates`)
+  } else {
+    fail(
+      "page_cap_1005",
+      JSON.stringify({
+        len: pageTxnEntries.length,
+        unique: pageUnique.size,
+        ordered: pageOrdered,
+        first: pageIds[0],
+        last: pageIds[pageIds.length - 1],
+      }),
+    )
+  }
+
   const viewed = await ctx.asUser(viewerId, async () => {
     const row = await db.query(`SELECT public.kit_history($1) AS history`, [createdItem.itemId])
     return row.rows[0].history
