@@ -842,7 +842,7 @@ export interface Database {
         Row: {
           id: string
           name: string
-          company: string
+          company: string | null
           email: string
           phone: string | null
           address: string | null
@@ -850,11 +850,12 @@ export interface Database {
           total_orders: number
           total_spent: number
           last_order: string | null
+          duplicate_override_reason: string | null
         }
         Insert: {
           id: string
           name: string
-          company: string
+          company?: string | null
           email: string
           phone?: string | null
           address?: string | null
@@ -862,11 +863,12 @@ export interface Database {
           total_orders?: number
           total_spent?: number
           last_order?: string | null
+          duplicate_override_reason?: string | null
         }
         Update: {
           id?: string
           name?: string
-          company?: string
+          company?: string | null
           email?: string
           phone?: string | null
           address?: string | null
@@ -874,6 +876,7 @@ export interface Database {
           total_orders?: number
           total_spent?: number
           last_order?: string | null
+          duplicate_override_reason?: string | null
         }
         Relationships: []
       }
@@ -1634,6 +1637,17 @@ export interface Database {
       set_request_atlas_link: {
         Args: { p_request_id: string; p_url: string }
         Returns: undefined
+      }
+      find_client_duplicate_candidates: {
+        Args: { p_email: string; p_phone: string; p_name: string }
+        Returns: {
+          id: string
+          name: string
+          company: string | null
+          email: string
+          phone: string | null
+          match_on: string[]
+        }[]
       }
       submit_request: {
         Args: { p_payload: Json }

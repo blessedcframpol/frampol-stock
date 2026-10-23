@@ -164,6 +164,8 @@ export interface Client {
   totalOrders: number
   totalSpent: number
   lastOrder: string
+  /** Admin reason when created despite a possible duplicate; otherwise unset/null */
+  duplicateOverrideReason?: string | null
 }
 
 /** App/team user (searchable; can be extended with auth later) */

@@ -26,14 +26,17 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
 import { InvoiceChoiceFields } from "@/components/invoice-choice-fields"
 import { useAuth } from "@/lib/auth-context"
-import type { ClientSite } from "@/lib/data"
 import { formatClientLabel } from "@/lib/client-label"
-import { useClients, insertClient } from "@/lib/supabase/clients-db"
+import { useClients } from "@/lib/supabase/clients-db"
+import { ClientNc1Fields } from "@/components/client-nc1-fields"
+import { ClientDuplicateDialog } from "@/components/client-duplicate-dialog"
+import { useNc1ClientCreate } from "@/lib/use-nc1-client-create"
 import { getSupabaseClient } from "@/lib/supabase/client"
 import { fetchProductCatalogue } from "@/lib/product-catalogue"
 import {
@@ -63,7 +66,7 @@ import { toast } from "sonner"
 import { toastFromCaughtError } from "@/lib/toast-reportable-error"
 import { AlertCircle, Check, ChevronsUpDown, Loader2, Plus, Trash2 } from "lucide-react"
 import { PageBreadcrumbs } from "@/components/page-breadcrumbs"
-import { canCreateStockRequest } from "@/lib/permissions"
+import { ADMIN, canCreateStockRequest } from "@/lib/permissions"
 import { availabilityByProductId, fetchStockAvailability, overRequestWarning } from "@/lib/stock-availability"
 import { useEffectiveRole } from "@/lib/dev-role-preview"
 
@@ -179,12 +182,9 @@ export function StockRequestForm({
   const [busy, setBusy] = useState(false)
   const [attempted, setAttempted] = useState(false)
   const [newClientOpen, setNewClientOpen] = useState(false)
-  const [newClientName, setNewClientName] = useState("")
-  const [newClientCompany, setNewClientCompany] = useState("")
-  const [newClientEmail, setNewClientEmail] = useState("")
-  const [newClientPhone, setNewClientPhone] = useState("")
-  const [sites, setSites] = useState<ClientSite[]>([{ address: "" }])
   const [atlasLinkRequired, setAtlasLinkRequired] = useState(true)
+  const isAdmin = role === ADMIN
+  const nc1 = useNc1ClientCreate(isAdmin)
 
   useEffect(() => {
     if (!canCreate) return
@@ -285,35 +285,22 @@ export function StockRequestForm({
     }
   }
 
+  async function finishNewClientSelection(createdId: string) {
+    await refetchClients()
+    setClientId(createdId)
+    setNewClientOpen(false)
+    nc1.reset()
+    toast.success("Client created.")
+  }
+
   async function handleCreateClient() {
-    const addr = sites.map((s) => s.address.trim()).filter(Boolean)
-    if (!newClientName.trim() || !newClientCompany.trim() || !newClientEmail.trim() || addr.length === 0) {
-      toast.error("Name, company, email, and at least one site address are required.")
-      return
-    }
-    setBusy(true)
-    try {
-      const created = await insertClient({
-        name: newClientName.trim(),
-        company: newClientCompany.trim(),
-        email: newClientEmail.trim(),
-        phone: newClientPhone.trim(),
-        sites: sites.map((s) => ({ ...s, address: s.address.trim() })).filter((s) => s.address),
-      })
-      await refetchClients()
-      setClientId(created.id)
-      setNewClientOpen(false)
-      setNewClientName("")
-      setNewClientCompany("")
-      setNewClientEmail("")
-      setNewClientPhone("")
-      setSites([{ address: "" }])
-      toast.success("Client created.")
-    } catch (e) {
-      toastFromCaughtError(e, "Could not create client")
-    } finally {
-      setBusy(false)
-    }
+    const created = await nc1.submitNewClient()
+    if (created) await finishNewClientSelection(created.id)
+  }
+
+  async function handleNc1CreateAnyway() {
+    const created = await nc1.confirmCreateAnyway()
+    if (created) await finishNewClientSelection(created.id)
   }
 
   const breadcrumbs =
@@ -600,57 +587,62 @@ export function StockRequestForm({
         </CardContent>
       </Card>
 
-      <Dialog open={newClientOpen} onOpenChange={setNewClientOpen}>
-        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+      <Dialog
+        open={newClientOpen}
+        onOpenChange={(open) => {
+          setNewClientOpen(open)
+          if (!open) nc1.reset()
+        }}
+      >
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>New client</DialogTitle>
           </DialogHeader>
-          <div className="flex flex-col gap-3 text-sm">
-            <div className="grid gap-2">
-              <Label htmlFor="nc-name">Name</Label>
-              <Input id="nc-name" value={newClientName} onChange={(e) => setNewClientName(e.target.value)} className="bg-card" />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="nc-co">Company</Label>
-              <Input id="nc-co" value={newClientCompany} onChange={(e) => setNewClientCompany(e.target.value)} className="bg-card" />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="nc-email">Email</Label>
-              <Input id="nc-email" type="email" value={newClientEmail} onChange={(e) => setNewClientEmail(e.target.value)} className="bg-card" />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="nc-phone">Phone</Label>
-              <Input id="nc-phone" value={newClientPhone} onChange={(e) => setNewClientPhone(e.target.value)} className="bg-card" />
-            </div>
-            <div className="grid gap-2">
-              <Label>Site addresses</Label>
-              {sites.map((s, i) => (
-                <div key={i} className="flex gap-2">
-                  <Input
-                    placeholder="Address"
-                    value={s.address}
-                    onChange={(e) =>
-                      setSites((prev) => prev.map((x, j) => (j === i ? { ...x, address: e.target.value } : x)))
-                    }
-                    className="bg-card"
-                  />
-                  {sites.length > 1 && (
-                    <Button type="button" variant="ghost" size="sm" onClick={() => setSites((prev) => prev.filter((_, j) => j !== i))}>
-                      <Trash2 className="size-4" />
-                    </Button>
-                  )}
-                </div>
-              ))}
-              <Button type="button" variant="outline" size="sm" className="w-fit" onClick={() => setSites((prev) => [...prev, { address: "" }])}>
-                Add site
-              </Button>
-            </div>
-            <Button type="button" onClick={() => void handleCreateClient()} disabled={busy}>
+          <ClientNc1Fields
+            idPrefix="request-new-client"
+            kind={nc1.kind}
+            onKind={nc1.setKind}
+            name={nc1.name}
+            onName={nc1.setName}
+            company={nc1.company}
+            onCompany={nc1.setCompany}
+            email={nc1.email}
+            onEmail={nc1.setEmail}
+            phone={nc1.phone}
+            onPhone={nc1.setPhone}
+            sites={nc1.sites}
+            onSites={nc1.setSites}
+            errors={nc1.fieldErrors}
+            showKindPicker
+          />
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setNewClientOpen(false)} disabled={nc1.busy}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={() => void handleCreateClient()} disabled={nc1.busy || busy}>
+              {nc1.busy ? <Loader2 className="size-4 animate-spin mr-2" /> : null}
               Create client
             </Button>
-          </div>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ClientDuplicateDialog
+        open={nc1.dupOpen}
+        matches={nc1.dupMatches}
+        isAdmin={isAdmin}
+        forceReason={nc1.dupForceReason}
+        onForceReason={nc1.setDupForceReason}
+        onUseExisting={(id) => {
+          nc1.setDupOpen(false)
+          setClientId(id)
+          setNewClientOpen(false)
+          nc1.reset()
+        }}
+        onCreateAnyway={() => void handleNc1CreateAnyway()}
+        onCancel={() => nc1.setDupOpen(false)}
+        busy={nc1.busy}
+      />
     </div>
   )
 }

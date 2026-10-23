@@ -69,7 +69,7 @@ export function ProblemReportForm() {
         pageUrl,
         context,
       })
-      toast.success(`Thanks, sent to Blessed`, {
+      toast.success(`Thanks — the team has been notified`, {
         description: `Report ${result.report_number}`,
       })
       router.push(`/problems/${result.id}`)
@@ -91,7 +91,7 @@ export function ProblemReportForm() {
       />
       <PageHeader
         title="Report a problem"
-        description="Tell us what went wrong. Blessed gets a notification with the report number."
+        description="Tell us what went wrong. Admins get a notification with the report number."
       />
 
       <Card>

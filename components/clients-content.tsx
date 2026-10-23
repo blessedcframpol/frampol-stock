@@ -25,7 +25,13 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
-import { useClients, insertClient, updateClient } from "@/lib/supabase/clients-db"
+import { useClients, updateClient, type InsertClientInput } from "@/lib/supabase/clients-db"
+import { ClientNc1Fields } from "@/components/client-nc1-fields"
+import { ClientDuplicateDialog } from "@/components/client-duplicate-dialog"
+import { newClientFieldErrors, type ClientEntityKind, type ClientDuplicateMatch } from "@/lib/client-complete"
+import { createClientFromCompleteInput, fetchClientDuplicateCandidates } from "@/lib/create-client-flow"
+import { getSupabaseClient } from "@/lib/supabase/client"
+import { ADMIN } from "@/lib/permissions"
 import { fetchHeldUnits } from "@/lib/clients-holdings"
 import {
   compareDispatchCount,
@@ -158,7 +164,14 @@ export function ClientsContent() {
   const [formEmail, setFormEmail] = useState("")
   const [formPhone, setFormPhone] = useState("")
   const [formSites, setFormSites] = useState<ClientSite[]>([{ address: "" }])
+  const [formKind, setFormKind] = useState<ClientEntityKind>("company")
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
+  const [dupOpen, setDupOpen] = useState(false)
+  const [dupMatches, setDupMatches] = useState<ClientDuplicateMatch[]>([])
+  const [dupForceReason, setDupForceReason] = useState("")
+  const [pendingCreate, setPendingCreate] = useState<InsertClientInput | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const isAdmin = role === ADMIN
 
   function resetFormFields() {
     setEditingClient(null)
@@ -167,6 +180,11 @@ export function ClientsContent() {
     setFormEmail("")
     setFormPhone("")
     setFormSites([{ address: "" }])
+    setFormKind("company")
+    setFieldErrors({})
+    setDupMatches([])
+    setDupForceReason("")
+    setPendingCreate(null)
   }
 
   function openAddClient() {
@@ -187,6 +205,9 @@ export function ClientsContent() {
           ? [{ name: "", address: client.address }]
           : [{ name: "", address: "" }]
     )
+    const co = (client.company ?? "").trim()
+    setFormKind(co && co.toLowerCase() !== client.name.trim().toLowerCase() ? "company" : "individual")
+    setFieldErrors({})
     setFormOpen(true)
   }
 
@@ -232,51 +253,102 @@ export function ClientsContent() {
     return filtered.slice(start, start + PAGE_SIZE)
   }, [filtered, safePage])
 
-  function addFormSiteRow() {
-    setFormSites((prev) => [...prev, { address: "" }])
-  }
-
-  function removeFormSiteRow(index: number) {
-    setFormSites((prev) => prev.filter((_, i) => i !== index))
-  }
-
-  function updateFormSite(index: number, field: "name" | "address", value: string) {
-    setFormSites((prev) => prev.map((s, i) => (i === index ? { ...s, [field]: value } : s)))
-  }
-
-  async function handleSaveClient() {
-    const name = formName.trim()
-    const company = formCompany.trim()
-    const email = formEmail.trim()
-    const phone = formPhone.trim()
+  function buildInsertPayload(): InsertClientInput {
     const validSites = formSites
       .filter((s) => s.address.trim())
       .map((s) => ({
         ...(s.name?.trim() ? { name: s.name.trim() } : {}),
         address: s.address.trim(),
       }))
-    if (!name || !company || !email || !phone) {
-      toast.error("All fields are required: name, company, email, and phone")
+    return {
+      kind: formKind,
+      name: formName,
+      company: formCompany,
+      email: formEmail,
+      phone: formPhone,
+      sites: validSites,
+    }
+  }
+
+  async function finishCreate(payload: InsertClientInput) {
+    await createClientFromCompleteInput(getSupabaseClient(), {
+      kind: payload.kind,
+      name: payload.name,
+      company: payload.company,
+      email: payload.email,
+      phone: payload.phone,
+      sites: payload.sites,
+      duplicateOverrideReason: payload.duplicateOverrideReason,
+    })
+    toast.success("Client added")
+    await refetch()
+    setFormOpen(false)
+    resetFormFields()
+  }
+
+  async function handleSaveClient() {
+    const payload = buildInsertPayload()
+    setFieldErrors({})
+    if (editingClient) {
+      if (payload.sites.length === 0) {
+        toast.error("Add at least one site with an address")
+        return
+      }
+      setIsSubmitting(true)
+      try {
+        await updateClient(editingClient.id, payload)
+        toast.success("Client updated")
+        await refetch()
+        setFormOpen(false)
+        resetFormFields()
+      } catch (e) {
+        toastFromCaughtError(e, "Failed to update client")
+      } finally {
+        setIsSubmitting(false)
+      }
       return
     }
-    if (validSites.length === 0) {
-      toast.error("Add at least one site with an address")
+
+    const errors = newClientFieldErrors({
+      kind: payload.kind,
+      name: payload.name,
+      company: payload.company,
+      email: payload.email,
+      phone: payload.phone,
+      sites: payload.sites,
+    })
+    if (errors) {
+      setFieldErrors(errors)
+      toast.error("Fix the highlighted fields")
       return
     }
+
     setIsSubmitting(true)
     try {
-      if (editingClient) {
-        await updateClient(editingClient.id, { name, company, email, phone, sites: validSites })
-        toast.success("Client updated")
-      } else {
-        await insertClient({ name, company, email, phone, sites: validSites })
-        toast.success("Client added")
+      const matches = await fetchClientDuplicateCandidates(getSupabaseClient(), payload)
+      if (matches.length > 0) {
+        setPendingCreate(payload)
+        setDupMatches(matches)
+        setDupOpen(true)
+        return
       }
-      await refetch()
-      setFormOpen(false)
-      resetFormFields()
+      await finishCreate(payload)
     } catch (e) {
-      toastFromCaughtError(e, editingClient ? "Failed to update client" : "Failed to add client")
+      toastFromCaughtError(e, "Failed to add client")
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  async function confirmCreateAnyway() {
+    const reason = dupForceReason.trim()
+    if (!pendingCreate || !isAdmin || reason.length < 10) return
+    setIsSubmitting(true)
+    try {
+      await finishCreate({ ...pendingCreate, duplicateOverrideReason: reason })
+      setDupOpen(false)
+    } catch (e) {
+      toastFromCaughtError(e, "Failed to add client")
     } finally {
       setIsSubmitting(false)
     }
@@ -311,93 +383,23 @@ export function ClientsContent() {
           <DialogHeader>
             <DialogTitle>{editingClient ? "Edit client" : "Add client"}</DialogTitle>
           </DialogHeader>
-          <div className="flex flex-col gap-4 py-2">
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="client-form-name">Name</Label>
-              <Input
-                id="client-form-name"
-                placeholder="Contact name"
-                value={formName}
-                onChange={(e) => setFormName(e.target.value)}
-              />
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="client-form-company">Company</Label>
-              <Input
-                id="client-form-company"
-                placeholder="Company name"
-                value={formCompany}
-                onChange={(e) => setFormCompany(e.target.value)}
-              />
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="client-form-email">Email</Label>
-              <Input
-                id="client-form-email"
-                type="email"
-                placeholder="email@example.com"
-                value={formEmail}
-                onChange={(e) => setFormEmail(e.target.value)}
-              />
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="client-form-phone">Phone</Label>
-              <Input
-                id="client-form-phone"
-                type="tel"
-                placeholder="+250 788 123 456"
-                value={formPhone}
-                onChange={(e) => setFormPhone(e.target.value)}
-              />
-            </div>
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center justify-between gap-2">
-                <Label className="flex items-center gap-1.5">
-                  <MapPin className="w-3.5 h-3.5 text-muted-foreground" />
-                  Sites
-                </Label>
-                <Button type="button" variant="ghost" size="sm" className="h-8 text-xs" onClick={addFormSiteRow}>
-                  <Plus className="w-3.5 h-3.5 mr-1" />
-                  Add site
-                </Button>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                {editingClient
-                  ? "At least one site address is required."
-                  : "Add one or more office, branch, or delivery addresses."}
-              </p>
-              <div className="space-y-2">
-                {formSites.map((site, i) => (
-                  <div key={i} className="flex gap-2 items-start">
-                    <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      <Input
-                        placeholder="Site name (e.g. HQ, Branch A)"
-                        value={site.name ?? ""}
-                        onChange={(e) => updateFormSite(i, "name", e.target.value)}
-                        className="h-9"
-                      />
-                      <Input
-                        placeholder="Full address"
-                        value={site.address}
-                        onChange={(e) => updateFormSite(i, "address", e.target.value)}
-                        className="h-9"
-                      />
-                    </div>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-9 w-9 shrink-0 text-muted-foreground hover:text-destructive"
-                      onClick={() => removeFormSiteRow(i)}
-                      disabled={formSites.length <= 1}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
+          <ClientNc1Fields
+            idPrefix="client-form"
+            kind={formKind}
+            onKind={setFormKind}
+            name={formName}
+            onName={setFormName}
+            company={formCompany}
+            onCompany={setFormCompany}
+            email={formEmail}
+            onEmail={setFormEmail}
+            phone={formPhone}
+            onPhone={setFormPhone}
+            sites={formSites}
+            onSites={setFormSites}
+            errors={fieldErrors}
+            showKindPicker={!editingClient}
+          />
           <DialogFooter>
             <Button variant="outline" onClick={() => setFormOpen(false)} disabled={isSubmitting}>
               Cancel
@@ -414,6 +416,26 @@ export function ClientsContent() {
           </DialogFooter>
         </DialogContent>
       </Dialog> : null}
+
+      <ClientDuplicateDialog
+        open={dupOpen}
+        matches={dupMatches}
+        isAdmin={isAdmin}
+        forceReason={dupForceReason}
+        onForceReason={setDupForceReason}
+        onUseExisting={(id) => {
+          setDupOpen(false)
+          setFormOpen(false)
+          resetFormFields()
+          router.push(`/clients/${id}`)
+        }}
+        onCreateAnyway={() => void confirmCreateAnyway()}
+        onCancel={() => {
+          setDupOpen(false)
+          setPendingCreate(null)
+        }}
+        busy={isSubmitting}
+      />
 
       {error && (
         <p className="text-sm text-destructive">Failed to load clients.</p>

@@ -39,15 +39,18 @@ import { InvoiceChoiceFields } from "@/components/invoice-choice-fields"
 import type { InvoiceChoice } from "@/lib/invoices"
 import { INTERNAL_LOCATIONS } from "@/lib/data"
 import { formatClientLabel } from "@/lib/client-label"
-import type { ClientSite, JsonValue, TransactionType } from "@/lib/data"
-import { useClients, insertClient } from "@/lib/supabase/clients-db"
+import type { JsonValue, TransactionType } from "@/lib/data"
+import { useClients } from "@/lib/supabase/clients-db"
+import { ClientNc1Fields } from "@/components/client-nc1-fields"
+import { ClientDuplicateDialog } from "@/components/client-duplicate-dialog"
+import { useNc1ClientCreate } from "@/lib/use-nc1-client-create"
+import { newClientFieldErrors } from "@/lib/client-complete"
 import { useInventoryStore } from "@/lib/inventory-store"
 import {
   ScanBarcode,
   FileText,
   Package,
   Plus,
-  MapPin,
   Loader2,
   Upload,
   X,
@@ -68,7 +71,7 @@ import { productRequiresCloudKey, splitDelimitedValues, cloudKeysMapForSerials }
 import type { NotInvoicedKind } from "@/lib/invoices"
 import { useAuth } from "@/lib/auth-context"
 import { prefillMovementType } from "@/lib/alerts"
-import { canRecordStockMovement } from "@/lib/permissions"
+import { ADMIN, canRecordStockMovement } from "@/lib/permissions"
 import {
   NEW_CLIENT_SELECT,
   OUTBOUND_LIKE_MOVEMENTS,
@@ -151,6 +154,8 @@ export function MovementForm({
   const { clients, refetch: refetchClients } = useClients()
   const { role, loading: authLoading } = useAuth()
   const canMove = canRecordStockMovement(role)
+  const isAdmin = role === ADMIN
+  const nc1 = useNc1ClientCreate(isAdmin)
   const activeAdmins = useSearchUsers({ activeAdminsOnly: true })
 
   const [selectedType, setSelectedType] = useState(() => {
@@ -197,11 +202,6 @@ export function MovementForm({
   const [clientOpen, setClientOpen] = useState(false)
   const [clientSearch, setClientSearch] = useState("")
   const [createStep, setCreateStep] = useState<"idle" | "confirm" | "form">("idle")
-  const [newClientName, setNewClientName] = useState("")
-  const [newClientCompany, setNewClientCompany] = useState("")
-  const [newClientEmail, setNewClientEmail] = useState("")
-  const [newClientPhone, setNewClientPhone] = useState("")
-  const [clientSites, setClientSites] = useState<ClientSite[]>([{ address: "" }])
 
   const [productOpen, setProductOpen] = useState(false)
   const [productSearch, setProductSearch] = useState("")
@@ -286,8 +286,8 @@ export function MovementForm({
   )
 
   const closestForCreate = useMemo(
-    () => closestClientsForCreate(sortedClients, clientSearch || newClientName || newClientCompany, 5),
-    [sortedClients, clientSearch, newClientName, newClientCompany]
+    () => closestClientsForCreate(sortedClients, clientSearch || nc1.name || nc1.company, 5),
+    [sortedClients, clientSearch, nc1.name, nc1.company]
   )
 
   const typesForGroup = useMemo(() => {
@@ -349,16 +349,18 @@ export function MovementForm({
     notes,
   }
 
+  const newClientPayload = nc1.buildPayload()
   const newClientFormReady =
     clientId === NEW_CLIENT_SELECT &&
     createStep === "form" &&
-    Boolean(
-      newClientName.trim() &&
-        newClientCompany.trim() &&
-        newClientEmail.trim() &&
-        newClientPhone.trim() &&
-        clientSites.some((s) => s.address.trim())
-    )
+    !newClientFieldErrors({
+      kind: newClientPayload.kind,
+      name: newClientPayload.name,
+      company: newClientPayload.company,
+      email: newClientPayload.email,
+      phone: newClientPayload.phone,
+      sites: newClientPayload.sites,
+    })
 
   const rawBlock = submitBlockMessage(formFields, serialFeedback, {
     todayYmd,
@@ -464,11 +466,7 @@ export function MovementForm({
     setClientId("")
     setClientSearch("")
     setCreateStep("idle")
-    setNewClientName("")
-    setNewClientCompany("")
-    setNewClientEmail("")
-    setNewClientPhone("")
-    setClientSites([{ address: "" }])
+    nc1.reset()
     setInvoiceNumber("")
     setInvoiceChoice("")
     setInvoiceReason("")
@@ -494,30 +492,28 @@ export function MovementForm({
     if (!showClient) return clientId || undefined
     if (clientId && clientId !== NEW_CLIENT_SELECT) return clientId
     if (clientId !== NEW_CLIENT_SELECT) return undefined
-
-    const name = newClientName.trim()
-    const company = newClientCompany.trim()
-    const email = newClientEmail.trim()
-    const phone = newClientPhone.trim()
-    if (!name || !company || !email || !phone) {
-      toast.error("New client: name, company, email, and phone are all required")
+    if (createStep !== "form") {
+      toast.error("Confirm closest matches or finish the new client form")
       return undefined
     }
-    const validSites = clientSites
-      .filter((s) => s.address.trim())
-      .map((s) => ({
-        ...(s.name?.trim() ? { name: s.name.trim() } : {}),
-        address: s.address.trim(),
-      }))
-    if (validSites.length === 0) {
-      toast.error("Add at least one site address for the new client")
+    if (nc1.dupOpen) {
+      toast.error("Resolve the similar-client dialog first")
       return undefined
     }
-    const nc = await insertClient({ name, company, email, phone, sites: validSites })
+    const created = await nc1.submitNewClient()
+    if (!created) return undefined
     await refetchClients()
-    setClientId(nc.id)
+    setClientId(created.id)
     setCreateStep("idle")
-    return nc.id
+    return created.id
+  }
+
+  async function handleNc1CreateAnyway() {
+    const created = await nc1.confirmCreateAnyway()
+    if (!created) return
+    await refetchClients()
+    setClientId(created.id)
+    setCreateStep("idle")
   }
 
   async function uploadMovementDocument(
@@ -984,7 +980,7 @@ export function MovementForm({
                     onSelect={() => {
                       setCreateStep("confirm")
                       setClientId(NEW_CLIENT_SELECT)
-                      if (!newClientName && clientSearch.trim()) setNewClientName(clientSearch.trim())
+                      if (!nc1.name && clientSearch.trim()) nc1.setName(clientSearch.trim())
                       setClientOpen(false)
                     }}
                     className="text-brand"
@@ -1038,95 +1034,24 @@ export function MovementForm({
       )}
 
       {clientId === NEW_CLIENT_SELECT && createStep === "form" && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-lg border border-border bg-muted/30">
-          <div className="sm:col-span-2">
-            <Label className="text-xs">Contact name (required)</Label>
-            <Input
-              className="mt-1 bg-card"
-              value={newClientName}
-              onChange={(e) => setNewClientName(e.target.value)}
-            />
-          </div>
-          <div>
-            <Label className="text-xs">Company (required)</Label>
-            <Input
-              className="mt-1 bg-card"
-              value={newClientCompany}
-              onChange={(e) => setNewClientCompany(e.target.value)}
-            />
-          </div>
-          <div>
-            <Label className="text-xs">Email (required)</Label>
-            <Input
-              type="email"
-              className="mt-1 bg-card"
-              value={newClientEmail}
-              onChange={(e) => setNewClientEmail(e.target.value)}
-            />
-          </div>
-          <div className="sm:col-span-2">
-            <Label className="text-xs">Phone (required)</Label>
-            <Input
-              className="mt-1 bg-card"
-              value={newClientPhone}
-              onChange={(e) => setNewClientPhone(e.target.value)}
-            />
-          </div>
-          <div className="sm:col-span-2 flex flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <Label className="text-xs flex items-center gap-1">
-                <MapPin className="h-3.5 w-3.5" />
-                Sites (at least one address)
-              </Label>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-7 text-xs"
-                onClick={() => setClientSites((prev) => [...prev, { address: "" }])}
-              >
-                <Plus className="h-3 w-3 mr-1" />
-                Add site
-              </Button>
-            </div>
-            {clientSites.map((site, i) => (
-              <div key={i} className="flex gap-2 items-start">
-                <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <Input
-                    placeholder="Site name (optional)"
-                    value={site.name ?? ""}
-                    onChange={(e) =>
-                      setClientSites((prev) =>
-                        prev.map((s, idx) => (idx === i ? { ...s, name: e.target.value } : s))
-                      )
-                    }
-                    className="h-9 bg-card"
-                  />
-                  <Input
-                    placeholder="Full address (required)"
-                    value={site.address}
-                    onChange={(e) =>
-                      setClientSites((prev) =>
-                        prev.map((s, idx) => (idx === i ? { ...s, address: e.target.value } : s))
-                      )
-                    }
-                    className="h-9 bg-card"
-                  />
-                </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-9 w-9 shrink-0"
-                  onClick={() => setClientSites((prev) => prev.filter((_, idx) => idx !== i))}
-                  disabled={clientSites.length <= 1}
-                  aria-label="Remove site"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
-            ))}
-          </div>
+        <div className="p-3 rounded-lg border border-border bg-muted/30">
+          <ClientNc1Fields
+            idPrefix="movement-new-client"
+            kind={nc1.kind}
+            onKind={nc1.setKind}
+            name={nc1.name}
+            onName={nc1.setName}
+            company={nc1.company}
+            onCompany={nc1.setCompany}
+            email={nc1.email}
+            onEmail={nc1.setEmail}
+            phone={nc1.phone}
+            onPhone={nc1.setPhone}
+            sites={nc1.sites}
+            onSites={nc1.setSites}
+            errors={nc1.fieldErrors}
+            showKindPicker
+          />
         </div>
       )}
     </div>
@@ -1429,6 +1354,7 @@ export function MovementForm({
   }
 
   return (
+    <>
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
       <div className="lg:col-span-2 flex flex-col gap-4 md:gap-5">
         <Card className="flex flex-col">
@@ -1533,5 +1459,24 @@ export function MovementForm({
         </Card>
       </div>
     </div>
+    <ClientDuplicateDialog
+      open={nc1.dupOpen}
+      matches={nc1.dupMatches}
+      isAdmin={isAdmin}
+      forceReason={nc1.dupForceReason}
+      onForceReason={nc1.setDupForceReason}
+      onUseExisting={(id) => {
+        nc1.setDupOpen(false)
+        nc1.reset()
+        setClientId(id)
+        setCreateStep("idle")
+      }}
+      onCreateAnyway={() => void handleNc1CreateAnyway()}
+      onCancel={() => {
+        nc1.setDupOpen(false)
+      }}
+      busy={nc1.busy || isSubmitting}
+    />
+    </>
   )
 }

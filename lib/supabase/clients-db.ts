@@ -5,6 +5,8 @@ import type { Client, ClientSite } from "@/lib/data"
 import type { Database } from "./database.types"
 import { getSupabaseClient } from "./client"
 import { fetchAllPages } from "./postgrest-page"
+import type { ClientEntityKind } from "@/lib/client-complete"
+import { normalizeClientPhone, normalizeNewClientForDb, sanitizeClientText } from "@/lib/client-complete"
 
 type ClientRow = Database["public"]["Tables"]["clients"]["Row"]
 
@@ -48,7 +50,7 @@ export function rowToClient(row: ClientRow): Client {
   return {
     id: row.id,
     name: row.name,
-    company: row.company,
+    company: row.company ?? "",
     email: row.email,
     phone: row.phone ?? "",
     address: primary,
@@ -56,6 +58,7 @@ export function rowToClient(row: ClientRow): Client {
     totalOrders: row.total_orders,
     totalSpent: Number(row.total_spent),
     lastOrder: row.last_order ?? "",
+    duplicateOverrideReason: row.duplicate_override_reason ?? null,
   }
 }
 
@@ -98,12 +101,27 @@ export async function fetchClientById(id: string): Promise<Client | null> {
 }
 
 export type InsertClientInput = {
+  kind: ClientEntityKind
   name: string
+  /** Empty string for individuals; stored as NULL */
   company: string
   email: string
   phone: string
   /** At least one entry with a non-empty address */
   sites: ClientSite[]
+  /** Admin-only; omit/undefined for normal creates (column stays NULL) */
+  duplicateOverrideReason?: string
+}
+
+function toCompleteInput(input: InsertClientInput): import("@/lib/client-complete").ClientCompleteInput {
+  return {
+    kind: input.kind,
+    name: input.name,
+    company: input.company,
+    email: input.email,
+    phone: input.phone,
+    sites: input.sites,
+  }
 }
 
 function generateClientId(): string {
@@ -113,20 +131,23 @@ function generateClientId(): string {
 export async function insertClient(input: InsertClientInput): Promise<Client> {
   const supabase = getSupabaseIfConfigured()
   if (!supabase) throw new Error("Supabase is not configured")
-  const { address, sites } = normalizeClientSitesForDb(input.sites)
+  const normalized = normalizeNewClientForDb(toCompleteInput(input))
+  const { address, sites } = normalizeClientSitesForDb(normalized.sites)
   if (!sites?.length) throw new Error("At least one site address is required")
   const id = generateClientId()
-  const row = {
+  const override = input.duplicateOverrideReason?.trim()
+  const row: Database["public"]["Tables"]["clients"]["Insert"] = {
     id,
-    name: input.name.trim(),
-    company: input.company.trim(),
-    email: input.email.trim(),
-    phone: input.phone.trim() || null,
+    name: normalized.name,
+    company: normalized.company,
+    email: normalized.email,
+    phone: normalized.phone,
     address,
     sites,
     total_orders: 0,
     total_spent: 0,
     last_order: null,
+    ...(override ? { duplicate_override_reason: override } : {}),
   }
   const { data, error } = await supabase.from("clients").insert(row).select().single()
   if (error) throw error
@@ -138,11 +159,13 @@ export async function updateClient(id: string, input: InsertClientInput): Promis
   if (!supabase) throw new Error("Supabase is not configured")
   const { address, sites } = normalizeClientSitesForDb(input.sites)
   if (!sites?.length) throw new Error("At least one site address is required")
+  const phoneTrim = input.phone.trim()
   const patch = {
-    name: input.name.trim(),
-    company: input.company.trim(),
+    name: sanitizeClientText(input.name),
+    company:
+      input.kind === "individual" ? null : sanitizeClientText(input.company) || null,
     email: input.email.trim(),
-    phone: input.phone.trim() || null,
+    phone: normalizeClientPhone(phoneTrim) ?? (phoneTrim || null),
     address,
     sites,
   }

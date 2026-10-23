@@ -416,6 +416,11 @@ export default function ClientDetailPage() {
                 ) : company ? (
                   <p className="mt-1 text-sm text-muted-foreground">{company}</p>
                 ) : null}
+                {activeClient.duplicateOverrideReason ? (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Created despite a possible duplicate: {activeClient.duplicateOverrideReason}
+                  </p>
+                ) : null}
               </div>
               {canEdit ? (
                 <Button type="button" variant="outline" size="sm" className="w-fit shrink-0" onClick={openEditClient}>

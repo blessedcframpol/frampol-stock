@@ -129,7 +129,7 @@ function PendingRoleContent() {
               Your account has been deactivated. If you think this is a mistake, contact your Fram-Stock administrator.
             </>
           ) : (
-            <>Your account is waiting for a role. Josh or another admin will set it up.</>
+            <>Your account is waiting for a role. An admin still needs to give you access.</>
           )}
         </p>
         <p className="mt-3 text-xs text-muted-foreground">

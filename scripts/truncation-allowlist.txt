@@ -7,3 +7,4 @@ supabase/migrations/054_request_hygiene_and_profile_access_audit.sql  first comm
 supabase/migrations/061_transaction_business_dates.sql  first commit: 3d347ea
 components/quick-scan.tsx	P3.6: logic moved to components/movement-form.tsx (compact wrapper)
 components/stock-movement-content.tsx	P3.6: logic moved to components/movement-form.tsx (full wrapper)
+supabase/migrations/20261015120000_nc1_client_complete.sql	not yet applied to production; added lock_timeout + duplicate_override_reason before first apply
