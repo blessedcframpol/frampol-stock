@@ -6,7 +6,7 @@
  *   node scripts/verify-088-hf1-requester-flow.mjs
  */
 import { runVerifyCli } from "./verify-harness.mjs"
-import { dropMovementPrev, stampTxn } from "./verify-harness-fixtures.mjs"
+import { dropMovementPrev, insertHarnessClient, stampTxn } from "./verify-harness-fixtures.mjs"
 
 const PREFIX = "H3088"
 const NOTES = "harness-088"
@@ -55,12 +55,14 @@ export async function runChecks(ctx) {
   const techId = await ctx.createFixtureUser("technicians", `${EMAIL}tech@test.local`)
   const accountsId = await ctx.createFixtureUser("accounts", `${EMAIL}accounts@test.local`)
 
-  const client = await db.query(
-    `INSERT INTO public.clients (id, name, company, email)
-     VALUES ($1, 'Harness 088', 'Harness 088 Co', $2) RETURNING id`,
-    [`CLT-${NOTES}-c`, `${EMAIL}client@test.local`],
-  )
-  const clientId = client.rows[0].id
+  const clientId = `CLT-${NOTES}-c`
+  await insertHarnessClient(db, {
+    id: clientId,
+    name: "Harness 088",
+    company: "Harness 088 Co",
+    email: `${EMAIL}client@test.local`,
+    phone: "0771118088",
+  })
 
   const products = await db.query(
     `SELECT id, product_name, vendor

@@ -18,6 +18,11 @@ export const MARKERS = [
     sql: `SELECT count(*)::int AS n FROM public.inventory_items WHERE serial_number LIKE $1`,
     params: [`${PREFIX}%`],
   },
+  {
+    label: "products",
+    sql: `SELECT count(*)::int AS n FROM public.product_lines WHERE id = $1 OR product_name LIKE $2`,
+    params: [`PL-${PREFIX.toLowerCase()}-avail`, `${PREFIX}%`],
+  },
 ]
 
 export async function runChecks(ctx) {
@@ -26,11 +31,14 @@ export async function runChecks(ctx) {
   const fail = ctx.fail
   const asUser = ctx.asUser
 
-  const product = await db.query(
-    `SELECT id, product_name, vendor FROM public.product_lines WHERE is_active IS TRUE LIMIT 1`
+  // Dedicated product so live inventory does not inflate available_count.
+  const productId = `PL-${PREFIX.toLowerCase()}-avail`
+  await db.query(
+    `INSERT INTO public.product_lines (id, product_name, vendor, is_active)
+     VALUES ($1, $2, 'General', true)
+     ON CONFLICT (id) DO UPDATE SET is_active = true`,
+    [productId, `${PREFIX} Availability Kit`],
   )
-  const productId = product.rows[0]?.id
-  if (!productId) throw new Error("need an active product_line")
 
   // Seed two sale In Stock kits + one rental + one Pending Inspection (must not count).
   for (const [serial, status, pool] of [

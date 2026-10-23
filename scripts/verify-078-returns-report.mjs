@@ -5,7 +5,7 @@
  * Usage: node scripts/verify-078-returns-report.mjs
  */
 import { runVerifyCli } from "./verify-harness.mjs"
-import { dropMovementPrev, setJwt } from "./verify-harness-fixtures.mjs"
+import { dropMovementPrev, insertHarnessClient, setJwt } from "./verify-harness-fixtures.mjs"
 
 const PREFIX = "H3078"
 const SITE = "Borrowdale"
@@ -122,13 +122,25 @@ export async function runChecks(ctx) {
   const adminId = await ctx.createFixtureUser("admin", "harness-078-admin@test.local")
   const viewerId = await ctx.createFixtureUser("viewer", "harness-078-viewer@test.local")
   const salesId = await ctx.createFixtureUser("sales", "harness-078-sales@test.local")
-  await db.query(
-    `INSERT INTO public.clients (id, name, company, email, address, sites)
-     VALUES
-       ($1, 'H3 Borrowdale', 'H3 Site', 'h3078-site@test.local', $3, $4::jsonb),
-       ($2, 'H3 Nowhere', 'H3 None', 'h3078-none@test.local', NULL, NULL)`,
-    [siteClientId, noneClientId, SITE, JSON.stringify([{ address: SITE }])],
-  )
+  await insertHarnessClient(db, {
+    id: siteClientId,
+    name: "H3 Borrowdale",
+    company: "H3 Site",
+    email: "h3078-site@test.local",
+    phone: "0771118078",
+    address: SITE,
+    sites: [{ address: SITE }],
+  })
+  await insertHarnessClient(db, {
+    id: noneClientId,
+    name: "H3 Nowhere",
+    company: "H3 None",
+    email: "h3078-none@test.local",
+    phone: "0771118079",
+  })
+  await db.query(`ALTER TABLE public.clients DISABLE TRIGGER tr_clients_nc1_validate`)
+  await db.query(`UPDATE public.clients SET address = NULL, sites = NULL WHERE id = $1`, [noneClientId])
+  await db.query(`ALTER TABLE public.clients ENABLE TRIGGER tr_clients_nc1_validate`)
   await setJwt(db, adminId)
 
   // Window relative to harness now() so fixtures opened today stay inside p_to.

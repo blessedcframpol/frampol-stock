@@ -5,7 +5,7 @@
  *   node scripts/verify-084-au1-audit-trail.mjs
  */
 import { runVerifyCli } from "./verify-harness.mjs"
-import { setJwt } from "./verify-harness-fixtures.mjs"
+import { insertHarnessClient, resetHarnessSession, setJwt } from "./verify-harness-fixtures.mjs"
 
 const PREFIX = "H3084"
 
@@ -76,10 +76,13 @@ export async function runChecks(ctx) {
   {
     await setJwt(db, adminId)
     const clientId = `CLT-${PREFIX}-actor`
-    await db.query(
-      `INSERT INTO public.clients (id, name, company, email) VALUES ($1, $2, $3, $4)`,
-      [clientId, "H3084 Actor", "H3084", "h3084-actor@test.local"]
-    )
+    await insertHarnessClient(db, {
+      id: clientId,
+      name: "H3084 Actor",
+      company: "H3084",
+      email: "h3084-actor@test.local",
+      phone: "0771118084",
+    })
     await db.query(`RESET ROLE`)
     await db.query(`
       CREATE OR REPLACE FUNCTION public._h3084_definer_touch(p_id text)
@@ -110,10 +113,13 @@ export async function runChecks(ctx) {
     await db.query(`SELECT set_config('app.audit_source', 'maintenance', true)`)
     await db.query(`SELECT set_config('app.audit_actor', 'admin:Joshua Goredema', true)`)
     const clientId = `CLT-${PREFIX}-maint`
-    await db.query(
-      `INSERT INTO public.clients (id, name, company, email) VALUES ($1, $2, $3, $4)`,
-      [clientId, "H3084 Maint", "H3084", "h3084-maint@test.local"]
-    )
+    await insertHarnessClient(db, {
+      id: clientId,
+      name: "H3084 Maint",
+      company: "H3084",
+      email: "h3084-maint@test.local",
+      phone: "0771118085",
+    })
     const row = await db.query(
       `SELECT actor, source FROM public.audit_log WHERE row_id = $1 ORDER BY seq DESC LIMIT 1`,
       [clientId]
@@ -133,10 +139,13 @@ export async function runChecks(ctx) {
     await db.query(`SELECT set_config('app.audit_source', 'maintenance', true)`)
     await db.query(`SELECT set_config('app.audit_actor', 'spoofed-not-real', true)`)
     const clientId = `CLT-${PREFIX}-spoof`
-    await db.query(
-      `INSERT INTO public.clients (id, name, company, email) VALUES ($1, $2, $3, $4)`,
-      [clientId, "H3084 Spoof", "H3084", "h3084-spoof@test.local"]
-    )
+    await insertHarnessClient(db, {
+      id: clientId,
+      name: "H3084 Spoof",
+      company: "H3084",
+      email: "h3084-spoof@test.local",
+      phone: "0771118086",
+    })
     const row = await db.query(
       `SELECT actor, source FROM public.audit_log WHERE row_id = $1 ORDER BY seq DESC LIMIT 1`,
       [clientId]
@@ -302,6 +311,8 @@ export async function runChecks(ctx) {
     if (Array.isArray(ex.rows[0].v)) pass("exceptions_read", `n=${ex.rows[0].v.length}`)
     else fail("exceptions_read", JSON.stringify(ex.rows[0]))
   }
+
+  await resetHarnessSession(db)
 }
 
 const isMain = process.argv[1] && process.argv[1].includes("verify-084-au1-audit-trail")

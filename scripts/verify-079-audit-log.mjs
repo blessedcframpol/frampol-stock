@@ -5,7 +5,7 @@
  * Usage: node scripts/verify-079-audit-log.mjs
  */
 import { isPermissionDenied, runVerifyCli } from "./verify-harness.mjs"
-import { dropMovementPrev, setJwt } from "./verify-harness-fixtures.mjs"
+import { dropMovementPrev, insertHarnessClient, setJwt } from "./verify-harness-fixtures.mjs"
 
 const PREFIX = "H3079"
 const EDIT_REASON = "H3079 edit the product group"
@@ -72,11 +72,13 @@ export async function runChecks(ctx) {
      WHERE id IN ($1, $2)`,
     [adminId, viewerId],
   )
-  await db.query(
-    `INSERT INTO public.clients (id, name, company, email, phone, address)
-     VALUES ($1, 'H3079 Holder', 'H3079 Co', 'h3079@test.local', '000', 'Test')`,
-    [clientId],
-  )
+  await insertHarnessClient(db, {
+    id: clientId,
+    name: "H3079 Holder",
+    company: "H3079 Co",
+    email: "h3079@test.local",
+    phone: "0771118079",
+  })
   await setJwt(db, adminId)
   const fixtureProduct = await db.query(`SELECT public.ensure_product_line($1, $2) AS id`, [
     FIXTURE_PRODUCT,

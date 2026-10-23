@@ -4,7 +4,7 @@
  * Usage: node scripts/verify-083-rq3-preview-scan.mjs
  */
 import { runVerifyCli } from "./verify-harness.mjs"
-import { dropMovementPrev, setJwt, stampTxn } from "./verify-harness-fixtures.mjs"
+import { dropMovementPrev, insertHarnessClient, setJwt, stampTxn } from "./verify-harness-fixtures.mjs"
 
 const PREFIX = "H3083"
 const ATLAS =
@@ -85,12 +85,13 @@ export async function runChecks(ctx) {
   const viewer = await ctx.createFixtureUser("viewer", "harness-083-viewer@test.local")
 
   const clientId = `${PREFIX}-CLIENT`
-  await db.query(`INSERT INTO public.clients (id, name, company, email) VALUES ($1, $2, $3, $4)`, [
-    clientId,
-    `${PREFIX} Client`,
-    `${PREFIX} Co`,
-    "harness-083-client@test.local",
-  ])
+  await insertHarnessClient(db, {
+    id: clientId,
+    name: `${PREFIX} Client`,
+    company: `${PREFIX} Co`,
+    email: "harness-083-client@test.local",
+    phone: "0771118083",
+  })
 
   const PL = {
     fg: { id: `${PREFIX}-PL-FG`, name: `${PREFIX} FortiGate`, vendor: "Fortinet", key: true },
@@ -242,12 +243,13 @@ export async function runChecks(ctx) {
 
   // Issue AP-2 on a separate request so preview explains "not in stock — sold to …".
   const nashId = `${PREFIX}-NASH`
-  await db.query(`INSERT INTO public.clients (id, name, company, email) VALUES ($1, $2, $3, $4)`, [
-    nashId,
-    "Nash Paints",
-    "Nash Paints",
-    "harness-083-nash@test.local",
-  ])
+  await insertHarnessClient(db, {
+    id: nashId,
+    name: "Nash Paints",
+    company: "Nash Paints",
+    email: "harness-083-nash@test.local",
+    phone: "0771118083",
+  })
   await setJwt(db, sales)
   const nashReq = await attempt(`SELECT public.submit_request($1::jsonb)::text AS id`, [
     JSON.stringify({

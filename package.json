@@ -16,7 +16,15 @@
     "test:watch": "vitest",
     "prepare": "node scripts/install-git-hooks.mjs",
     "guard:truncation": "node scripts/check-truncation-and-migrations.mjs",
-    "verify:all": "node --require ./scripts/dev/tls-classic.cjs scripts/verify-all.mjs"
+    "verify:all": "node --require ./scripts/dev/tls-classic.cjs scripts/verify-all.mjs",
+    "test-db:apply-migrations": "node --require ./scripts/dev/tls-classic.cjs scripts/test-db-apply-migrations.mjs",
+    "test-db:clone-schema": "node --require ./scripts/dev/tls-classic.cjs scripts/test-db-clone-schema.mjs",
+    "test-db:compare-schema": "node --require ./scripts/dev/tls-classic.cjs scripts/test-db-compare-schema.mjs",
+    "test-db:refresh": "node --require ./scripts/dev/tls-classic.cjs scripts/test-db-refresh.mjs",
+    "test-db:bootstrap": "node --require ./scripts/dev/tls-classic.cjs scripts/test-db-bootstrap.mjs",
+    "test-db:sync-grants": "node --require ./scripts/dev/tls-classic.cjs scripts/test-db-sync-grants.mjs",
+    "test-db:reset": "node --require ./scripts/dev/tls-classic.cjs scripts/test-db-reset.mjs",
+    "dev:test": "node --require ./scripts/dev/tls-classic.cjs scripts/dev-with-test-env.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",

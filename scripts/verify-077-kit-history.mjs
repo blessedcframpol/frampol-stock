@@ -7,6 +7,7 @@
 import { runVerifyCli } from "./verify-harness.mjs"
 import {
   dropMovementPrev,
+  insertHarnessClient,
   stampTxn,
   bumpRestoreClock,
   setJwt,
@@ -102,11 +103,13 @@ export async function runChecks(ctx) {
      WHERE id IN ($1, $2)`,
     [adminId, viewerId],
   )
-  await db.query(
-    `INSERT INTO public.clients (id, name, company, email, phone, address)
-     VALUES ($1, 'H3077 Holder', 'H3077 Co', 'h3077@test.local', '000', 'Test')`,
-    [clientId],
-  )
+  await insertHarnessClient(db, {
+    id: clientId,
+    name: "H3077 Holder",
+    company: "H3077 Co",
+    email: "h3077@test.local",
+    phone: "0771118077",
+  })
   await setJwt(db, adminId)
 
   const invoker = await db.query(

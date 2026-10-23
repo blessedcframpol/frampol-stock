@@ -21,8 +21,11 @@ const require = createRequire(import.meta.url)
 const { Client } = require("pg")
 const {
   loadEnvLocal,
+  loadVerifyEnv,
   assertNotProduction,
   prepareVerifyEnv: prepareVerifyEnvStrict,
+  resolveHarnessDbUrl,
+  argvHasProductionFlag,
   PRODUCTION_SUPABASE_REF,
   projectRefFromUrl,
 } = require("./verify-env.cjs")
@@ -30,19 +33,21 @@ const {
 const DEFAULT_TIMEOUT_MS = 180_000
 
 /**
- * @param {{ harness?: boolean, extraUrls?: string[] }} [options]
- * harness: true → allow production (caller must use withHarness / rehearse).
+ * @param {{ harness?: boolean, extraUrls?: string[], production?: boolean }} [options]
+ * harness: true → DB URL from .env.test (TEST_DATABASE_URL) unless --production.
  * harness omitted/false → refuse production (HTTP / client scripts).
  */
 export function prepareVerifyEnv(options = {}) {
-  loadEnvLocal()
+  const productionMode = options.production === true || argvHasProductionFlag()
   if (options.harness === true) {
-    const dbUrl = process.env.SUPABASE_DB_URL || process.env.DATABASE_URL
-    if (!dbUrl) {
-      throw new Error("verify-harness: Missing SUPABASE_DB_URL or DATABASE_URL")
-    }
-    return { dbUrl, production: projectRefFromUrl(dbUrl) === PRODUCTION_SUPABASE_REF }
+    const loaded = loadVerifyEnv({ production: productionMode })
+    const { dbUrl, production, ref } = resolveHarnessDbUrl(loaded.productionMode)
+    console.log(
+      `HARNESS  env ${loaded.source}${production ? " (PRODUCTION — ROLLBACK only)" : ` (test ref ${ref || "ok"})`}`,
+    )
+    return { dbUrl, production, ref, productionMode: loaded.productionMode }
   }
+  loadVerifyEnv({ production: false })
   prepareVerifyEnvStrict(options.extraUrls || [])
 }
 
@@ -493,7 +498,14 @@ export async function withHarness(options, fn) {
 }
 
 // Re-export strict guard for scripts that still use the old path.
-export { assertNotProduction, PRODUCTION_SUPABASE_REF, projectRefFromUrl, loadEnvLocal }
+export {
+  assertNotProduction,
+  PRODUCTION_SUPABASE_REF,
+  projectRefFromUrl,
+  loadEnvLocal,
+  loadVerifyEnv,
+  argvHasProductionFlag,
+}
 
 const isMain =
   process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url

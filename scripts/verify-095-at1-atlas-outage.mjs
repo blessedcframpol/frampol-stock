@@ -4,7 +4,7 @@
  *   node scripts/rehearse-migration.mjs supabase/migrations/20261015100000_at1_atlas_outage.sql scripts/verify-095-at1-atlas-outage.mjs
  */
 import { runVerifyCli } from "./verify-harness.mjs"
-import { dropMovementPrev, stampTxn } from "./verify-harness-fixtures.mjs"
+import { dropMovementPrev, insertHarnessClient, stampTxn } from "./verify-harness-fixtures.mjs"
 
 const PREFIX = "H3095"
 const NOTES = "harness-095"
@@ -38,12 +38,14 @@ export async function runChecks(ctx) {
   const salesId = await ctx.createFixtureUser("sales", `${EMAIL}sales@test.local`)
   const accountsId = await ctx.createFixtureUser("accounts", `${EMAIL}accounts@test.local`)
 
-  const client = await db.query(
-    `INSERT INTO public.clients (id, name, company, email)
-     VALUES ($1, 'Harness 095', 'Harness 095 Co', $2) RETURNING id`,
-    [`CLT-${NOTES}-c`, `${EMAIL}client@test.local`],
-  )
-  const clientId = client.rows[0].id
+  const clientId = `CLT-${NOTES}-c`
+  await insertHarnessClient(db, {
+    id: clientId,
+    name: "Harness 095",
+    company: "Harness 095 Co",
+    email: `${EMAIL}client@test.local`,
+    phone: "0771118095",
+  })
 
   const products = await db.query(
     `SELECT id FROM public.product_lines

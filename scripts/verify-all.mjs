@@ -5,14 +5,22 @@
  * Usage:
  *   npm run verify:all
  *   node scripts/verify-all.mjs --self-test
+ *   node scripts/verify-all.mjs --production   # .env.local; harness ROLLBACK only
+ *
+ * Default: .env.test / TEST_DATABASE_URL (never production unless --production).
  */
 import { spawn } from "child_process"
 import path from "path"
 import { fileURLToPath } from "url"
+import { createRequire } from "module"
 import { parseVerifySummary } from "./verify-harness.mjs"
+
+const require = createRequire(import.meta.url)
+const { loadVerifyEnv, argvHasProductionFlag } = require("./verify-env.cjs")
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(__dirname, "..")
+const productionMode = argvHasProductionFlag()
 
 /** Ordered suite. Schema rules → probe → harness scripts. */
 const SUITE = [
@@ -48,6 +56,7 @@ const SUITE = [
   { id: "093", file: "scripts/verify-093-nt1-notifications-live.mjs" },
   { id: "094", file: "scripts/verify-094-nt1c-issue-lock-advisory.mjs" },
   { id: "095", file: "scripts/verify-095-at1-atlas-outage.mjs" },
+  { id: "096", file: "scripts/verify-096-nc1-client-complete.mjs" },
   { id: "movement", file: "scripts/verify-movement-transitions.mjs" },
 ]
 
@@ -55,7 +64,9 @@ const SELF_TEST_SUITE = [{ id: "canary-fail", file: "scripts/verify-vr1-canary-f
 
 function runNode(relPath) {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [path.join(root, relPath)], {
+    const args = [path.join(root, relPath)]
+    if (productionMode) args.push("--production")
+    const child = spawn(process.execPath, args, {
       cwd: root,
       stdio: ["ignore", "pipe", "pipe"],
       env: process.env,
@@ -134,6 +145,11 @@ async function runSuite(suite, title) {
 }
 
 async function main() {
+  const loaded = loadVerifyEnv({ production: productionMode })
+  console.log(
+    `verify:all using ${loaded.source}${loaded.productionMode ? " (--production)" : " (test DB)"}\n`,
+  )
+
   const selfTest = process.argv.includes("--self-test")
   if (selfTest) {
     const failed = await runSuite(SELF_TEST_SUITE, "verify:all --self-test")

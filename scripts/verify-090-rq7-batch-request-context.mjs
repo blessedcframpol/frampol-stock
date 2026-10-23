@@ -6,7 +6,13 @@
  *   node scripts/verify-090-rq7-batch-request-context.mjs
  */
 import { runVerifyCli } from "./verify-harness.mjs"
-import { dropMovementPrev, stampTxn } from "./verify-harness-fixtures.mjs"
+import {
+  dropMovementPrev,
+  insertHarnessClient,
+  resetHarnessSession,
+  setJwt,
+  stampTxn,
+} from "./verify-harness-fixtures.mjs"
 
 const PREFIX = "H3090"
 const NOTES = "harness-090"
@@ -59,14 +65,19 @@ export async function runChecks(ctx) {
 
   const adminId = await ctx.createFixtureUser("admin", `${EMAIL}admin@test.local`)
   const salesId = await ctx.createFixtureUser("sales", `${EMAIL}sales@test.local`)
+  await resetHarnessSession(db)
+  await setJwt(db, adminId)
   await db.query(`UPDATE public.profiles SET display_name = 'Harness Requester' WHERE id = $1`, [salesId])
+  await resetHarnessSession(db)
 
-  const client = await db.query(
-    `INSERT INTO public.clients (id, name, company, email)
-     VALUES ($1, 'Harness 090', 'Harness 090 Co', $2) RETURNING id`,
-    [`CLT-${NOTES}-c`, `${EMAIL}client@test.local`],
-  )
-  const clientId = client.rows[0].id
+  const clientId = `CLT-${NOTES}-c`
+  await insertHarnessClient(db, {
+    id: clientId,
+    name: "Harness 090",
+    company: "Harness 090 Co",
+    email: `${EMAIL}client@test.local`,
+    phone: "0771118090",
+  })
 
   const product = await db.query(
     `SELECT id FROM public.product_lines

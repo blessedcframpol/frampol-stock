@@ -53,9 +53,45 @@ export async function bumpRestoreClock(db, batchId) {
   )
 }
 
+export const HARNESS_CLIENT_ADDRESS = "12 Harness Example Street, Harare"
+
+/** NC1-complete client row for harness INSERTs. */
+export async function insertHarnessClient(db, row) {
+  const {
+    id,
+    name,
+    company,
+    email,
+    phone = "0771112233",
+    address = HARNESS_CLIENT_ADDRESS,
+    sites = [{ address: HARNESS_CLIENT_ADDRESS }],
+  } = row
+  await db.query(
+    `INSERT INTO public.clients (id, name, company, email, phone, address, sites)
+     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)`,
+    [id, name, company, email, phone, address, JSON.stringify(sites)],
+  )
+}
+
 export async function setJwt(db, userId) {
   await db.query(`SELECT set_config('request.jwt.claim.sub', $1, true)`, [userId])
   await db.query(`SELECT set_config('request.jwt.claims', $1, true)`, [
     JSON.stringify({ sub: userId, role: "authenticated" }),
   ])
+}
+
+/** Clear JWT + ROLE so the next harness script starts as the DB owner. */
+export async function resetHarnessSession(db) {
+  try {
+    await db.query(`RESET ROLE`)
+  } catch {
+    /* never set, or transaction already aborted */
+  }
+  await db.query(`SELECT set_config('request.jwt.claim.sub', '', true)`)
+  await db.query(`SELECT set_config('request.jwt.claims', '', true)`)
+  // apply_stock_movement leaves app.movement_type; audit_capture prefers it over
+  // app.audit_source — clear so later suites (084/085/089) are not stuck on "Sale".
+  await db.query(`SELECT set_config('app.movement_type', '', true)`)
+  await db.query(`SELECT set_config('app.audit_source', '', true)`)
+  await db.query(`SELECT set_config('app.audit_actor', '', true)`)
 }

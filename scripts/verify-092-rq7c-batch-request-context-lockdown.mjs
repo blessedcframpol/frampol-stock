@@ -5,7 +5,13 @@
  *   node scripts/verify-092-rq7c-batch-request-context-lockdown.mjs
  */
 import { queryExpectDenied, runVerifyCli } from "./verify-harness.mjs"
-import { dropMovementPrev, stampTxn } from "./verify-harness-fixtures.mjs"
+import {
+  dropMovementPrev,
+  insertHarnessClient,
+  resetHarnessSession,
+  setJwt,
+  stampTxn,
+} from "./verify-harness-fixtures.mjs"
 
 const PREFIX = "H3092"
 const NOTES = "harness-092"
@@ -74,14 +80,19 @@ export async function runChecks(ctx) {
   const salesId = await ctx.createFixtureUser("sales", `${EMAIL}sales@test.local`)
   const viewerId = await ctx.createFixtureUser("viewer", `${EMAIL}viewer@test.local`)
   const accountsId = await ctx.createFixtureUser("accounts", `${EMAIL}accounts@test.local`)
+  await resetHarnessSession(db)
+  await setJwt(db, adminId)
   await db.query(`UPDATE public.profiles SET display_name = 'Harness Requester' WHERE id = $1`, [salesId])
+  await resetHarnessSession(db)
 
-  const client = await db.query(
-    `INSERT INTO public.clients (id, name, company, email)
-     VALUES ($1, 'Harness 092', 'Harness 092 Co', $2) RETURNING id`,
-    [`CLT-${NOTES}-c`, `${EMAIL}client@test.local`],
-  )
-  const clientId = client.rows[0].id
+  const clientId = `CLT-${NOTES}-c`
+  await insertHarnessClient(db, {
+    id: clientId,
+    name: "Harness 092",
+    company: "Harness 092 Co",
+    email: `${EMAIL}client@test.local`,
+    phone: "0771118092",
+  })
 
   const product = await db.query(
     `SELECT id FROM public.product_lines

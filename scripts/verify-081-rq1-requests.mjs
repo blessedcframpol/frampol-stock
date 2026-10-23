@@ -6,7 +6,7 @@
  *   node scripts/verify-081-rq1-requests.mjs
  */
 import { runVerifyCli } from "./verify-harness.mjs"
-import { dropMovementPrev, setJwt, stampTxn } from "./verify-harness-fixtures.mjs"
+import { dropMovementPrev, insertHarnessClient, setJwt, stampTxn } from "./verify-harness-fixtures.mjs"
 
 const PREFIX = "H3081"
 const ATLAS =
@@ -106,10 +106,13 @@ export async function runChecks(ctx) {
   const tech = await ctx.createFixtureUser("technicians", "harness-081-tech@test.local")
 
   const clientId = `${PREFIX}-CLIENT`
-  await db.query(
-    `INSERT INTO public.clients (id, name, company, email) VALUES ($1, $2, $3, $4)`,
-    [clientId, `${PREFIX} Client`, `${PREFIX} Company`, "harness-081-client@test.local"],
-  )
+  await insertHarnessClient(db, {
+    id: clientId,
+    name: `${PREFIX} Client`,
+    company: `${PREFIX} Company`,
+    email: "harness-081-client@test.local",
+    phone: "0771118081",
+  })
 
   const PL = {
     fg: { id: `${PREFIX}-PL-FG`, name: `${PREFIX} FortiGate Harness`, vendor: "Fortinet", key: true },
@@ -330,12 +333,20 @@ export async function runChecks(ctx) {
 
   // --- 3. Atlas link --------------------------------------------------------
   {
+    let linkRequired = true
+    const hasOutageFn = await db.query(
+      `SELECT to_regprocedure('public.app_settings_atlas_link_required()') IS NOT NULL AS ok`,
+    )
+    if (hasOutageFn.rows[0]?.ok) {
+      const settings = await db.query(`SELECT public.app_settings_atlas_link_required() AS required`)
+      linkRequired = settings.rows[0]?.required !== false
+    }
     const bad = [
       "https://example.com/projects/11111111-1111-1111-1111-111111111111?task=22222222-2222-2222-2222-222222222222",
       "https://ai.frampolafrica.com:10801/projects/11111111-1111-1111-1111-111111111111",
       "https://ai.frampolafrica.com:9999/my-tasks?task=22222222-2222-2222-2222-222222222222",
       "https://ai.frampolafrica.com:10801/my-tasks?task=not-a-uuid",
-      "",
+      ...(linkRequired ? [""] : []),
     ]
     const problems = []
     for (const link of bad) {
@@ -346,8 +357,14 @@ export async function runChecks(ctx) {
       )
       if (problem) problems.push(`${link || "(blank)"}: ${problem}`)
     }
-    if (problems.length === 0) pass("atlas_link_rejected", `${bad.length} bad or missing Atlas links rejected`)
-    else fail("atlas_link_rejected", problems.join(" | "))
+    if (problems.length === 0) {
+      pass(
+        "atlas_link_rejected",
+        linkRequired
+          ? `${bad.length} bad or missing Atlas links rejected`
+          : `${bad.length} malformed links rejected (blank allowed while Atlas link optional)`,
+      )
+    } else fail("atlas_link_rejected", problems.join(" | "))
   }
 
   // --- 1. Submit each type --------------------------------------------------

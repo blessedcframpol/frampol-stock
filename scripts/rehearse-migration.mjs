@@ -18,13 +18,17 @@ const require = createRequire(import.meta.url)
 const { Client } = require("pg")
 
 function usage() {
-  console.error("Usage: node scripts/rehearse-migration.mjs <migration.sql> [verify-script.mjs]")
+  console.error(
+    "Usage: node scripts/rehearse-migration.mjs <migration.sql> [verify-script.mjs] [--production]",
+  )
+  console.error("Default DB: TEST_DATABASE_URL from .env.test. Pass --production for .env.local.")
   process.exit(2)
 }
 
 async function main() {
-  const migrationPath = process.argv[2]
-  const verifyPath = process.argv[3]
+  const args = process.argv.slice(2).filter((a) => a !== "--production")
+  const migrationPath = args[0]
+  const verifyPath = args[1]
   if (!migrationPath) usage()
   const absMigration = path.resolve(migrationPath)
   if (!fs.existsSync(absMigration)) {

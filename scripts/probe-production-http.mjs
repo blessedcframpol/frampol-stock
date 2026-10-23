@@ -18,9 +18,15 @@ import { createClient } from "@supabase/supabase-js"
 import { isPermissionDenied, printVerifySummary } from "./verify-harness.mjs"
 
 const require = createRequire(import.meta.url)
-const { loadEnvLocal, PRODUCTION_SUPABASE_REF, projectRefFromUrl } = require("./verify-env.cjs")
+const {
+  loadVerifyEnv,
+  argvHasProductionFlag,
+  PRODUCTION_SUPABASE_REF,
+  projectRefFromUrl,
+} = require("./verify-env.cjs")
 
-loadEnvLocal()
+// Default: test project (.env.test). --production → .env.local (read-only probe).
+loadVerifyEnv({ production: argvHasProductionFlag() })
 
 function isDeniedStatus(status) {
   return status === 401 || status === 403 || status === 404 || status === 405
@@ -105,7 +111,7 @@ async function main() {
     process.env.VERIFY_APP_URL ||
     (projectRefFromUrl(process.env.NEXT_PUBLIC_SUPABASE_URL || "") === PRODUCTION_SUPABASE_REF
       ? "https://frampol-stock.vercel.app"
-      : "http://localhost:3000")
+      : "http://127.0.0.1:3000")
   ).replace(/\/$/, "")
 
   if (!url || !anonKey) {
@@ -241,7 +247,28 @@ async function main() {
   }
 
   // --- Admin / write APIs without a session must not succeed (401/403) ---
+  // Wait briefly for `npm run dev:test` (verify:all often starts before Ready).
   {
+    const deadline = Date.now() + 90_000
+    let ready = false
+    while (Date.now() < deadline) {
+      try {
+        const ping = await fetch(appUrl, { method: "GET", redirect: "manual" })
+        if (ping.status > 0) {
+          ready = true
+          break
+        }
+      } catch {
+        /* still starting */
+      }
+      await new Promise((r) => setTimeout(r, 1500))
+    }
+    if (!ready) {
+      console.log(
+        `PROBE  app not reachable at ${appUrl} after 90s — start with: npm run dev:test`,
+      )
+    }
+
     const checks = [
       { name: "admin_profiles", path: "/api/admin/profiles", method: "GET" },
       { name: "admin_export", path: "/api/admin/transactions/export", method: "GET" },

@@ -4,7 +4,7 @@
  *   node scripts/rehearse-migration.mjs supabase/migrations/20261014150000_nt1c_issue_lock_advisory.sql scripts/verify-094-nt1c-issue-lock-advisory.mjs
  */
 import { runVerifyCli } from "./verify-harness.mjs"
-import { dropMovementPrev, stampTxn } from "./verify-harness-fixtures.mjs"
+import { dropMovementPrev, insertHarnessClient, stampTxn } from "./verify-harness-fixtures.mjs"
 
 const PREFIX = "H3094"
 const NOTES = "harness-094"
@@ -37,12 +37,14 @@ export async function runChecks(ctx) {
   const adminB = await ctx.createFixtureUser("admin", `${EMAIL}admin-b@test.local`)
   const salesId = await ctx.createFixtureUser("sales", `${EMAIL}sales@test.local`)
 
-  const client = await db.query(
-    `INSERT INTO public.clients (id, name, company, email)
-     VALUES ($1, 'Harness 094', 'Harness 094 Co', $2) RETURNING id`,
-    [`CLT-${NOTES}-c`, `${EMAIL}client@test.local`],
-  )
-  const clientId = client.rows[0].id
+  const clientId = `CLT-${NOTES}-c`
+  await insertHarnessClient(db, {
+    id: clientId,
+    name: "Harness 094",
+    company: "Harness 094 Co",
+    email: `${EMAIL}client@test.local`,
+    phone: "0771118094",
+  })
 
   const products = await db.query(
     `SELECT id FROM public.product_lines

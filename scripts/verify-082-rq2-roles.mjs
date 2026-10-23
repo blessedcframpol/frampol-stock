@@ -7,7 +7,7 @@
  */
 import { createRequire } from "module"
 import { runVerifyCli, prepareVerifyEnv } from "./verify-harness.mjs"
-import { dropMovementPrev } from "./verify-harness-fixtures.mjs"
+import { dropMovementPrev, insertHarnessClient } from "./verify-harness-fixtures.mjs"
 
 const require = createRequire(import.meta.url)
 const { Client } = require("pg")
@@ -77,12 +77,14 @@ export async function runChecks(ctx) {
   const accountsId = await ctx.createFixtureUser("accounts", `${EMAIL}accounts@test.local`)
   const viewerId = await ctx.createFixtureUser("viewer", `${EMAIL}viewer@test.local`)
 
-  const client = await db.query(
-    `INSERT INTO public.clients (id, name, company, email)
-     VALUES ($1, 'Harness 082', 'Harness 082 Co', $2) RETURNING id`,
-    [`CLT-${NOTES}-c`, `${EMAIL}client@test.local`],
-  )
-  const clientId = client.rows[0].id
+  const clientId = `CLT-${NOTES}-c`
+  await insertHarnessClient(db, {
+    id: clientId,
+    name: "Harness 082",
+    company: "Harness 082 Co",
+    email: `${EMAIL}client@test.local`,
+    phone: "0771118082",
+  })
 
   const products = await db.query(
     `WITH picks AS (

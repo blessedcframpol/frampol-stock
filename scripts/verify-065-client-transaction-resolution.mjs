@@ -195,11 +195,11 @@ export async function runChecks(ctx) {
   await db.query(
     `INSERT INTO public.clients (id, name, company, email, phone, address, sites)
      VALUES
-       ('CLT-harness-065-acme', 'Buyer', 'Acme', 'harness-065-acme@test.local', '000', 'Verify', '[{"address":"Verify"}]'),
-       ('CLT-harness-065-twin-a', 'Twin A', 'Verify Twin', 'harness-065-twin-a@test.local', '000', 'Verify', '[{"address":"Verify"}]'),
-       ('CLT-harness-065-twin-b', 'Twin B', 'Verify Twin', 'harness-065-twin-b@test.local', '000', 'Verify', '[{"address":"Verify"}]'),
-       ('CLT-harness-065-text', 'Text Target', 'Text Target Co', 'harness-065-text@test.local', '000', 'Verify', '[{"address":"Verify"}]'),
-       ('CLT-harness-065-owner', 'Owner', 'Owner Co', 'harness-065-owner@test.local', '000', 'Verify', '[{"address":"Verify"}]')`,
+       ('CLT-harness-065-acme', 'Buyer', 'Acme', 'harness-065-acme@test.local', '0771110651', '12 Acme Street, Harare', '[{"address":"12 Acme Street, Harare"}]'),
+       ('CLT-harness-065-twin-a', 'Twin A', 'Verify Twin', 'harness-065-twin-a@test.local', '0771110652', '12 Twin Street, Harare', '[{"address":"12 Twin Street, Harare"}]'),
+       ('CLT-harness-065-twin-b', 'Twin B', 'Verify Twin', 'harness-065-twin-b@test.local', '0771110653', '13 Twin Street, Harare', '[{"address":"13 Twin Street, Harare"}]'),
+       ('CLT-harness-065-text', 'Text Target', 'Text Target Co', 'harness-065-text@test.local', '0771110654', '14 Text Street, Harare', '[{"address":"14 Text Street, Harare"}]'),
+       ('CLT-harness-065-owner', 'Owner', 'Owner Co', 'harness-065-owner@test.local', '0771110655', '15 Owner Street, Harare', '[{"address":"15 Owner Street, Harare"}]')`,
   )
   await db.query(
     `INSERT INTO public.transactions (id, type, serial_number, item_name, client, date, client_id, invoice_number, batch_id)
