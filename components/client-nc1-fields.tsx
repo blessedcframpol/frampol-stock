@@ -105,13 +105,18 @@ export function ClientNc1Fields({
         <Label htmlFor={`${idPrefix}-email`}>Email</Label>
         <Input
           id={`${idPrefix}-email`}
-          type="email"
+          type="text"
+          inputMode="email"
           autoComplete="email"
           value={email}
           onChange={(e) => onEmail(e.target.value)}
           aria-invalid={Boolean(errors.email)}
+          aria-describedby={`${idPrefix}-email-hint`}
           className={cn(errors.email && "border-destructive")}
         />
+        <p id={`${idPrefix}-email-hint`} className="text-xs text-muted-foreground">
+          Separate multiple emails with ;
+        </p>
         {errors.email ? <p className="text-xs text-destructive">{errors.email}</p> : null}
       </div>
 

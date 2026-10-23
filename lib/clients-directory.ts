@@ -97,9 +97,9 @@ export function splitEmails(value: string | null | undefined): string[] {
   const raw = (value ?? "").trim()
   if (!raw) return []
   return raw
-    .split(";")
+    .split(/[;,]+/)
     .map((part) => part.trim())
-    .filter((part) => !isPlaceholder(part))
+    .filter((part) => part.length > 0 && !isPlaceholder(part))
 }
 
 export function realSites(

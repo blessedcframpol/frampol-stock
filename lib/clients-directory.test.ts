@@ -70,6 +70,7 @@ describe("client directory display", () => {
     expect(displayLabel({ name: "N/A", company: "N/A" })).toBe("—")
     expect(displayLabel({ name: "ABC Auctions", company: "ABC Auctions" })).toBe("ABC Auctions")
     expect(splitEmails("a@x.com; b@x.com; N/A")).toEqual(["a@x.com", "b@x.com"])
+    expect(splitEmails("a@x.com, b@x.com, N/A")).toEqual(["a@x.com", "b@x.com"])
     expect(clientHasNoContact(blank)).toBe(true)
     expect(clientHasNoContact(joseph)).toBe(false)
     expect(realSites([{ address: "N/A" }, { name: "HQ", address: "1 Main" }])).toEqual([

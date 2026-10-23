@@ -31,19 +31,57 @@ export function isClientPlaceholder(value: string | null | undefined): boolean {
   return false
 }
 
-/** One email only; rejects semicolon lists and obvious placeholders. */
+/** Split email field on ";" / "," → trimmed non-empty parts (order preserved). */
+export function splitClientEmailParts(email: string): string[] {
+  const raw = email.trim()
+  if (!raw) return []
+  return raw
+    .split(/[;,]+/)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0)
+}
+
+function oneClientEmailProblem(raw: string): string | null {
+  if (!raw) return "Email is required"
+  if (isClientPlaceholder(raw)) return "Email cannot be a placeholder"
+  if (/\s/.test(raw)) return "Email cannot contain spaces"
+  const at = raw.indexOf("@")
+  if (at <= 0 || at === raw.length - 1) return "Enter a valid email address"
+  const domain = raw.slice(at + 1)
+  if (!domain.includes(".")) return "Enter a valid email address"
+  return null
+}
+
+/** Deduped lowercased parts in first-seen order (case-insensitive). */
+export function uniqueClientEmailParts(email: string): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const part of splitClientEmailParts(email)) {
+    const key = part.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(key)
+  }
+  return out
+}
+
+/** 1–5 addresses separated by ";" or ","; each must be valid; repeats ignored. */
 export function clientEmailProblem(email: string): string | null {
   const raw = email.trim()
   if (!raw) return "Email is required"
-  if (raw.includes(";") || raw.includes(",")) return "Use one email address only"
-  const at = raw.indexOf("@")
-  if (at <= 0 || at === raw.length - 1) return "Enter a valid email address"
-  const local = raw.slice(0, at)
-  const domain = raw.slice(at + 1)
-  if (!domain.includes(".") || local.length < 1) return "Enter a valid email address"
-  if (isClientPlaceholder(raw)) return "Email cannot be a placeholder"
-  if (/\s/.test(raw)) return "Email cannot contain spaces"
+  const parts = uniqueClientEmailParts(raw)
+  if (parts.length === 0) return "Email is required"
+  if (parts.length > 5) return "At most 5 email addresses allowed"
+  for (const part of parts) {
+    const problem = oneClientEmailProblem(part)
+    if (problem) return `${problem}: ${part}`
+  }
   return null
+}
+
+/** Canonical store form: "a@x.com; b@y.com" (silent case-insensitive dedupe). */
+export function normalizeClientEmails(email: string): string {
+  return uniqueClientEmailParts(email).join("; ")
 }
 
 /**
@@ -159,7 +197,7 @@ export function normalizeNewClientForDb(input: ClientCompleteInput): {
   return {
     name: sanitizeClientText(input.name),
     company: input.kind === "individual" ? null : sanitizeClientText(input.company),
-    email: input.email.trim().toLowerCase(),
+    email: normalizeClientEmails(input.email),
     phone,
     sites,
   }

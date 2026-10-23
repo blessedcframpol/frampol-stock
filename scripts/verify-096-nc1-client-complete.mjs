@@ -1,7 +1,9 @@
 /**
- * NC1 — client completeness trigger + duplicate lookup.
+ * NC1 / NC1f — client completeness trigger + duplicate lookup (+ multi-email).
  *
  *   node scripts/rehearse-migration.mjs supabase/migrations/20261015120000_nc1_client_complete.sql scripts/verify-096-nc1-client-complete.mjs
+ *   # For NC1f checks, apply 20261023150000_nc1f_multi_email.sql in the same transaction first
+ *   # (rehearse-nc1-full-suite does both), or apply NC1f on the test DB then run this script.
  */
 import { runVerifyCli } from "./verify-harness.mjs"
 
@@ -330,6 +332,117 @@ export async function runChecks(ctx) {
     }
   } else {
     fail("override_immutable_on_update", "missing override row")
+  }
+
+  // --- NC1f multi-email ---
+  const multi = goodPayload("multi2")
+  // Includes a case-variant repeat of multi-a — must accept and silently dedupe.
+  multi.email = `${EMAIL}multi-a@test.local, ${EMAIL}MULTI-A@test.local; ${EMAIL}multi-b@test.local`
+  const multiOk = await attempt(
+    `INSERT INTO public.clients (id, name, company, email, phone, address, sites)
+     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)`,
+    [
+      multi.id,
+      multi.name,
+      multi.company,
+      multi.email,
+      multi.phone,
+      multi.address,
+      JSON.stringify(multi.sites),
+    ],
+  )
+  if (multiOk.ok) {
+    const stored = await db.query(`SELECT email FROM public.clients WHERE id = $1`, [multi.id])
+    const want = `${EMAIL}multi-a@test.local; ${EMAIL}multi-b@test.local`
+    if (stored.rows[0]?.email === want) pass("multi_email_accepted_normalised", stored.rows[0].email)
+    else fail("multi_email_accepted_normalised", stored.rows[0]?.email ?? "missing")
+  } else {
+    fail("multi_email_accepted_normalised", multiOk.error ?? "insert failed")
+  }
+
+  const multiNa = await attempt(
+    `INSERT INTO public.clients (id, name, company, email, phone, address, sites)
+     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)`,
+    [
+      goodPayload("multina").id,
+      "Harness Multi NA",
+      "Harness Multi NA Co",
+      `${EMAIL}ok@test.local, n/a`,
+      "0772223344",
+      "12 Example Street, Harare",
+      JSON.stringify([{ address: "12 Example Street, Harare" }]),
+    ],
+  )
+  if (!multiNa.ok && /n\/a/i.test(multiNa.error ?? "")) {
+    pass("multi_email_placeholder_named", multiNa.error.slice(0, 100))
+  } else if (!multiNa.ok) {
+    fail("multi_email_placeholder_named", multiNa.error?.slice(0, 100) ?? "rejected without n/a")
+  } else {
+    fail("multi_email_placeholder_named", "inserted")
+  }
+
+  const sixAddrs = [
+    `${EMAIL}s1@test.local`,
+    `${EMAIL}s2@test.local`,
+    `${EMAIL}s3@test.local`,
+    `${EMAIL}s4@test.local`,
+    `${EMAIL}s5@test.local`,
+    `${EMAIL}s6@test.local`,
+  ].join("; ")
+  const sixOk = await attempt(
+    `INSERT INTO public.clients (id, name, company, email, phone, address, sites)
+     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)`,
+    [
+      goodPayload("six").id,
+      "Harness Six",
+      "Harness Six Co",
+      sixAddrs,
+      "0772224455",
+      "12 Example Street, Harare",
+      JSON.stringify([{ address: "12 Example Street, Harare" }]),
+    ],
+  )
+  if (!sixOk.ok && /at most 5/i.test(sixOk.error ?? "")) {
+    pass("multi_email_six_rejected", sixOk.error.slice(0, 80))
+  } else if (!sixOk.ok) {
+    fail("multi_email_six_rejected", sixOk.error?.slice(0, 80) ?? "rejected without max message")
+  } else {
+    fail("multi_email_six_rejected", "inserted")
+  }
+
+  const anchor = goodPayload("dupanchor")
+  anchor.email = `${EMAIL}dup-first@test.local; ${EMAIL}dup-second@test.local`
+  const anchorOk = await attempt(
+    `INSERT INTO public.clients (id, name, company, email, phone, address, sites)
+     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)`,
+    [
+      anchor.id,
+      anchor.name,
+      anchor.company,
+      anchor.email,
+      "0773334455",
+      anchor.address,
+      JSON.stringify(anchor.sites),
+    ],
+  )
+  if (!anchorOk.ok) {
+    fail("multi_email_second_addr_duplicate", anchorOk.error ?? "anchor insert failed")
+  } else {
+    const dupSecond = await asUser(salesId, () =>
+      attempt(`SELECT * FROM public.find_client_duplicate_candidates($1, $2, $3)`, [
+        `${EMAIL}dup-second@test.local`,
+        "0779998877",
+        "Unrelated Name For Dup Test",
+      ]),
+    )
+    if (
+      dupSecond.ok &&
+      dupSecond.rows.some((r) => r.id === anchor.id && (r.match_on || []).includes("email"))
+    ) {
+      pass("multi_email_second_addr_duplicate", anchor.id)
+    } else {
+      fail("multi_email_second_addr_duplicate", JSON.stringify(dupSecond.rows ?? dupSecond.error))
+    }
   }
 }
 

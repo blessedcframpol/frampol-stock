@@ -4,10 +4,10 @@ export function mapClientDbError(message: string): Record<string, string> {
   const lower = m.toLowerCase()
 
   if (lower.includes("email")) {
-    if (lower.includes("one email")) return { email: "Use one email address only" }
-    if (lower.includes("placeholder")) return { email: "Email cannot be a placeholder" }
+    if (lower.includes("at most 5")) return { email: m }
+    if (lower.includes("placeholder")) return { email: m.includes(":") ? m : "Email cannot be a placeholder" }
     if (lower.includes("required")) return { email: "Email is required" }
-    if (lower.includes("valid") || lower.includes("spaces")) return { email: "Enter a valid email address" }
+    if (lower.includes("valid") || lower.includes("spaces")) return { email: m.includes(":") ? m : "Enter a valid email address" }
     return { email: m }
   }
   if (lower.includes("phone") || lower.includes("mobile") || lower.includes("zimbabwe")) {

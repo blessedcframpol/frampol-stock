@@ -18,6 +18,7 @@ import { fileURLToPath } from "url"
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(__dirname, "..")
 const MIGRATION = path.join(root, "supabase/migrations/20261015120000_nc1_client_complete.sql")
+const MIGRATION_NC1F = path.join(root, "supabase/migrations/20261023150000_nc1f_multi_email.sql")
 
 /** Same harness entries as verify-all.mjs (no schema-rules, no probe-http). */
 const HARNESS_SCRIPTS = [
@@ -72,7 +73,11 @@ async function main() {
   if (!fs.existsSync(MIGRATION)) {
     throw new Error(`Missing migration: ${MIGRATION}`)
   }
+  if (!fs.existsSync(MIGRATION_NC1F)) {
+    throw new Error(`Missing migration: ${MIGRATION_NC1F}`)
+  }
   const sql = fs.readFileSync(MIGRATION, "utf8")
+  const sqlNc1f = fs.readFileSync(MIGRATION_NC1F, "utf8")
   const markers = await loadAllMarkers()
 
   const { ok, passed, failed } = await withHarness(
@@ -81,6 +86,9 @@ async function main() {
       console.log(`REHEARSE  applying ${path.basename(MIGRATION)} inside transaction…`)
       await ctx.db.query(sql)
       ctx.pass("nc1_migration_sql", "applied inside transaction")
+      console.log(`REHEARSE  applying ${path.basename(MIGRATION_NC1F)} inside transaction…`)
+      await ctx.db.query(sqlNc1f)
+      ctx.pass("nc1f_migration_sql", "applied inside transaction")
 
       for (const entry of HARNESS_SCRIPTS) {
         console.log(`\n=== harness ${entry.id} (${entry.file}) ===`)
