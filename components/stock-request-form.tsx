@@ -33,7 +33,7 @@ import {
 import { InvoiceChoiceFields } from "@/components/invoice-choice-fields"
 import { useAuth } from "@/lib/auth-context"
 import { formatClientLabel } from "@/lib/client-label"
-import { useClients } from "@/lib/supabase/clients-db"
+import { useClients } from "@/lib/clients-store"
 import { ClientNc1Fields } from "@/components/client-nc1-fields"
 import { ClientDuplicateDialog } from "@/components/client-duplicate-dialog"
 import { useNc1ClientCreate } from "@/lib/use-nc1-client-create"
@@ -132,7 +132,7 @@ export function StockRequestForm({
   const canCreate = canCreateStockRequest(role)
   const timeZone = useOrgTimezone()
   const today = todayBusinessDate(timeZone)
-  const { clients, refetch: refetchClients } = useClients()
+  const { clients, upsertClient } = useClients()
   // Catalogue via product_catalogue (not inventory serials). Counts via stock_availability.
   const [catalogue, setCatalogue] = useState<ProductOption[]>([])
   const [availability, setAvailability] = useState<Record<string, number> | null>(null)
@@ -285,9 +285,9 @@ export function StockRequestForm({
     }
   }
 
-  async function finishNewClientSelection(createdId: string) {
-    await refetchClients()
-    setClientId(createdId)
+  async function finishNewClientSelection(created: { id: string }) {
+    // created row already upserted by caller when available; ensure id is selected
+    setClientId(created.id)
     setNewClientOpen(false)
     nc1.reset()
     toast.success("Client created.")
@@ -295,12 +295,18 @@ export function StockRequestForm({
 
   async function handleCreateClient() {
     const created = await nc1.submitNewClient()
-    if (created) await finishNewClientSelection(created.id)
+    if (created) {
+      upsertClient(created)
+      await finishNewClientSelection(created)
+    }
   }
 
   async function handleNc1CreateAnyway() {
     const created = await nc1.confirmCreateAnyway()
-    if (created) await finishNewClientSelection(created.id)
+    if (created) {
+      upsertClient(created)
+      await finishNewClientSelection(created)
+    }
   }
 
   const breadcrumbs =

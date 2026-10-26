@@ -88,7 +88,18 @@ function internalFilter(): string {
   ]).join(",")
 }
 
+/** Share one in-flight alert feed load when shell + page both mount useAlertFeed. */
+let alertFeedInflight: Promise<AlertFeed> | null = null
+
 export async function fetchAlertFeed(supabase: FeedClient = getSupabaseClient()): Promise<AlertFeed> {
+  if (alertFeedInflight) return alertFeedInflight
+  alertFeedInflight = loadAlertFeed(supabase).finally(() => {
+    alertFeedInflight = null
+  })
+  return alertFeedInflight
+}
+
+async function loadAlertFeed(supabase: FeedClient): Promise<AlertFeed> {
   const settings = await supabase.from("app_settings").select("timezone").limit(1).maybeSingle()
   const timezone = settings.data?.timezone?.trim() || DEFAULT_ORG_TIMEZONE
   const today = todayBusinessDate(timezone)

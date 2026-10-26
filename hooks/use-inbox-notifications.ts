@@ -16,6 +16,7 @@ import {
   notificationHref,
   showBrowserNotification,
 } from "@/lib/notifications-live"
+// announceNotificationsInbox: notifications page list only (not on every poll)
 
 export type { AppNotificationRow }
 
@@ -122,7 +123,8 @@ export function useInboxNotifications(): {
     try {
       const rows = await fetchUnreadNotifications(sb)
       setUnread(rows)
-      announceNotificationsInbox()
+      // Do not announce inbox/queues here — routine poll/focus must stay
+      // notifications-only. New-row detection below announces when needed.
     } catch {
       setUnread([])
     } finally {
@@ -208,6 +210,7 @@ export function useInboxNotifications(): {
       toast.message(row.title, { description: row.body ?? undefined })
       showBrowserNotification(row.title, row.body ?? undefined, notificationHref(row))
     }
+    announceNotificationsInbox()
     announceRequestQueuesRefresh()
   }, [unread, loading, muted])
 

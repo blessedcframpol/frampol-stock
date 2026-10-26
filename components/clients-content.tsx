@@ -25,7 +25,8 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
-import { useClients, updateClient, type InsertClientInput } from "@/lib/supabase/clients-db"
+import { useClients } from "@/lib/clients-store"
+import { updateClient, type InsertClientInput } from "@/lib/supabase/clients-db"
 import { ClientNc1Fields } from "@/components/client-nc1-fields"
 import { ClientDuplicateDialog } from "@/components/client-duplicate-dialog"
 import { newClientFieldErrors, type ClientEntityKind, type ClientDuplicateMatch } from "@/lib/client-complete"
@@ -112,7 +113,7 @@ export function ClientsContent() {
     setPageKey(listKey)
     setPage(1)
   }
-  const { clients, isLoading, error, refetch } = useClients()
+  const { clients, isLoading, error, upsertClient } = useClients()
   const [holdings, setHoldings] = useState<HeldUnit[]>([])
   const [holdingsReady, setHoldingsReady] = useState(false)
   const [dispatchCounts, setDispatchCounts] = useState<Map<string, ClientDispatchCount>>(new Map())
@@ -271,7 +272,7 @@ export function ClientsContent() {
   }
 
   async function finishCreate(payload: InsertClientInput) {
-    await createClientFromCompleteInput(getSupabaseClient(), {
+    const created = await createClientFromCompleteInput(getSupabaseClient(), {
       kind: payload.kind,
       name: payload.name,
       company: payload.company,
@@ -280,8 +281,8 @@ export function ClientsContent() {
       sites: payload.sites,
       duplicateOverrideReason: payload.duplicateOverrideReason,
     })
+    upsertClient(created)
     toast.success("Client added")
-    await refetch()
     setFormOpen(false)
     resetFormFields()
   }
@@ -296,9 +297,9 @@ export function ClientsContent() {
       }
       setIsSubmitting(true)
       try {
-        await updateClient(editingClient.id, payload)
+        const updated = await updateClient(editingClient.id, payload)
+        upsertClient(updated)
         toast.success("Client updated")
-        await refetch()
         setFormOpen(false)
         resetFormFields()
       } catch (e) {

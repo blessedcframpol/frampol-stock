@@ -40,7 +40,7 @@ import type { InvoiceChoice } from "@/lib/invoices"
 import { INTERNAL_LOCATIONS } from "@/lib/data"
 import { formatClientLabel } from "@/lib/client-label"
 import type { JsonValue, TransactionType } from "@/lib/data"
-import { useClients } from "@/lib/supabase/clients-db"
+import { useClients } from "@/lib/clients-store"
 import { ClientNc1Fields } from "@/components/client-nc1-fields"
 import { ClientDuplicateDialog } from "@/components/client-duplicate-dialog"
 import { useNc1ClientCreate } from "@/lib/use-nc1-client-create"
@@ -151,7 +151,7 @@ export function MovementForm({
   const isEmbed = Boolean(embedMode)
   const isCompact = layout === "compact"
   const { inventory, applyMovement, refetchLedger } = useInventoryStore()
-  const { clients, refetch: refetchClients } = useClients()
+  const { clients, upsertClient } = useClients()
   const { role, loading: authLoading } = useAuth()
   const canMove = canRecordStockMovement(role)
   const isAdmin = role === ADMIN
@@ -502,7 +502,7 @@ export function MovementForm({
     }
     const created = await nc1.submitNewClient()
     if (!created) return undefined
-    await refetchClients()
+    upsertClient(created)
     setClientId(created.id)
     setCreateStep("idle")
     return created.id
@@ -511,7 +511,7 @@ export function MovementForm({
   async function handleNc1CreateAnyway() {
     const created = await nc1.confirmCreateAnyway()
     if (!created) return
-    await refetchClients()
+    upsertClient(created)
     setClientId(created.id)
     setCreateStep("idle")
   }

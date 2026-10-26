@@ -1,6 +1,3 @@
-"use client"
-
-import { useCallback, useEffect, useState } from "react"
 import type { Client, ClientSite } from "@/lib/data"
 import type { Database } from "./database.types"
 import { getSupabaseClient } from "./client"
@@ -179,65 +176,3 @@ export async function updateClient(id: string, input: InsertClientInput): Promis
   return rowToClient(data)
 }
 
-export function useClients(): {
-  clients: Client[]
-  isLoading: boolean
-  error: Error | null
-  refetch: () => Promise<void>
-} {
-  const [clients, setClients] = useState<Client[]>([])
-  const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState<Error | null>(null)
-
-  const fetchClientRows = useCallback(async () => {
-    const supabase = getSupabaseIfConfigured()
-    if (!supabase) return { ok: false as const }
-    const rows = await fetchAllClientRows(supabase)
-    return { ok: true as const, rows }
-  }, [])
-
-  const refetch = useCallback(async () => {
-    setError(null)
-    setIsLoading(true)
-    try {
-      const result = await fetchClientRows()
-      if (!result.ok) {
-        setClients([])
-        return
-      }
-      setClients(result.rows.map(rowToClient))
-    } catch (e) {
-      setError(e instanceof Error ? e : new Error(String(e)))
-      setClients([])
-    } finally {
-      setIsLoading(false)
-    }
-  }, [fetchClientRows])
-
-  useEffect(() => {
-    let cancelled = false
-    void (async () => {
-      try {
-        const result = await fetchClientRows()
-        if (cancelled) return
-        if (!result.ok) {
-          setClients([])
-          return
-        }
-        setClients(result.rows.map(rowToClient))
-      } catch (e) {
-        if (!cancelled) {
-          setError(e instanceof Error ? e : new Error(String(e)))
-          setClients([])
-        }
-      } finally {
-        if (!cancelled) setIsLoading(false)
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [fetchClientRows])
-
-  return { clients, isLoading, error, refetch }
-}

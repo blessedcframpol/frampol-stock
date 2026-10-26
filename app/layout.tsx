@@ -4,6 +4,7 @@ import { Analytics } from '@vercel/analytics/next'
 import { ThemeProvider } from '@/components/theme-provider'
 import { Toaster } from '@/components/ui/sonner'
 import { AuthProvider } from '@/lib/auth-context'
+import { ClientsStoreProvider } from '@/lib/clients-store'
 import { DevRolePreviewProvider } from '@/lib/dev-role-preview'
 import { InventoryStoreProvider } from '@/lib/inventory-store'
 import './globals.css'
@@ -36,9 +37,11 @@ export default function RootLayout({
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false} disableTransitionOnChange>
           <AuthProvider>
             <DevRolePreviewProvider>
-              <InventoryStoreProvider>
-                {children}
-              </InventoryStoreProvider>
+              <ClientsStoreProvider>
+                <InventoryStoreProvider>
+                  {children}
+                </InventoryStoreProvider>
+              </ClientsStoreProvider>
             </DevRolePreviewProvider>
           </AuthProvider>
         </ThemeProvider>

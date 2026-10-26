@@ -48,7 +48,8 @@ import { DashboardShell } from "@/components/dashboard-shell"
 import { PageBreadcrumbs } from "@/components/page-breadcrumbs"
 import { useAuth } from "@/lib/auth-context"
 import { canEditClients, canViewFinancials } from "@/lib/permissions"
-import { useClients, updateClient } from "@/lib/supabase/clients-db"
+import { useClients } from "@/lib/clients-store"
+import { updateClient } from "@/lib/supabase/clients-db"
 import { getSupabaseClient } from "@/lib/supabase/client"
 import { fetchAllPages } from "@/lib/supabase/postgrest-page"
 import {
@@ -109,7 +110,7 @@ export default function ClientDetailPage() {
   const { role } = useAuth()
   const showFinancials = canViewFinancials(role)
   const canEdit = canEditClients(role)
-  const { clients, isLoading: clientsLoading, error: clientsError, refetch: refetchClients } =
+  const { clients, isLoading: clientsLoading, error: clientsError, upsertClient } =
     useClients()
   const [ledger, setLedger] = useState<ResolvedClientTransaction[]>([])
   const [ledgerReady, setLedgerReady] = useState(false)
@@ -389,8 +390,15 @@ export default function ClientDetailPage() {
     }
     setIsSavingClient(true)
     try {
-      await updateClient(activeClient.id, { name, company, email, phone, sites: validSites })
-      await refetchClients()
+      const updated = await updateClient(activeClient.id, {
+        kind: company.trim() ? "company" : "individual",
+        name,
+        company,
+        email,
+        phone,
+        sites: validSites,
+      })
+      upsertClient(updated)
       setEditOpen(false)
       toast.success("Client updated")
     } catch (e) {

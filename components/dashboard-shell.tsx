@@ -82,7 +82,7 @@ import {
 import { useInboxNotifications } from "@/hooks/use-inbox-notifications"
 import { useAlertFeed } from "@/hooks/use-alert-feed"
 import { notificationHref } from "@/lib/notifications-live"
-import { useClients } from "@/lib/supabase/clients-db"
+import { useClients } from "@/lib/clients-store"
 import { useSearchUsers } from "@/lib/supabase/search-users"
 import { runSearch } from "@/lib/search"
 import { SearchSuggestions } from "@/components/search-suggestions"
@@ -535,12 +535,18 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const { previewRole } = useDevRolePreview()
   const { inventory } = useInventoryStore()
   const { feed } = useAlertFeed()
-  const { clients } = useClients()
   const users = useSearchUsers()
   const mounted = useIsClient()
   const searchEntities = useMemo(() => roleSearchEntities(role), [role])
   const searchPlaceholder = roleSearchPlaceholder(role)
   const showGlobalSearch = searchEntities.length > 0
+  // Start the shared directory as soon as we know the user is signed in, even
+  // before role/searchEntities resolve — waiting on role delayed the first
+  // clients request ~250–350ms vs main's ungated useClients(). Roles that never
+  // search clients still skip once role is known (enabled becomes false).
+  const { clients } = useClients({
+    enabled: role == null || searchEntities.includes("clients"),
+  })
 
   const blockReason: "inactive" | "no-role" | null =
     user && profile && !profile.active
