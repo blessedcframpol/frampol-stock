@@ -43,7 +43,9 @@ function isPastRetention(deletedAtIso: string, now: number): boolean {
 export function InventoryTrashContent() {
   const { role } = useAuth()
   const isAdmin = canEditInventory(role)
-  const { trashedInventory, refetchTrashed, restoreItem, permanentlyDeleteItem, purgeTrashExpired } = useInventoryStore()
+  // Trash list is a separate fetch — do not pull the live ledger here.
+  const { trashedInventory, refetchTrashed, restoreItem, permanentlyDeleteItem, purgeTrashExpired } =
+    useInventoryStore({ enabled: false })
   const [loading, setLoading] = useState(true)
   const [purgeOpen, setPurgeOpen] = useState(false)
   const [purging, setPurging] = useState(false)

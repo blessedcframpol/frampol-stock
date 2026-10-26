@@ -533,7 +533,6 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const { user, profile, signOut, loading, refetch } = useAuth()
   const role = useEffectiveRole()
   const { previewRole } = useDevRolePreview()
-  const { inventory } = useInventoryStore()
   const { feed } = useAlertFeed()
   const users = useSearchUsers()
   const mounted = useIsClient()
@@ -547,6 +546,10 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const { clients } = useClients({
     enabled: role == null || searchEntities.includes("clients"),
   })
+  // Ledger only when the header search needs inventory matches (not on every page).
+  const ledgerForSearch =
+    searchQuery.trim().length > 0 && searchEntities.includes("inventory")
+  const { inventory } = useInventoryStore({ enabled: ledgerForSearch })
 
   const blockReason: "inactive" | "no-role" | null =
     user && profile && !profile.active

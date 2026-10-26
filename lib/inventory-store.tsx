@@ -1,6 +1,14 @@
 "use client"
 
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react"
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import type { InventoryItem, JsonValue, Transaction, TransactionType } from "./data"
 import { getSupabaseClient } from "./supabase/client"
 import { fetchAllPages } from "./supabase/postgrest-page"
@@ -182,13 +190,16 @@ function getAlertsFromInventory(inventory: InventoryItem[]): AlertsResult {
 interface InventoryStoreValue {
   inventory: InventoryItem[]
   transactions: Transaction[]
+  isLoading: boolean
   applyMovement: (params: MovementParams) => Promise<{
     success: string[]
     notFound: string[]
     rejected: MovementRejection[]
     movementBatchId?: string
   }>
-  refetchLedger: () => Promise<void>
+  /** Load if idle / stale; shares one in-flight request. */
+  ensureLoaded: () => Promise<void>
+  refetchLedger: (opts?: { isStale?: () => boolean }) => Promise<void>
   updateItem: (id: string, updates: Partial<InventoryItem>, reason: string) => Promise<void>
   softDeleteItem: (id: string) => Promise<{ ok: boolean; error?: string }>
   restoreItem: (id: string) => Promise<{ ok: boolean; error?: string }>
@@ -215,78 +226,139 @@ interface InventoryStoreValue {
 
 const InventoryStoreContext = createContext<InventoryStoreValue | null>(null)
 
+const STALE_MS = 5 * 60 * 1000
+
+type LedgerPayload = { inventory: InventoryItem[]; transactions: Transaction[] }
+
+/** Module-level in-flight so Strict Mode / overlapping callers share one round-trip. */
+let ledgerInflight: Promise<LedgerPayload> | null = null
+
+async function fetchLedgerPayload(
+  supabase: NonNullable<ReturnType<typeof getSupabaseIfConfigured>>
+): Promise<LedgerPayload> {
+  if (ledgerInflight) return ledgerInflight
+  // Page past PostgREST's cap so insert-vs-update decisions see every live row.
+  // A truncated ledger re-inserts unseen serials as duplicates.
+  ledgerInflight = (async () => {
+    const allInvRows = await fetchAllPages((from, to) =>
+      supabase
+        .from("inventory_items")
+        .select(INVENTORY_ITEM_SELECT)
+        .is("deleted_at", null)
+        .order("date_added", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, to)
+    )
+    const allTxnRows = await fetchAllPages((from, to) =>
+      supabase
+        .from("transactions")
+        .select("*")
+        .order("date", { ascending: false })
+        .order("id", { ascending: false })
+        .range(from, to)
+    )
+    const invoiceStates = await fetchInvoiceStates(supabase)
+    return {
+      inventory: allInvRows.map(rowToInventoryItem),
+      transactions: withInvoiceStates(allTxnRows.map(rowToTransaction), invoiceStates),
+    }
+  })().finally(() => {
+    ledgerInflight = null
+  })
+  return ledgerInflight
+}
+
 export function InventoryStoreProvider({ children }: { children: React.ReactNode }) {
   const { user, loading: authLoading } = useAuth()
   const supabase = useMemo(() => getSupabaseIfConfigured(), [])
   const [inventory, setInventory] = useState<InventoryItem[]>([])
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [trashedInventory, setTrashedInventory] = useState<InventoryItem[]>([])
+  const [isLoading, setIsLoading] = useState(false)
+  const [hasLoaded, setHasLoaded] = useState(false)
+  const lastFetchedAt = useRef(0)
+  const wantedRef = useRef(false)
 
   // Logout must drop the in-memory ledger. Doing it here, when the session id
   // changes, clears before paint without an effect setState. Same id (token
   // refresh) does not reset.
   const sessionUserId = user?.id
   const [ledgerUserId, setLedgerUserId] = useState<string | undefined>(sessionUserId)
-  if (supabase && sessionUserId !== ledgerUserId) {
+  if (sessionUserId !== ledgerUserId) {
     setLedgerUserId(sessionUserId)
     setInventory([])
     setTransactions([])
     setTrashedInventory([])
+    setHasLoaded(false)
+    setIsLoading(false)
+    lastFetchedAt.current = 0
+    wantedRef.current = false
+    ledgerInflight = null
   }
+
+  const runFetch = useCallback(
+    async (force: boolean, opts?: { isStale?: () => boolean }) => {
+      const stale = () => opts?.isStale?.() ?? false
+      if (!supabase) return
+      if (!authLoading && !user?.id) {
+        setInventory([])
+        setTransactions([])
+        setIsLoading(false)
+        return
+      }
+      const freshEnough =
+        hasLoaded && !force && Date.now() - lastFetchedAt.current < STALE_MS
+      if (freshEnough) return
+
+      setIsLoading(true)
+      try {
+        const payload = await fetchLedgerPayload(supabase)
+        if (stale()) return
+        setInventory(payload.inventory)
+        setTransactions(payload.transactions)
+        setHasLoaded(true)
+        lastFetchedAt.current = Date.now()
+      } catch (error) {
+        console.error("refetchLedger:", error)
+      } finally {
+        if (!stale()) setIsLoading(false)
+      }
+    },
+    [supabase, authLoading, user?.id, hasLoaded]
+  )
+
+  const ensureLoaded = useCallback(async () => {
+    wantedRef.current = true
+    await runFetch(false)
+  }, [runFetch])
 
   const refetchLedger = useCallback(
     async (opts?: { isStale?: () => boolean }) => {
-      const stale = () => opts?.isStale?.() ?? false
-      if (!supabase) return
-
-      // Page past PostgREST's cap so insert-vs-update decisions see every live row.
-      // A truncated ledger re-inserts unseen serials as duplicates.
-      try {
-        const allInvRows = await fetchAllPages((from, to) =>
-          supabase
-            .from("inventory_items")
-            .select(INVENTORY_ITEM_SELECT)
-            .is("deleted_at", null)
-            .order("date_added", { ascending: true })
-            .order("id", { ascending: true })
-            .range(from, to)
-        )
-        if (stale()) return
-        setInventory(allInvRows.map(rowToInventoryItem))
-
-        const allTxnRows = await fetchAllPages((from, to) =>
-          supabase
-            .from("transactions")
-            .select("*")
-            .order("date", { ascending: false })
-            .order("id", { ascending: false })
-            .range(from, to)
-        )
-        const invoiceStates = await fetchInvoiceStates(supabase)
-        if (!stale()) setTransactions(withInvoiceStates(allTxnRows.map(rowToTransaction), invoiceStates))
-      } catch (error) {
-        console.error("refetchLedger:", error)
-      }
+      wantedRef.current = true
+      await runFetch(true, opts)
     },
-    [supabase]
+    [runFetch]
   )
 
+  // Background refresh: at most every 5 minutes, on focus / visibility — only
+  // after a consumer has asked for the ledger (wantedRef).
   useEffect(() => {
-    if (!supabase) return
-    if (authLoading) return
-    // Body reads user?.id, not the User object — do not add `user` to the deps.
-    // refetchLedger does not read user; attribution uses user?.id in applyMovement.
     if (!user?.id) return
-    let cancelled = false
-    // setState inside refetchLedger runs only after its awaits. The rule still
-    // flags the call site; restructuring the ledger fetch would be worse than
-    // leaving this mount/session refetch as-is.
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- ledger refetch is async; setState is after await
-    void refetchLedger({ isStale: () => cancelled })
-    return () => {
-      cancelled = true
+    const maybeRefresh = () => {
+      if (!wantedRef.current) return
+      if (document.visibilityState !== "visible") return
+      if (Date.now() - lastFetchedAt.current < STALE_MS) return
+      void runFetch(true)
     }
-  }, [supabase, authLoading, user?.id, refetchLedger])
+    window.addEventListener("focus", maybeRefresh)
+    document.addEventListener("visibilitychange", maybeRefresh)
+    const id = window.setInterval(maybeRefresh, STALE_MS)
+    return () => {
+      window.removeEventListener("focus", maybeRefresh)
+      document.removeEventListener("visibilitychange", maybeRefresh)
+      window.clearInterval(id)
+    }
+  }, [user?.id, runFetch])
 
   const applyMovement = useCallback(
     async (
@@ -910,6 +982,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
     () => ({
       inventory,
       transactions,
+      isLoading,
       applyMovement,
       updateItem,
       softDeleteItem,
@@ -922,11 +995,13 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
       reassignInventoryItems,
       reassignInventoryGroup,
       getAlerts,
+      ensureLoaded,
       refetchLedger,
     }),
     [
       inventory,
       transactions,
+      isLoading,
       applyMovement,
       updateItem,
       softDeleteItem,
@@ -939,6 +1014,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
       reassignInventoryItems,
       reassignInventoryGroup,
       getAlerts,
+      ensureLoaded,
       refetchLedger,
     ]
   )
@@ -950,8 +1026,26 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
   )
 }
 
-export function useInventoryStore(): InventoryStoreValue {
+function useInventoryStoreContext(): InventoryStoreValue {
   const ctx = useContext(InventoryStoreContext)
   if (!ctx) throw new Error("useInventoryStore must be used within InventoryStoreProvider")
   return ctx
+}
+
+/**
+ * Shared inventory + transactions ledger. Loads once when first enabled
+ * consumer mounts; does not reload on navigation. Pass `enabled: false` to
+ * subscribe without triggering a fetch (count-only / mutation-only callers
+ * that must not pull the full ledger — see PF1b SQL-count candidates).
+ */
+export function useInventoryStore(options?: { enabled?: boolean }): InventoryStoreValue {
+  const store = useInventoryStoreContext()
+  const enabled = options?.enabled !== false
+
+  useEffect(() => {
+    if (!enabled) return
+    void store.ensureLoaded()
+  }, [enabled, store.ensureLoaded])
+
+  return store
 }

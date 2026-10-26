@@ -8,11 +8,9 @@ import {
   SETTINGS_UPDATED_EVENT,
   type LowStockProduct,
 } from "@/lib/settings"
-import { useInventoryStore } from "@/lib/inventory-store"
 
 export function useLowStockProducts() {
   const { user, loading: authLoading } = useAuth()
-  const { inventory } = useInventoryStore()
   const [products, setProducts] = useState<LowStockProduct[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -56,7 +54,7 @@ export function useLowStockProducts() {
     return () => {
       cancelled = true
     }
-  }, [authLoading, user, inventory])
+  }, [authLoading, user])
 
   useEffect(() => {
     const handleSettingsUpdate = () => void refresh()

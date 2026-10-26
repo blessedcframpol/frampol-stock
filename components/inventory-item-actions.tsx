@@ -80,7 +80,8 @@ function vendorSeed(item: InventoryItem): string {
 }
 
 function EditItemForm({ item, onClose }: { item: InventoryItem; onClose: () => void }) {
-  const { updateItem } = useInventoryStore()
+  // Edit patches one known row — do not pull the full ledger.
+  const { updateItem } = useInventoryStore({ enabled: false })
   const [editName, setEditName] = useState(item.name)
   const [editVendor, setEditVendor] = useState(() => vendorSeed(item))
   const [editLocation, setEditLocation] = useState(item.location)

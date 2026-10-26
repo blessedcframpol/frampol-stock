@@ -38,7 +38,6 @@ import {
 import { useAuth } from "@/lib/auth-context"
 import { canAccessSettings, canManageUsers, canViewAuditLog } from "@/lib/permissions"
 import { AuditLogPanel } from "@/components/audit-log-panel"
-import { useInventoryStore } from "@/lib/inventory-store"
 import { cn } from "@/lib/utils"
 import { displayInitials } from "@/lib/format-display"
 import {
@@ -108,7 +107,8 @@ export function SettingsContent() {
   const { role, profile, user } = useAuth()
   const isAdmin = canManageUsers(role)
   const showAudit = canViewAuditLog(role)
-  const { inventory } = useInventoryStore()
+  // In-stock counts come from the low-stock products view (SQL). Filling gaps
+  // from the full ledger was a PF1b candidate — do not pull the ledger here.
   const { products: lowStockProducts, refresh: refreshLowStock } = useLowStockProducts()
   const [settings, setSettings] = useState<AppSettings | null>(null)
   const [products, setProducts] = useState<ProductLineSetting[]>([])
@@ -197,17 +197,11 @@ export function SettingsContent() {
 
   const inStockByProduct = useMemo(() => {
     const counts = new Map<string, number>()
-    // View counts win. The ledger only fills catalogue rows the view omits.
     for (const product of lowStockProducts) {
       counts.set(product.productId, product.inStockCount)
     }
-    for (const item of inventory) {
-      if (!item.productId || counts.has(item.productId)) continue
-      if (item.status !== "In Stock" || item.deletedAt || (item.stockPool ?? "sale") !== "sale") continue
-      counts.set(item.productId, (counts.get(item.productId) ?? 0) + 1)
-    }
     return counts
-  }, [inventory, lowStockProducts])
+  }, [lowStockProducts])
 
   const displayName = (profile?.display_name ?? "").trim()
   const nameParts = displayName ? displayName.split(/\s+/).filter(Boolean) : []

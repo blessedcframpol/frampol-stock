@@ -47,7 +47,8 @@ export function ConvertToSaleDialog({
   onOpenChange: (open: boolean) => void
   onCompleted?: () => void
 }) {
-  const { applyMovement } = useInventoryStore()
+  // applyMovement fetches missing serials from the DB — no full-ledger load.
+  const { applyMovement } = useInventoryStore({ enabled: false })
   const timeZone = useOrgTimezone()
   const [saleDate, setSaleDate] = useState(() => todayBusinessDate())
   const [invoiceChoice, setInvoiceChoice] = useState<InvoiceChoice | "">("")
@@ -315,7 +316,8 @@ export function ExtendHoldingDialog({
   onOpenChange: (open: boolean) => void
   onCompleted?: (returnDate: string) => void
 }) {
-  const { refetchLedger } = useInventoryStore()
+  // Refetch only after extend succeeds — do not preload the ledger on dialog open.
+  const { refetchLedger } = useInventoryStore({ enabled: false })
   const [returnDate, setReturnDate] = useState("")
   const [reason, setReason] = useState("")
   const [saving, setSaving] = useState(false)
