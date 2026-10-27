@@ -458,12 +458,14 @@ export async function fetchRequestDisplayStatus(sb: SB, requestId: string): Prom
   return isRequestDisplayStatus(data) ? data : null
 }
 
-const DISPLAY_STATUS_CONCURRENCY = 8
+/** PostgREST / URL practical cap; batch RPC accepts the full array but we chunk. */
+const DISPLAY_STATUS_CHUNK = 500
 
 /**
  * Display status for many requests. Only `submitted` requests need the server
  * function (their status depends on issued counts); every other review_state maps
- * one-to-one, so those never cost a round trip.
+ * one-to-one, so those never cost a round trip. One `request_display_statuses`
+ * call per chunk (replaces the per-id worker loop).
  */
 export async function fetchRequestDisplayStatuses(
   sb: SB,
@@ -475,18 +477,26 @@ export async function fetchRequestDisplayStatuses(
     if (row.review_state === "submitted") needServer.push(row.id)
     else out[row.id] = displayStatusOrReviewState(null, row.review_state)
   }
-  let next = 0
-  async function worker() {
-    while (next < needServer.length) {
-      const id = needServer[next++]
-      try {
-        out[id] = (await fetchRequestDisplayStatus(sb, id)) ?? "being_reviewed"
-      } catch {
-        out[id] = "being_reviewed"
+  for (let i = 0; i < needServer.length; i += DISPLAY_STATUS_CHUNK) {
+    const chunk = needServer.slice(i, i + DISPLAY_STATUS_CHUNK)
+    try {
+      const { data, error } = await sb.rpc("request_display_statuses", {
+        p_request_ids: chunk,
+      })
+      if (error) throw error
+      const byId = new Map<string, RequestDisplayStatus>()
+      for (const row of data ?? []) {
+        if (row?.request_id && isRequestDisplayStatus(row.status)) {
+          byId.set(String(row.request_id), row.status)
+        }
       }
+      for (const id of chunk) {
+        out[id] = byId.get(id) ?? "being_reviewed"
+      }
+    } catch {
+      for (const id of chunk) out[id] = "being_reviewed"
     }
   }
-  await Promise.all(Array.from({ length: Math.min(DISPLAY_STATUS_CONCURRENCY, needServer.length) }, worker))
   return out
 }
 

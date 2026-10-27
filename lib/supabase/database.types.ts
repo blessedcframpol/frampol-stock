@@ -1700,6 +1700,13 @@ export interface Database {
         Args: { p_request_id: string }
         Returns: string
       }
+      request_display_statuses: {
+        Args: { p_request_ids: string[] }
+        Returns: {
+          request_id: string
+          status: string
+        }[]
+      }
     }
   }
 }
