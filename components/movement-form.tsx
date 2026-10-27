@@ -70,7 +70,7 @@ import { FilterChip } from "@/components/fs/filter-chip"
 import { productRequiresCloudKey, splitDelimitedValues, cloudKeysMapForSerials } from "@/lib/fortigate"
 import type { NotInvoicedKind } from "@/lib/invoices"
 import { useAuth } from "@/lib/auth-context"
-import { prefillMovementType } from "@/lib/alerts"
+import { announceDashboardRefresh, prefillMovementType } from "@/lib/alerts"
 import { ADMIN, canRecordStockMovement } from "@/lib/permissions"
 import {
   NEW_CLIENT_SELECT,
@@ -150,7 +150,15 @@ export function MovementForm({
 }: MovementFormProps) {
   const isEmbed = Boolean(embedMode)
   const isCompact = layout === "compact"
-  const { inventory, applyMovement, refetchLedger } = useInventoryStore()
+  // Compact Quick Scan on the dashboard must not pull the ledger on mount (PF1b).
+  // Full movement page still loads immediately; compact waits for focus/typing.
+  const [ledgerWanted, setLedgerWanted] = useState(
+    () => layout !== "compact" || Boolean(embedMode) || Boolean(prefillSerials?.trim())
+  )
+  const { inventory, applyMovement, refetchLedger, hasLoaded } = useInventoryStore({
+    enabled: ledgerWanted,
+  })
+  const ledgerChecking = ledgerWanted && !hasLoaded
   const { clients, upsertClient } = useClients()
   const { role, loading: authLoading } = useAuth()
   const canMove = canRecordStockMovement(role)
@@ -362,13 +370,16 @@ export function MovementForm({
       sites: newClientPayload.sites,
     })
 
-  const rawBlock = submitBlockMessage(formFields, serialFeedback, {
-    todayYmd,
-    originLocation: transferOrigin.location,
-    hasUnknownSerial,
-  })
-  const blockMessage =
-    rawBlock === "Select a client" && newClientFormReady
+  const rawBlock = ledgerChecking
+    ? "Checking serials…"
+    : submitBlockMessage(formFields, serialFeedback, {
+        todayYmd,
+        originLocation: transferOrigin.location,
+        hasUnknownSerial,
+      })
+  const blockMessage = ledgerChecking
+    ? rawBlock
+    : rawBlock === "Select a client" && newClientFormReady
       ? null
       : rawBlock === "Select a client" && clientId === NEW_CLIENT_SELECT && createStep === "confirm"
         ? "Confirm closest matches or create new"
@@ -444,12 +455,18 @@ export function MovementForm({
     }
   }
 
+  function wantLedger() {
+    if (!ledgerWanted) setLedgerWanted(true)
+  }
+
   function handleSerialChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
+    wantLedger()
     const v = e.target.value
     setSerialNumbers(v.includes("\n") ? v.replace(/\n+/g, ", ").replace(/,+\s*,/g, ", ") : v)
   }
 
   function handleSerialPaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+    wantLedger()
     const pasted = e.clipboardData.getData("text")
     if (pasted.includes("\n") || pasted.includes(",")) {
       e.preventDefault()
@@ -670,6 +687,7 @@ export function MovementForm({
         embedMode?.onClose?.()
         resetAfterSuccess()
         void refetchLedger()
+        announceDashboardRefresh()
       }
       if (result.notFound.length > 0) {
         toast.warning(`Serial number(s) not found: ${result.notFound.slice(0, 5).join(", ")}`)
@@ -679,11 +697,13 @@ export function MovementForm({
     }
   }
 
-  const recordLabel = blockMessage
-    ? blockMessage
-    : isSubmitting
-      ? "Recording…"
-      : `Record${serialFeedback.validSerials.length ? ` (${serialFeedback.validSerials.length})` : ""}`
+  const recordLabel = ledgerChecking
+    ? "Checking serials…"
+    : blockMessage
+      ? blockMessage
+      : isSubmitting
+        ? "Recording…"
+        : `Record${serialFeedback.validSerials.length ? ` (${serialFeedback.validSerials.length})` : ""}`
 
   if (authLoading) {
     return <p className="text-sm text-muted-foreground">Checking access…</p>
@@ -894,16 +914,22 @@ export function MovementForm({
         value={serialNumbers}
         onChange={handleSerialChange}
         onPaste={handleSerialPaste}
+        onFocus={wantLedger}
         disabled={isSubmitting}
         className={cn(
           "font-mono text-xs bg-card text-foreground border-border",
           isCompact ? "min-h-[72px]" : "min-h-[100px] sm:min-h-[120px]"
         )}
       />
-      {serialNumbers.trim() ? (
+      {serialNumbers.trim() && ledgerChecking ? (
+        <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+          <Loader2 className="size-3 animate-spin" />
+          Checking serials against stock…
+        </p>
+      ) : serialNumbers.trim() ? (
         <p className="text-xs text-muted-foreground">{serialFeedback.summary}</p>
       ) : null}
-      {serialFeedback.marks.length > 0 ? (
+      {!ledgerChecking && serialFeedback.marks.length > 0 ? (
         <ul className="text-[11px] font-mono space-y-0.5 max-h-32 overflow-auto">
           {serialFeedback.marks.slice(0, 20).map((m) => (
             <li
@@ -1308,10 +1334,10 @@ export function MovementForm({
     <Button
       className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
       onClick={() => void handleRecord()}
-      disabled={isSubmitting || Boolean(blockMessage)}
+      disabled={isSubmitting || ledgerChecking || Boolean(blockMessage)}
       title={blockMessage ?? undefined}
     >
-      {isSubmitting ? (
+      {isSubmitting || ledgerChecking ? (
         <Loader2 className="w-4 h-4 animate-spin mr-1.5" />
       ) : (
         <Package className="w-4 h-4 mr-1.5" />

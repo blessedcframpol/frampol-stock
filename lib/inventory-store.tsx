@@ -191,6 +191,8 @@ interface InventoryStoreValue {
   inventory: InventoryItem[]
   transactions: Transaction[]
   isLoading: boolean
+  /** True after at least one successful ledger fetch for this session/user. */
+  hasLoaded: boolean
   applyMovement: (params: MovementParams) => Promise<{
     success: string[]
     notFound: string[]
@@ -983,6 +985,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
       inventory,
       transactions,
       isLoading,
+      hasLoaded,
       applyMovement,
       updateItem,
       softDeleteItem,
@@ -1002,6 +1005,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
       inventory,
       transactions,
       isLoading,
+      hasLoaded,
       applyMovement,
       updateItem,
       softDeleteItem,

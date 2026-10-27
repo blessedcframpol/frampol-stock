@@ -190,6 +190,14 @@ export function announceAlertsUpdated() {
   window.dispatchEvent(new Event(ALERTS_UPDATED_EVENT))
 }
 
+/** Dashboard summary / recent transactions should refetch (stock movement recorded). */
+export const DASHBOARD_REFRESH_EVENT = "fram-stock-dashboard-refresh"
+
+export function announceDashboardRefresh() {
+  if (typeof window === "undefined") return
+  window.dispatchEvent(new Event(DASHBOARD_REFRESH_EVENT))
+}
+
 /** Record return uses the same role gate as recording a stock movement. */
 export function canRecordReturn(role: AppRole | null | undefined): boolean {
   return canRecordStockMovement(role)

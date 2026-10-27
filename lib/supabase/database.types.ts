@@ -1707,6 +1707,10 @@ export interface Database {
           status: string
         }[]
       }
+      dashboard_summary: {
+        Args: Record<string, never>
+        Returns: Json
+      }
     }
   }
 }

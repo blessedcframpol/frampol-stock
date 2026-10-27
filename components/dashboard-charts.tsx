@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useMemo } from "react"
 import {
   Bar,
   BarChart,
@@ -17,14 +17,7 @@ import {
 } from "recharts"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart"
-import { useInventoryStore } from "@/lib/inventory-store"
-import { getSupabaseClient } from "@/lib/supabase/client"
-import { fetchAllPages } from "@/lib/supabase/postgrest-page"
-import { rowToTransaction } from "@/lib/supabase/inventory-db"
-import type { Transaction } from "@/lib/data"
-import { todayBusinessDate } from "@/lib/business-date.mjs"
-import { allUnitsByVendor, inStockByVendor, monthlySaleUnits } from "@/lib/dashboard-metrics"
-import { useOrgTimezone } from "@/hooks/use-org-timezone"
+import type { MonthlySaleUnits, VendorUnits } from "@/lib/dashboard-metrics"
 import { chartAxisTick, chartGridProps, chartTooltipStyle } from "@/components/fs/chart-theme"
 import { formatCount, hundredTicks } from "@/lib/format-display"
 
@@ -42,9 +35,8 @@ const barValueLabel = {
   formatter: (value: number | string) => formatCount(Number(value) || 0),
 }
 
-export function StockByVendorChart() {
-  const { inventory } = useInventoryStore()
-  const stockByVendor = useMemo(() => inStockByVendor(inventory), [inventory])
+export function StockByVendorChart({ data }: { data: VendorUnits[] }) {
+  const stockByVendor = data
   const axis = useMemo(
     () => hundredTicks(Math.max(0, ...stockByVendor.map((row) => row.units))),
     [stockByVendor],
@@ -100,16 +92,15 @@ export function StockByVendorChart() {
   )
 }
 
-export function VendorDistributionChart() {
-  const { inventory } = useInventoryStore()
+export function VendorDistributionChart({ data }: { data: VendorUnits[] }) {
   const pieData = useMemo(
     () =>
-      allUnitsByVendor(inventory).map((row, index) => ({
+      data.map((row, index) => ({
         name: row.vendor,
         value: row.units,
         fill: CHART_SERIES[index % CHART_SERIES.length],
       })),
-    [inventory]
+    [data]
   )
 
   return (
@@ -157,45 +148,29 @@ export function VendorDistributionChart() {
   )
 }
 
-export function MonthlySalesChart() {
-  const timeZone = useOrgTimezone()
-  const [sales, setSales] = useState<Transaction[]>([])
-  useEffect(() => {
-    let cancelled = false
-    void (async () => {
-      try {
-        const rows = await fetchAllPages((from, to) =>
-          getSupabaseClient()
-            .from("active_transactions")
-            .select("*")
-            .eq("type", "Sale")
-            .order("date", { ascending: true })
-            .order("id", { ascending: true })
-            .range(from, to)
-        )
-        if (!cancelled) setSales(rows.map(rowToTransaction))
-      } catch {
-        if (!cancelled) setSales([])
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [])
-  const monthlyData = useMemo(
-    () => monthlySaleUnits(sales, todayBusinessDate(timeZone)),
-    [sales, timeZone]
-  )
+export function MonthlySalesChart({
+  data,
+}: {
+  data: (MonthlySaleUnits & { internal_units?: number; internal_label?: string })[]
+}) {
+  const monthlyData = data
   const salesAxis = useMemo(
     () => hundredTicks(Math.max(0, ...monthlyData.map((row) => row.units))),
     [monthlyData],
   )
+  const internalTotal = monthlyData.reduce((sum, row) => sum + (row.internal_units ?? 0), 0)
+  const internalLabel = monthlyData.find((row) => row.internal_label)?.internal_label ?? "Internal"
 
   return (
     <Card className="h-full flex flex-col">
       <CardHeader className="pb-2">
         <CardTitle className="text-base font-semibold text-foreground">Monthly sales</CardTitle>
-        <CardDescription>Sale units by business date, last 6 months</CardDescription>
+        <CardDescription>
+          Sale units by business date, last 6 months
+          {internalTotal > 0
+            ? ` · ${formatCount(internalTotal)} ${internalLabel.toLowerCase()} included`
+            : null}
+        </CardDescription>
       </CardHeader>
       <CardContent className="flex-1 flex flex-col min-h-0">
         <ChartContainer

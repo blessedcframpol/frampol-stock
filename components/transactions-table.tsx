@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import {
   Table,
   TableBody,
@@ -27,6 +27,8 @@ import { toastFromApiErrorBody, toastFromCaughtError } from "@/lib/toast-reporta
 import { SESSION_EXPIRED_MESSAGE } from "@/lib/unauthorized"
 import { SignedStorageLink } from "@/components/signed-storage-link"
 import { formatCount } from "@/lib/format-display"
+import { ALERTS_UPDATED_EVENT, DASHBOARD_REFRESH_EVENT } from "@/lib/alerts"
+import { REQUEST_QUEUES_REFRESH_EVENT } from "@/lib/notifications-live"
 
 const RECENT_BATCH_LIMIT = 10
 
@@ -38,34 +40,47 @@ export function TransactionsTable() {
   const { role } = useAuth()
   const showFinancials = canViewFinancials(role)
 
+  const refresh = useCallback(async (opts?: { quiet?: boolean }) => {
+    if (!opts?.quiet) setLoading(true)
+    try {
+      const page = await fetchTransactionBatchPage({ limit: RECENT_BATCH_LIMIT, offset: 0, active: true })
+      setLoadError(null)
+      setBatches(page.batches)
+    } catch (e) {
+      const status = typeof e === "object" && e && "status" in e ? Number(e.status) : 500
+      const body = typeof e === "object" && e && "body" in e ? e.body : {}
+      if (typeof e === "object" && e && "body" in e) {
+        toastFromApiErrorBody(body, "Failed to load recent transactions", status)
+      } else {
+        toastFromCaughtError(e, "Failed to load recent transactions")
+      }
+      setLoadError(status === 401 ? SESSION_EXPIRED_MESSAGE : "Could not load recent transactions.")
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
   useEffect(() => {
     let cancelled = false
-    void (async () => {
-      try {
-        const page = await fetchTransactionBatchPage({ limit: RECENT_BATCH_LIMIT, offset: 0, active: true })
-        if (cancelled) return
-        setLoadError(null)
-        setBatches(page.batches)
-      } catch (e) {
-        if (cancelled) return
-        const status = typeof e === "object" && e && "status" in e ? Number(e.status) : 500
-        const body = typeof e === "object" && e && "body" in e ? e.body : {}
-        if (typeof e === "object" && e && "body" in e) {
-          toastFromApiErrorBody(body, "Failed to load recent transactions", status)
-        } else {
-          toastFromCaughtError(e, "Failed to load recent transactions")
-        }
-        setLoadError(
-          status === 401 ? SESSION_EXPIRED_MESSAGE : "Could not load recent transactions."
-        )
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    })()
+    void refresh().finally(() => {
+      if (cancelled) return
+    })
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [refresh])
+
+  useEffect(() => {
+    const onRefresh = () => void refresh({ quiet: true })
+    window.addEventListener(DASHBOARD_REFRESH_EVENT, onRefresh)
+    window.addEventListener(ALERTS_UPDATED_EVENT, onRefresh)
+    window.addEventListener(REQUEST_QUEUES_REFRESH_EVENT, onRefresh)
+    return () => {
+      window.removeEventListener(DASHBOARD_REFRESH_EVENT, onRefresh)
+      window.removeEventListener(ALERTS_UPDATED_EVENT, onRefresh)
+      window.removeEventListener(REQUEST_QUEUES_REFRESH_EVENT, onRefresh)
+    }
+  }, [refresh])
 
   const recent = batches.slice(0, RECENT_BATCH_LIMIT)
 

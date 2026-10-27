@@ -6,28 +6,22 @@ import { StockByVendorChart, VendorDistributionChart, MonthlySalesChart } from "
 import { LatestRequests } from "@/components/latest-requests"
 import { QuickScan } from "@/components/quick-scan"
 import { TransactionsTable } from "@/components/transactions-table"
-import { useInventoryStore } from "@/lib/inventory-store"
 import { PageHeader } from "@/components/page-nav"
 import { AdminTodoRow } from "@/components/admin-todo-row"
 import { useEffectiveRole } from "@/lib/dev-role-preview"
-import { inStockPoolCounts } from "@/lib/inventory-products"
 import { ADMIN, canRecordStockMovement } from "@/lib/permissions"
 import { useAlertFeed } from "@/hooks/use-alert-feed"
+import { useDashboardSummary } from "@/hooks/use-dashboard-summary"
 import { EMPTY, formatCount } from "@/lib/format-display"
 
 export function DashboardContent() {
-  const { inventory } = useInventoryStore()
+  const { summary, loading: summaryLoading } = useDashboardSummary()
   const { feed, loading: lowStockLoading } = useAlertFeed()
   const role = useEffectiveRole()
   const showQuickScan = canRecordStockMovement(role)
-  const statsReady = useIsClient()
+  const statsReady = useIsClient() && !summaryLoading && summary != null
 
-  const pools = inStockPoolCounts(inventory)
-  const itemsSold = inventory.filter((i) => i.status === "Sold").length
-  const pocActive = inventory.filter((i) => i.status === "POC").length
   const lowStockCount = feed?.counts.lowStock ?? 0
-
-  const showStats = statsReady
   const dash = EMPTY
 
   return (
@@ -43,21 +37,25 @@ export function DashboardContent() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
         <StatCard
           label="Total inventory"
-          value={showStats ? formatCount(pools.sale) : dash}
-          caption={showStats ? `+ ${formatCount(pools.rental)} rental · ${formatCount(pools.demo)} demo` : undefined}
+          value={statsReady ? formatCount(summary.in_stock_sale) : dash}
+          caption={
+            statsReady
+              ? `+ ${formatCount(summary.in_stock_rental)} rental · ${formatCount(summary.in_stock_demo)} demo`
+              : undefined
+          }
           variant="highlight"
         />
         <StatCard
           label="Items sold"
-          value={showStats ? formatCount(itemsSold) : dash}
+          value={statsReady ? formatCount(summary.items_sold) : dash}
         />
         <StatCard
           label="POC active"
-          value={showStats ? formatCount(pocActive) : dash}
+          value={statsReady ? formatCount(summary.poc_active) : dash}
         />
         <StatCard
           label="Low stock alerts"
-          value={showStats && !lowStockLoading ? formatCount(lowStockCount) : dash}
+          value={statsReady && !lowStockLoading ? formatCount(lowStockCount) : dash}
           href="/alerts?chip=lowStock"
           linkLabel="View low stock"
         />
@@ -79,12 +77,12 @@ export function DashboardContent() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 md:gap-4 items-stretch">
         <div className="lg:col-span-2">
-          <StockByVendorChart />
+          <StockByVendorChart data={summary?.in_stock_by_vendor ?? []} />
         </div>
-        <VendorDistributionChart />
+        <VendorDistributionChart data={summary?.all_units_by_vendor ?? []} />
       </div>
 
-      <MonthlySalesChart />
+      <MonthlySalesChart data={summary?.monthly_sales ?? []} />
     </div>
   )
 }
