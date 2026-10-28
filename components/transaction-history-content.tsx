@@ -36,6 +36,8 @@ import { PageHeader } from "@/components/page-nav"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { History, Undo2, Loader2, Download, MoreHorizontal } from "lucide-react"
+import { TableBodySkeleton } from "@/components/fs/content-skeletons"
+import { LoadErrorInline } from "@/components/fs/load-error-inline"
 import { INTERNAL_LOCATIONS, isInternalLocation } from "@/lib/data"
 import { useInventoryStore } from "@/lib/inventory-store"
 import { fetchTransactionBatchPage, type TransactionBatchSummary } from "@/lib/transaction-batches"
@@ -138,7 +140,12 @@ export function TransactionHistoryContent() {
 
   const requestKey = `${page}|${filterKey}|${reloadToken}`
   const [settledKey, setSettledKey] = useState<string | null>(null)
+  const [hasLoaded, setHasLoaded] = useState(false)
+  const hasLoadedRef = useRef(false)
+  const [loadError, setLoadError] = useState(false)
   const loading = settledKey !== requestKey
+  const showTableSkeleton = loading && !hasLoaded
+  const showTableError = loadError && !hasLoaded
 
   useEffect(() => {
     let cancelled = false
@@ -153,6 +160,9 @@ export function TransactionHistoryContent() {
           search: appliedSearch,
         })
         if (cancelled) return
+        setLoadError(false)
+        hasLoadedRef.current = true
+        setHasLoaded(true)
         setBatches(next.batches)
         setViewingBatch((current) =>
           current ? next.batches.find((batch) => batch.batchKey === current.batchKey) ?? current : current,
@@ -168,9 +178,12 @@ export function TransactionHistoryContent() {
         } else {
           toastFromCaughtError(e, "Failed to load transaction history")
         }
-        setBatches([])
-        setCounts({})
-        setTotal(0)
+        if (!hasLoadedRef.current) {
+          setBatches([])
+          setCounts({})
+          setTotal(0)
+          setLoadError(true)
+        }
       } finally {
         if (!cancelled) setSettledKey(requestKey)
       }
@@ -401,7 +414,7 @@ export function TransactionHistoryContent() {
   }
 
   return (
-    <div className="flex flex-col gap-6 min-w-0">
+    <div className="flex flex-col gap-6 min-w-0" data-ready={hasLoaded ? "true" : undefined}>
       <PageHeader
         title="Transaction history"
         description={
@@ -443,7 +456,9 @@ export function TransactionHistoryContent() {
             aria-label="Search transaction history"
           />
         }
-        count={loading ? "Loading…" : historyBatchCountLabel(total, counts.Reversed ?? 0, movement)}
+        count={
+          showTableSkeleton ? "Loading…" : historyBatchCountLabel(total, counts.Reversed ?? 0, movement)
+        }
         secondary={
           <>
             <label className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -487,10 +502,10 @@ export function TransactionHistoryContent() {
         ))}
       </div>
 
-          {loading ? (
-            <div className="flex items-center justify-center py-16 text-muted-foreground">
-              <Loader2 className="size-8 animate-spin" />
-            </div>
+          {showTableSkeleton ? (
+            <TableBodySkeleton rows={24} cols={showFinancials ? 8 : 7} />
+          ) : showTableError ? (
+            <LoadErrorInline onRetry={() => setReloadToken((n) => n + 1)} />
           ) : batches.length === 0 ? (
             <EmptyState
               icon={<History />}

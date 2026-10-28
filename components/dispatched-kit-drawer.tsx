@@ -36,6 +36,9 @@ import { rentalDaysFromMetadata, rentalSaleSentence } from "@/lib/rental-convers
 import { loadProfileLabels } from "@/lib/profile-labels"
 import { getSupabaseClient } from "@/lib/supabase/client"
 import { INVENTORY_ITEM_SELECT, rowToInventoryItem } from "@/lib/supabase/inventory-db"
+import { DrawerBodySkeleton } from "@/components/fs/content-skeletons"
+import { LoadErrorInline } from "@/components/fs/load-error-inline"
+import { Skeleton } from "@/components/ui/skeleton"
 
 const MIN_CANCEL_REASON = 15
 
@@ -69,6 +72,7 @@ export function DispatchedKitDrawer({
   const storeItem = inventory.find((row) => row.id === itemId) ?? null
   const [fetched, setFetched] = useState<InventoryItem | null>(null)
   const [missing, setMissing] = useState(false)
+  const [fetchToken, setFetchToken] = useState(0)
   const [note, setNote] = useState<string | null>(null)
   const [statusOverride, setStatusOverride] = useState<string | null>(null)
   const [returnDateOverride, setReturnDateOverride] = useState<string | null | undefined>(undefined)
@@ -109,7 +113,7 @@ export function DispatchedKitDrawer({
     return () => {
       cancelled = true
     }
-  }, [itemId])
+  }, [itemId, fetchToken])
 
   useEffect(() => {
     let cancelled = false
@@ -276,10 +280,11 @@ export function DispatchedKitDrawer({
 
   const latestActiveId = extensions.find((row) => !row.cancelledAt)?.id ?? null
 
+  const kitLoading = !item && !missing
   const description = !item
     ? missing
       ? "This kit is not on the ledger."
-      : "Loading this kit…"
+      : undefined
     : [
         item.name,
         returnDate ? `Return ${formatBusinessDate(returnDate)}` : "No return date",
@@ -296,7 +301,16 @@ export function DispatchedKitDrawer({
           if (!open) onClose()
         }}
         title={item?.serialNumber ?? "Kit"}
-        description={description}
+        description={
+          kitLoading ? (
+            <span className="flex flex-col gap-1.5 pt-1" aria-hidden>
+              <Skeleton className="h-3 w-48" />
+              <Skeleton className="h-3 w-32" />
+            </span>
+          ) : (
+            description
+          )
+        }
         dateLabel="Return date"
         showMeta={false}
         detail={
@@ -312,10 +326,32 @@ export function DispatchedKitDrawer({
                   ...(rentalDays != null ? [{ label: "Rental days", value: String(rentalDays) }] : []),
                 ],
               }
-            : undefined
+            : kitLoading
+              ? {
+                  movement: <Skeleton className="h-4 w-20" />,
+                  client: <Skeleton className="h-4 w-28" />,
+                  date: <Skeleton className="h-4 w-24" />,
+                  showRequest: true,
+                  extra: [
+                    { label: "Due", value: <Skeleton className="h-4 w-16" /> },
+                  ],
+                }
+              : undefined
         }
         notice={
-          note || rentalPeriod || (status === "Pending Inspection" && item) ? (
+          kitLoading ? (
+            <DrawerBodySkeleton className="px-0 py-2" />
+          ) : missing && !item ? (
+            <LoadErrorInline
+              className="py-6"
+              message="Couldn't load"
+              onRetry={() => {
+                setMissing(false)
+                setFetched(null)
+                setFetchToken((n) => n + 1)
+              }}
+            />
+          ) : note || rentalPeriod || (status === "Pending Inspection" && item) ? (
             <div className="px-4 pb-2 flex flex-col gap-2">
               {rentalPeriod ? <p className="text-sm text-foreground">{rentalPeriod}</p> : null}
               {note && note !== rentalPeriod ? <p className="text-sm text-foreground">{note}</p> : null}

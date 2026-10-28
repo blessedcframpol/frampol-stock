@@ -645,9 +645,11 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
     </div>
   )
 
+  // Wait for auth + profile before chrome so signed-out / pending-role / role
+  // nav never flash the wrong frame (PF1c auth cases).
   if (loading) return authGateSpinner
   if (!user) return authGateSpinner
-  if (user && !profile) {
+  if (!profile) {
     return (
       <div className="flex h-screen flex-col items-center justify-center gap-4 bg-background px-4">
         <p className="max-w-sm text-center text-sm text-muted-foreground">

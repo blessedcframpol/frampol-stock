@@ -86,7 +86,8 @@ export function ClientsStoreProvider({ children }: { children: React.ReactNode }
       hasLoaded && !force && Date.now() - lastFetchedAt.current < STALE_MS
     if (freshEnough) return
 
-    setIsLoading(true)
+    // Quiet refresh when directory already loaded — keep list visible (PF1c).
+    if (!hasLoaded) setIsLoading(true)
     setError(null)
     try {
       const rows = await loadClientsOnce()

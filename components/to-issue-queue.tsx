@@ -142,7 +142,10 @@ export function ToIssueQueue({ requests, requesterName, onChanged }: Props) {
   const [rejectCode, setRejectCode] = useState<RejectReasonCode | "">("")
   const [rejectNote, setRejectNote] = useState("")
 
-  if (toIssue.length === 0 && awaiting.length === 0) return null
+  if (toIssue.length === 0 && awaiting.length === 0) {
+    // Parent on /requests reserves a fixed-height slot (PF1c CLS).
+    return null
+  }
 
   async function onApprove(id: string) {
     setBusyId(id)

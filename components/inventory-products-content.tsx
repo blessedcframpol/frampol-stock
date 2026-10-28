@@ -7,6 +7,9 @@ import { Download, MoreHorizontal, Plus } from "lucide-react"
 import { toast } from "sonner"
 import { pageTitleClass } from "@/components/page-nav"
 import { EmptyState } from "@/components/fs/empty-state"
+import { TableBodySkeleton } from "@/components/fs/content-skeletons"
+import { LoadErrorInline } from "@/components/fs/load-error-inline"
+import { Skeleton } from "@/components/ui/skeleton"
 import { clearAllLabel, FilterChip, type FilterChipModel } from "@/components/fs/filter-chip"
 import { ListToolbar, ListToolbarSearch } from "@/components/fs/list-toolbar"
 import { StatusPill } from "@/components/fs/status-pill"
@@ -158,10 +161,11 @@ export function InventoryProductsContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const { role } = useAuth()
-  const { inventory } = useInventoryStore()
-  const { products: lowStock, refresh } = useLowStockProducts()
+  const { inventory, hasLoaded: ledgerReady } = useInventoryStore()
+  const { products: lowStock, loading: lowStockLoading, refresh } = useLowStockProducts()
   const [lines, setLines] = useState<ProductLineSetting[]>([])
   const [linesReady, setLinesReady] = useState(false)
+  const [linesError, setLinesError] = useState(false)
   const [defaultReorder, setDefaultReorder] = useState(2)
   const [query, setQuery] = useState("")
   const [vendor, setVendor] = useState("all")
@@ -190,8 +194,10 @@ export function InventoryProductsContent() {
       const [nextLines, settings] = await Promise.all([fetchProductLineSettings(), fetchAppSettings()])
       setLines(nextLines)
       setDefaultReorder(settings.defaultReorderLevel)
+      setLinesError(false)
       setLinesReady(true)
     } catch (caught) {
+      setLinesError(true)
       setLinesReady(true)
       toast.error(caught instanceof Error ? caught.message : "Could not load products")
     }
@@ -204,10 +210,12 @@ export function InventoryProductsContent() {
         if (cancelled) return
         setLines(nextLines)
         setDefaultReorder(settings.defaultReorderLevel)
+        setLinesError(false)
         setLinesReady(true)
       })
       .catch((caught) => {
         if (cancelled) return
+        setLinesError(true)
         setLinesReady(true)
         toast.error(caught instanceof Error ? caught.message : "Could not load products")
       })
@@ -219,9 +227,14 @@ export function InventoryProductsContent() {
     }
   }, [loadLines])
 
+  // List is usable when product lines arrive — do not wait on the full ledger (PF1c).
+  const catalogReady = linesReady
+  const countsReady = ledgerReady || inventory.length > 0
+  const showProductsSkeleton = !linesError && !linesReady
+
   const rows = useMemo(
-    () => (linesReady ? buildInventoryProducts(lowStock, lines, inventory, defaultReorder) : []),
-    [linesReady, lowStock, lines, inventory, defaultReorder],
+    () => (catalogReady ? buildInventoryProducts(lowStock, lines, inventory, defaultReorder) : []),
+    [catalogReady, lowStock, lines, inventory, defaultReorder],
   )
   const chips = useMemo(() => vendorChips(rows), [rows])
   const lowCount = useMemo(() => lowStockChipCount(rows), [rows])
@@ -406,14 +419,24 @@ export function InventoryProductsContent() {
   }, [rows])
 
   return (
-    <div className="flex flex-col gap-4 md:gap-6">
+    <div
+      className="flex flex-col gap-4 md:gap-6"
+      data-ready={catalogReady ? "true" : undefined}
+    >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className={pageTitleClass}>Inventory</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {linesReady
-              ? `${formatCount(activeCount)} products · ${formatCount(pools.inStock)} items in stock · Available for sale ${formatCount(pools.sale)} · Rental ${formatCount(pools.rental)} · Demo ${formatCount(pools.demo)}`
-              : "Loading products"}
+          <p className="mt-1 min-h-[2.5rem] text-sm text-muted-foreground">
+            {!catalogReady ? (
+              "Loading products"
+            ) : countsReady ? (
+              `${formatCount(activeCount)} products · ${formatCount(pools.inStock)} items in stock · Available for sale ${formatCount(pools.sale)} · Rental ${formatCount(pools.rental)} · Demo ${formatCount(pools.demo)}`
+            ) : (
+              <span className="inline-flex flex-wrap items-center gap-2">
+                <span>{formatCount(activeCount)} products</span>
+                <Skeleton className="inline-block h-3.5 w-48 max-w-full align-middle" />
+              </span>
+            )}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -436,7 +459,9 @@ export function InventoryProductsContent() {
             aria-label="Search products"
           />
         }
-        count={linesReady ? `${visible.length} of ${showInactive ? rows.length : activeCount}` : "Loading…"}
+        count={
+          catalogReady ? `${visible.length} of ${showInactive ? rows.length : activeCount}` : "Loading…"
+        }
         secondary={
           <Button type="button" variant="ghost" onClick={() => setShowInactive((current) => !current)} aria-pressed={showInactive}>
             {showInactive ? "Hide archived" : "Show archived"}
@@ -444,12 +469,12 @@ export function InventoryProductsContent() {
         }
       />
 
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex min-h-[4rem] flex-wrap items-center gap-2 content-start">
         {chips.map((chip) => (
           <FilterChip
             key={chip.id}
             label={chip.label}
-            count={chip.count}
+            count={countsReady || !lowStockLoading ? chip.count : undefined}
             selected={vendorChipSelected(chip.id, vendor, lowOnly)}
             onSelect={() => {
               if (chip.id === "all") {
@@ -461,7 +486,7 @@ export function InventoryProductsContent() {
         ))}
         <FilterChip
           label="Low stock"
-          count={lowCount}
+          count={!lowStockLoading ? lowCount : undefined}
           selected={lowOnly}
           onSelect={() => setLowOnly((current) => !current)}
         />
@@ -479,8 +504,13 @@ export function InventoryProductsContent() {
         ) : null}
       </div>
 
-      {visible.length === 0 ? (
-        <EmptyState message={linesReady ? "No products match these filters." : "Loading products."} />
+      <div className="min-h-[1040px]">
+      {linesError && !catalogReady ? (
+        <LoadErrorInline onRetry={() => void loadLines()} />
+      ) : showProductsSkeleton ? (
+        <TableBodySkeleton rows={24} cols={showMenu ? 7 : 6} />
+      ) : visible.length === 0 ? (
+        <EmptyState message="No products match these filters." />
       ) : (
         <Table>
           <TableHeader>
@@ -527,8 +557,20 @@ export function InventoryProductsContent() {
                     </Link>
                   </TableCell>
                   <TableCell>{row.vendor}</TableCell>
-                  <TableCell className={tableNumericClass}>{row.inStockCount}</TableCell>
-                  <TableCell className={tableNumericClass}>{outLabel || "—"}</TableCell>
+                  <TableCell className={tableNumericClass}>
+                    {countsReady || !lowStockLoading ? (
+                      row.inStockCount
+                    ) : (
+                      <Skeleton className="ml-auto h-4 w-8" aria-hidden />
+                    )}
+                  </TableCell>
+                  <TableCell className={tableNumericClass}>
+                    {countsReady ? (
+                      outLabel || "—"
+                    ) : (
+                      <Skeleton className="ml-auto h-4 w-10" aria-hidden />
+                    )}
+                  </TableCell>
                   <TableCell className={tableNumericClass}>
                     {canEdit && row.isActive ? (
                       <ReorderEditor
@@ -542,9 +584,12 @@ export function InventoryProductsContent() {
                     )}
                   </TableCell>
                   <TableCell>
-                    <span className="flex items-center gap-1">
-                      {row.isLow ? <StatusPill value="Low" /> : null}
+                    <span className="flex min-h-5 items-center gap-1">
                       {!row.isActive ? <StatusPill value="Archived" /> : null}
+                      {row.isActive && lowStockLoading && !countsReady ? (
+                        <Skeleton className="h-5 w-12 rounded-full" aria-hidden />
+                      ) : null}
+                      {row.isActive && row.isLow ? <StatusPill value="Low" /> : null}
                     </span>
                   </TableCell>
                   {showMenu ? (
@@ -610,6 +655,7 @@ export function InventoryProductsContent() {
           </TableBody>
         </Table>
       )}
+      </div>
 
       <Dialog
         open={Boolean(productAction)}

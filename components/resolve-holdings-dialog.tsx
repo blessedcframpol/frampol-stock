@@ -59,7 +59,8 @@ export function ResolveHoldingsDialog({
 }) {
   const timeZone = useOrgTimezone()
   const today = todayBusinessDate(timeZone)
-  const { transactions } = useInventoryStore()
+  // Parent loads the ledger before opening; do not fetch on every Dispatched mount (PF1c).
+  const { transactions } = useInventoryStore({ enabled: false })
   const signature = kits.map((kit) => kit.id).join("|")
   const [builtFor, setBuiltFor] = useState<string | null>(null)
   const [drafts, setDrafts] = useState<ResolveDraft[]>([])

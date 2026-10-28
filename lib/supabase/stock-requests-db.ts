@@ -760,21 +760,23 @@ export function useStockRequests(): {
 
   const refetch = useCallback(async () => {
     setError(null)
-    setLoading(true)
+    // Quiet when we already have rows — avoid blanking the list (PF1c).
+    const quiet = list.length > 0
+    if (!quiet) setLoading(true)
     try {
       const result = await fetchList()
       if (!result.ok) {
-        setList([])
+        if (!quiet) setList([])
         return
       }
       setList(result.rows)
     } catch (e) {
       setError(e instanceof Error ? e : new Error(String(e)))
-      setList([])
+      if (!quiet) setList([])
     } finally {
       setLoading(false)
     }
-  }, [fetchList])
+  }, [fetchList, list.length])
 
   const softRefetch = useCallback(async () => {
     try {

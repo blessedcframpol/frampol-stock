@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { Copy, Loader2, MoreHorizontal } from "lucide-react"
+import { DrawerBodySkeleton } from "@/components/fs/content-skeletons"
+import { LoadErrorInline } from "@/components/fs/load-error-inline"
 import { toast } from "sonner"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
@@ -225,6 +227,8 @@ export function MovementBatchDrawer({
   const viewer = role === "viewer"
   const [detail, setDetail] = useState<MovementBatchDrawerPayload | null>(null)
   const [loading, setLoading] = useState(false)
+  const [loadError, setLoadError] = useState(false)
+  const [retryToken, setRetryToken] = useState(0)
   const [search, setSearch] = useState("")
   const [tab, setTab] = useState("items")
   const [footerAddInvoiceOpen, setFooterAddInvoiceOpen] = useState(false)
@@ -242,6 +246,7 @@ export function MovementBatchDrawer({
     }
     let cancelled = false
     setLoading(true)
+    setLoadError(false)
     void fetch(`/api/movement-batches/detail?batchKey=${encodeURIComponent(batchKey)}`)
       .then(async (res) => {
         const data = await res.json().catch(() => ({}))
@@ -259,7 +264,10 @@ export function MovementBatchDrawer({
       .catch((cause: unknown) => {
         if (cancelled) return
         toast.error(cause instanceof Error ? cause.message : "Could not load batch")
-        setDetail(null)
+        if (!seed) {
+          setDetail(null)
+          setLoadError(true)
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -267,7 +275,9 @@ export function MovementBatchDrawer({
     return () => {
       cancelled = true
     }
-  }, [open, batchKey, isReversed, reversalKind])
+    // seed is optional first paint only — omit from deps to avoid identity churn
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- retryToken / batchKey drive reload
+  }, [open, batchKey, isReversed, reversalKind, retryToken])
 
   const merged = useMemo(() => {
     if (!detail && !seed) return null
@@ -434,9 +444,9 @@ export function MovementBatchDrawer({
         </SheetHeader>
 
         {loading && !merged ? (
-          <div className="flex flex-1 items-center justify-center text-muted-foreground">
-            <Loader2 className="size-6 animate-spin" />
-          </div>
+          <DrawerBodySkeleton />
+        ) : loadError && !merged ? (
+          <LoadErrorInline onRetry={() => setRetryToken((n) => n + 1)} />
         ) : merged ? (
           <>
             <div className="shrink-0 border-b border-border px-4 py-3">

@@ -21,7 +21,7 @@ export function StatCard({
   return (
     <div
       className={cn(
-        "relative rounded-2xl p-5",
+        "relative rounded-2xl p-5 min-h-[7.25rem]",
         highlight ? "bg-primary text-primary-foreground" : "bg-card text-card-foreground",
       )}
     >

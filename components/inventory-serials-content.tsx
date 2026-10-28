@@ -13,6 +13,7 @@ import { PageBreadcrumbs } from "@/components/page-breadcrumbs"
 import { pageTitleClass } from "@/components/page-nav"
 import { RecordStockMovementDialog } from "@/components/record-stock-movement-dialog"
 import { EmptyState } from "@/components/fs/empty-state"
+import { TableBodySkeleton } from "@/components/fs/content-skeletons"
 import { ListToolbar, ListToolbarSearch } from "@/components/fs/list-toolbar"
 import { StatusPill } from "@/components/fs/status-pill"
 import { StockPoolChip } from "@/components/stock-pool-chip"
@@ -54,7 +55,8 @@ export function InventorySerialsContent({ productId }: { productId: string }) {
   const searchParams = useSearchParams()
   const serialFromUrl = searchParams.get("serial")?.trim() ?? ""
   const { role } = useAuth()
-  const { inventory, transactions, refetchLedger } = useInventoryStore()
+  const { inventory, transactions, refetchLedger, hasLoaded: ledgerReady } = useInventoryStore()
+  const showSerialsSkeleton = !ledgerReady && inventory.length === 0
   const [search, setSearch] = useState(serialFromUrl)
   const [seenSerial, setSeenSerial] = useState(serialFromUrl)
   if (serialFromUrl && serialFromUrl !== seenSerial) {
@@ -156,7 +158,10 @@ export function InventorySerialsContent({ productId }: { productId: string }) {
     5 + (checkboxes ? 1 : 0) + (columns.assignedTo ? 1 : 0) + (columns.purchaseWarranty ? 1 : 0)
 
   return (
-    <div className="flex flex-col gap-4 md:gap-6">
+    <div
+      className="flex flex-col gap-4 md:gap-6"
+      data-ready={ledgerReady || inventory.length > 0 ? "true" : undefined}
+    >
       <PageBreadcrumbs items={[{ label: "Inventory", href: "/inventory" }, { label: productName }]} />
       {serialFromUrl ? (
         <Card>
@@ -299,6 +304,9 @@ export function InventorySerialsContent({ productId }: { productId: string }) {
         </div>
       ) : null}
 
+      {showSerialsSkeleton ? (
+        <TableBodySkeleton rows={24} cols={columnCount} />
+      ) : (
       <Table>
         <TableHeader>
           <TableRow>
@@ -388,6 +396,7 @@ export function InventorySerialsContent({ productId }: { productId: string }) {
           )}
         </TableBody>
       </Table>
+      )}
 
       {focusedItem ? (
         <>

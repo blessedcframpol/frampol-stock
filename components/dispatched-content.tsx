@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import {
@@ -24,7 +24,9 @@ import { todayBusinessDate } from "@/lib/business-date.mjs"
 import { announceAlertsUpdated, canRecordReturn } from "@/lib/alerts"
 import { isOverdueHolding } from "@/lib/bulk-resolve"
 import { PageHeader } from "@/components/page-nav"
-import { ArrowUpRight, Loader2 } from "lucide-react"
+import { ArrowUpRight } from "lucide-react"
+import { TableBodySkeleton } from "@/components/fs/content-skeletons"
+import { LoadErrorInline } from "@/components/fs/load-error-inline"
 import { ChangeGroupDialog } from "@/components/change-group-dialog"
 import { ResolveHoldingsDialog } from "@/components/resolve-holdings-dialog"
 import { Button } from "@/components/ui/button"
@@ -61,7 +63,11 @@ export function DispatchedContent() {
   const timeZone = useOrgTimezone()
   const today = todayBusinessDate(timeZone)
   const { role } = useAuth()
-  const { inventory, refetchLedger } = useInventoryStore()
+  // Do not pull the full ledger on first paint — rows come from /api/dispatched.
+  // Ledger is only needed for pool chips / bulk actions (PF1c).
+  const { inventory, hasLoaded: ledgerReady, ensureLoaded, refetchLedger } = useInventoryStore({
+    enabled: false,
+  })
   const canChangeGroup = canChangeStockPool(role)
   const canResolve = canRecordReturn(role)
   const [selectedKits, setSelectedKits] = useState<Map<string, InventoryItem>>(() => new Map())
@@ -191,7 +197,19 @@ export function DispatchedContent() {
 
   const requestKey = `${page}|${filterKey}|${reload}`
   const [settledKey, setSettledKey] = useState<string | null>(null)
+  const [hasLoaded, setHasLoaded] = useState(false)
+  const hasLoadedRef = useRef(false)
+  const [loadError, setLoadError] = useState(false)
   const loading = settledKey !== requestKey
+  const showTableSkeleton = loading && !hasLoaded
+  const showTableError = loadError && !hasLoaded
+
+  // After rows are ready, pull the ledger for pool chips / selection (avoids racing /api/dispatched).
+  useEffect(() => {
+    if (!hasLoaded) return
+    if (!(canChangeGroup || canResolve || resolveParam)) return
+    void ensureLoaded()
+  }, [hasLoaded, canChangeGroup, canResolve, resolveParam, ensureLoaded])
 
   useEffect(() => {
     let cancelled = false
@@ -210,9 +228,15 @@ export function DispatchedContent() {
         if (cancelled) return
         if (!res.ok) {
           toastFromApiErrorBody(body, "Failed to load dispatched items", res.status)
-          setData({ rows: [], total: 0, counts: {}, resultKind: "batch" })
+          if (!hasLoadedRef.current) {
+            setData({ rows: [], total: 0, counts: {}, resultKind: "batch" })
+            setLoadError(true)
+          }
           return
         }
+        setLoadError(false)
+        hasLoadedRef.current = true
+        setHasLoaded(true)
         setData({
           rows: Array.isArray(body.rows) ? body.rows : [],
           total: typeof body.total === "number" ? body.total : 0,
@@ -222,7 +246,10 @@ export function DispatchedContent() {
       } catch (error) {
         if (!cancelled) {
           toastFromCaughtError(error, "Failed to load dispatched items")
-          setData({ rows: [], total: 0, counts: {}, resultKind: "batch" })
+          if (!hasLoadedRef.current) {
+            setData({ rows: [], total: 0, counts: {}, resultKind: "batch" })
+            setLoadError(true)
+          }
         }
       } finally {
         if (!cancelled) setSettledKey(requestKey)
@@ -238,7 +265,7 @@ export function DispatchedContent() {
   const pages = pageCount(total)
 
   return (
-    <div className="flex flex-col gap-6 min-w-0">
+    <div className="flex flex-col gap-6 min-w-0" data-ready={hasLoaded ? "true" : undefined}>
       <PageHeader
         title="Dispatched"
         description={
@@ -261,7 +288,7 @@ export function DispatchedContent() {
             aria-label="Search dispatched items"
           />
         }
-        count={loading ? "Loading…" : dispatchResultLabel(total, data.resultKind)}
+        count={showTableSkeleton ? "Loading…" : dispatchResultLabel(total, data.resultKind)}
         secondary={
           <>
             <label className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -326,10 +353,10 @@ export function DispatchedContent() {
         </div>
       ) : null}
 
-      {loading ? (
-            <div className="flex items-center justify-center py-16 text-muted-foreground">
-              <Loader2 className="size-8 animate-spin" />
-            </div>
+      {showTableSkeleton ? (
+            <TableBodySkeleton rows={24} cols={7} />
+          ) : showTableError ? (
+            <LoadErrorInline onRetry={() => setReload((n) => n + 1)} />
           ) : data.rows.length === 0 ? (
             <EmptyState
               icon={<ArrowUpRight />}
@@ -419,7 +446,13 @@ export function DispatchedContent() {
                             serial={row.serialNumber}
                             itemId={itemBySerial.get(row.serialNumber)?.id}
                           />
-                          <StockPoolChip pool={row.serialNumber ? poolBySerial.get(row.serialNumber) : undefined} />
+                          <span className="inline-flex h-5 min-w-[3.25rem] items-center justify-end">
+                            {ledgerReady ? (
+                              <StockPoolChip
+                                pool={row.serialNumber ? poolBySerial.get(row.serialNumber) : undefined}
+                              />
+                            ) : null}
+                          </span>
                           <button
                             type="button"
                             className="text-xs text-brand hover:underline"

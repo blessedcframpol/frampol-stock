@@ -85,6 +85,11 @@ import type { ClientSite, Transaction } from "@/lib/data"
 import { StatusPill } from "@/components/fs/status-pill"
 import { RequestStatusPill } from "@/components/request-status-pill"
 import { useRequestDisplayStatuses } from "@/hooks/use-request-display-statuses"
+import {
+  ClientDetailHeaderSkeleton,
+  TableBodySkeleton,
+} from "@/components/fs/content-skeletons"
+import { LoadErrorInline } from "@/components/fs/load-error-inline"
 
 type ConsignmentRow = {
   kind: "consignment"
@@ -110,8 +115,13 @@ export default function ClientDetailPage() {
   const { role } = useAuth()
   const showFinancials = canViewFinancials(role)
   const canEdit = canEditClients(role)
-  const { clients, isLoading: clientsLoading, error: clientsError, upsertClient } =
-    useClients()
+  const {
+    clients,
+    isLoading: clientsLoading,
+    error: clientsError,
+    upsertClient,
+    refetch: refetchClients,
+  } = useClients()
   const [ledger, setLedger] = useState<ResolvedClientTransaction[]>([])
   const [ledgerReady, setLedgerReady] = useState(false)
   const [ledgerForId, setLedgerForId] = useState(id)
@@ -286,24 +296,27 @@ export default function ClientDetailPage() {
     setDetailOpen(true)
   }
 
-  if (clientsLoading) {
+  if (clientsLoading && !client) {
     return (
       <DashboardShell>
         <div className="flex flex-col gap-4 min-w-0">
-          <p className="text-sm text-muted-foreground">Loading client...</p>
+          <PageBreadcrumbs items={[{ label: "Clients", href: "/clients" }, { label: "Client" }]} />
+          <ClientDetailHeaderSkeleton />
+          <TableBodySkeleton rows={6} cols={4} />
         </div>
       </DashboardShell>
     )
   }
 
-  if (clientsError) {
+  if (clientsError && !client) {
     return (
       <DashboardShell>
         <div className="flex flex-col gap-4 min-w-0">
           <PageBreadcrumbs items={[{ label: "Clients", href: "/clients" }, { label: "Client" }]} />
-          <p role="alert" className="text-sm text-destructive">
-            {isAuthFailure(clientsError) ? SESSION_EXPIRED_MESSAGE : "Could not load this client."}
-          </p>
+          <LoadErrorInline
+            message={isAuthFailure(clientsError) ? SESSION_EXPIRED_MESSAGE : "Couldn't load"}
+            onRetry={() => void refetchClients()}
+          />
         </div>
       </DashboardShell>
     )
@@ -410,7 +423,10 @@ export default function ClientDetailPage() {
 
   return (
     <DashboardShell>
-      <div className="flex flex-col gap-6 min-w-0">
+      <div
+        className="flex flex-col gap-6 min-w-0"
+        data-ready={ledgerReady && !requestsLoading ? "true" : undefined}
+      >
         <PageBreadcrumbs items={[{ label: "Clients", href: "/clients" }, { label: identity.title }]} />
 
         {/* Client header */}
@@ -561,8 +577,8 @@ export default function ClientDetailPage() {
             <CardTitle className="text-base font-semibold text-foreground">Requests</CardTitle>
           </CardHeader>
           <CardContent className="flex-1 min-h-0 overflow-auto overflow-x-auto">
-            {requestsLoading ? (
-              <p className="text-sm text-muted-foreground py-4">Loading requests…</p>
+            {requestsLoading && clientRequests.length === 0 ? (
+              <TableBodySkeleton rows={4} cols={4} className="border-0" />
             ) : clientRequests.length === 0 ? (
               <p className="text-sm text-muted-foreground py-4">No stock requests for this client yet.</p>
             ) : (
@@ -609,8 +625,8 @@ export default function ClientDetailPage() {
             <CardTitle className="text-base font-semibold text-foreground">Transactions</CardTitle>
           </CardHeader>
           <CardContent className="flex-1 min-h-0 overflow-auto overflow-x-auto">
-            {!ledgerReady ? (
-              <p className="text-sm text-muted-foreground py-4">Loading transactions…</p>
+            {!ledgerReady && rows.length === 0 ? (
+              <TableBodySkeleton rows={5} cols={showFinancials ? 5 : 4} className="border-0" />
             ) : rows.length === 0 ? (
               <p className="text-sm text-muted-foreground py-4">No transactions for this client.</p>
             ) : (

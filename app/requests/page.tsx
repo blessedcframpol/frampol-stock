@@ -2,9 +2,10 @@
 
 import { DashboardShell } from "@/components/dashboard-shell"
 import { StockRequestsList } from "@/components/stock-requests-list"
+import { PageHeader } from "@/components/page-nav"
 import { useRequestQueuesRefresh } from "@/hooks/use-request-queues-refresh"
 import { useStockRequests } from "@/lib/supabase/stock-requests-db"
-import { AlertCircle, Loader2 } from "lucide-react"
+import { LoadErrorInline } from "@/components/fs/load-error-inline"
 
 export default function RequestsPage() {
   const { list, loading, error, refetch, softRefetch } = useStockRequests()
@@ -12,18 +13,17 @@ export default function RequestsPage() {
 
   return (
     <DashboardShell>
-      {loading ? (
-        <div className="flex items-center justify-center py-20 text-muted-foreground gap-2">
-          <Loader2 className="size-5 animate-spin" />
-          Loading requests…
-        </div>
-      ) : error ? (
-        <div className="flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-          <AlertCircle className="size-5 shrink-0" />
-          <p>{error.message}</p>
+      {error && list.length === 0 ? (
+        <div className="flex flex-col gap-4 md:gap-6 min-w-0">
+          <PageHeader title="Requests" />
+          <LoadErrorInline onRetry={() => void refetch()} />
         </div>
       ) : (
-        <StockRequestsList requests={list} onRequestsChanged={() => void refetch()} />
+        <StockRequestsList
+          requests={list}
+          loading={loading && list.length === 0}
+          onRequestsChanged={() => void softRefetch()}
+        />
       )}
     </DashboardShell>
   )

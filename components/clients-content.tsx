@@ -83,6 +83,8 @@ import { toastFromCaughtError } from "@/lib/toast-reportable-error"
 import { PageHeader } from "@/components/page-nav"
 import { useAuth } from "@/lib/auth-context"
 import { canEditClients } from "@/lib/permissions"
+import { ClientRowsSkeleton } from "@/components/fs/content-skeletons"
+import { LoadErrorInline } from "@/components/fs/load-error-inline"
 
 const PAGE_SIZE = 24
 
@@ -113,7 +115,8 @@ export function ClientsContent() {
     setPageKey(listKey)
     setPage(1)
   }
-  const { clients, isLoading, error, upsertClient } = useClients()
+  const { clients, isLoading, error, upsertClient, refetch } = useClients()
+  const showClientsSkeleton = isLoading && clients.length === 0
   const [holdings, setHoldings] = useState<HeldUnit[]>([])
   const [holdingsReady, setHoldingsReady] = useState(false)
   const [dispatchCounts, setDispatchCounts] = useState<Map<string, ClientDispatchCount>>(new Map())
@@ -359,10 +362,13 @@ export function ClientsContent() {
   const rangeEnd = Math.min(safePage * PAGE_SIZE, filtered.length)
 
   return (
-    <div className="flex flex-col gap-4 md:gap-6 min-w-0">
+    <div
+      className="flex flex-col gap-4 md:gap-6 min-w-0"
+      data-ready={!showClientsSkeleton ? "true" : undefined}
+    >
       <PageHeader
         title="Clients"
-        description={isLoading ? "Loading…" : `${formatCount(clients.length)} clients`}
+        description={showClientsSkeleton ? "Loading…" : `${formatCount(clients.length)} clients`}
         actions={
           canEdit ? (
             <Button onClick={openAddClient} className="w-fit shrink-0">
@@ -438,10 +444,6 @@ export function ClientsContent() {
         busy={isSubmitting}
       />
 
-      {error && (
-        <p className="text-sm text-destructive">Failed to load clients.</p>
-      )}
-
       <ListToolbar
         search={
           <ListToolbarSearch
@@ -473,7 +475,7 @@ export function ClientsContent() {
             label={item.label}
             count={
               item.id === "all" ||
-              isLoading ||
+              showClientsSkeleton ||
               ((item.id === "out" || item.id === "overdue") && !holdingsReady)
                 ? undefined
                 : counts[item.id]
@@ -484,12 +486,10 @@ export function ClientsContent() {
         ))}
       </div>
 
-      {isLoading ? (
-        <div className="rounded-lg border border-border bg-card p-4 space-y-3 animate-pulse">
-          {[1, 2, 3, 4, 5].map((i) => (
-            <div key={i} className="h-10 bg-muted rounded" />
-          ))}
-        </div>
+      {error && clients.length === 0 ? (
+        <LoadErrorInline onRetry={() => void refetch()} />
+      ) : showClientsSkeleton ? (
+        <ClientRowsSkeleton rows={24} />
       ) : filtered.length === 0 ? (
         <EmptyState message="No clients found matching your search." />
       ) : (
@@ -506,7 +506,7 @@ export function ClientsContent() {
         />
       )}
 
-      {!isLoading && filtered.length > 0 && (
+      {!showClientsSkeleton && filtered.length > 0 && (
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm text-muted-foreground">
             Showing {formatCount(rangeStart)}–{formatCount(rangeEnd)} of {formatCount(filtered.length)}

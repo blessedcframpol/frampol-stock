@@ -35,7 +35,7 @@ function TodoCard({ item }: { item: TodoItem }) {
     <Link
       href={item.href}
       className={cn(
-        "group relative flex min-h-11 flex-col gap-1 rounded-2xl p-4 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+        "group relative flex min-h-[5.5rem] flex-col gap-1 rounded-2xl p-4 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
         active ? "bg-card text-card-foreground hover:bg-accent" : "bg-card/60 text-muted-foreground hover:bg-accent"
       )}
     >

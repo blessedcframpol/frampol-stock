@@ -23,19 +23,21 @@ export function useDashboardSummary(): {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (opts?: { quiet?: boolean }) => {
     if (!user?.id) {
       setSummary(null)
       setLoading(false)
       setError(null)
       return
     }
-    setLoading(true)
+    // Keep last summary visible on background refresh (PF1c).
+    if (!opts?.quiet) setLoading(true)
     try {
       setSummary(await fetchDashboardSummary())
       setError(null)
     } catch (caught) {
-      setSummary(null)
+      // Keep prior summary when a quiet refresh fails.
+      if (!opts?.quiet) setSummary(null)
       setError(caught instanceof Error ? caught.message : "Could not load dashboard summary")
     } finally {
       setLoading(false)
@@ -73,7 +75,7 @@ export function useDashboardSummary(): {
 
   useEffect(() => {
     if (!user?.id) return
-    const onRefresh = () => void refresh()
+    const onRefresh = () => void refresh({ quiet: true })
     window.addEventListener(DASHBOARD_REFRESH_EVENT, onRefresh)
     window.addEventListener(ALERTS_UPDATED_EVENT, onRefresh)
     window.addEventListener(REQUEST_QUEUES_REFRESH_EVENT, onRefresh)
@@ -84,5 +86,10 @@ export function useDashboardSummary(): {
     }
   }, [user?.id, refresh])
 
-  return { summary, loading, error, refresh }
+  return {
+    summary,
+    loading,
+    error,
+    refresh: () => refresh(),
+  }
 }

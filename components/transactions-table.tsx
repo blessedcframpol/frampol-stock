@@ -22,13 +22,15 @@ import {
 } from "@/lib/transaction-batches"
 import { BusinessDateLabel } from "@/components/business-date-label"
 import { useOrgTimezone } from "@/hooks/use-org-timezone"
-import { FileText, Loader2 } from "lucide-react"
+import { FileText } from "lucide-react"
 import { toastFromApiErrorBody, toastFromCaughtError } from "@/lib/toast-reportable-error"
 import { SESSION_EXPIRED_MESSAGE } from "@/lib/unauthorized"
 import { SignedStorageLink } from "@/components/signed-storage-link"
 import { formatCount } from "@/lib/format-display"
 import { ALERTS_UPDATED_EVENT, DASHBOARD_REFRESH_EVENT } from "@/lib/alerts"
 import { REQUEST_QUEUES_REFRESH_EVENT } from "@/lib/notifications-live"
+import { TableBodySkeleton } from "@/components/fs/content-skeletons"
+import { LoadErrorInline } from "@/components/fs/load-error-inline"
 
 const RECENT_BATCH_LIMIT = 10
 
@@ -41,7 +43,8 @@ export function TransactionsTable() {
   const showFinancials = canViewFinancials(role)
 
   const refresh = useCallback(async (opts?: { quiet?: boolean }) => {
-    if (!opts?.quiet) setLoading(true)
+    const quiet = Boolean(opts?.quiet) || batches.length > 0
+    if (!quiet) setLoading(true)
     try {
       const page = await fetchTransactionBatchPage({ limit: RECENT_BATCH_LIMIT, offset: 0, active: true })
       setLoadError(null)
@@ -54,11 +57,13 @@ export function TransactionsTable() {
       } else {
         toastFromCaughtError(e, "Failed to load recent transactions")
       }
-      setLoadError(status === 401 ? SESSION_EXPIRED_MESSAGE : "Could not load recent transactions.")
+      if (!quiet) {
+        setLoadError(status === 401 ? SESSION_EXPIRED_MESSAGE : "Couldn't load")
+      }
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [batches.length])
 
   useEffect(() => {
     let cancelled = false
@@ -84,8 +89,13 @@ export function TransactionsTable() {
 
   const recent = batches.slice(0, RECENT_BATCH_LIMIT)
 
+  const ready = !loading || recent.length > 0
+
   return (
-    <Card className="h-full min-h-[300px] sm:min-h-[340px] flex flex-col">
+    <Card
+      className="h-full min-h-[300px] sm:min-h-[340px] flex flex-col"
+      data-ready={ready && !loadError ? "true" : undefined}
+    >
       <CardHeader className="pb-3 flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
         <CardTitle className="text-base font-semibold text-foreground">Recent transactions</CardTitle>
         <Button variant="link" asChild className="h-auto p-0 text-sm text-brand shrink-0">
@@ -93,14 +103,10 @@ export function TransactionsTable() {
         </Button>
       </CardHeader>
       <CardContent className="flex-1 min-h-0 overflow-auto overflow-x-auto">
-        {loading ? (
-          <div className="flex items-center justify-center py-16 text-muted-foreground">
-            <Loader2 className="w-8 h-8 animate-spin" />
-          </div>
-        ) : loadError ? (
-          <p role="alert" className="text-sm text-destructive py-8 text-center">
-            {loadError}
-          </p>
+        {loading && recent.length === 0 ? (
+          <TableBodySkeleton rows={10} cols={showFinancials ? 6 : 5} className="border-0" />
+        ) : loadError && recent.length === 0 ? (
+          <LoadErrorInline message={loadError} onRetry={() => void refresh()} />
         ) : recent.length === 0 ? (
           <EmptyState message="No transactions yet." />
         ) : (

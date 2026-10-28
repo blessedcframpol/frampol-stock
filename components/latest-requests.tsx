@@ -24,6 +24,8 @@ import { useAuth } from "@/lib/auth-context"
 import { useEffectiveRole } from "@/lib/dev-role-preview"
 import { ADMIN } from "@/lib/permissions"
 import { requestIsAllFortinet } from "@/lib/issue-scan-feedback"
+import { RequestPreviewSkeleton } from "@/components/fs/content-skeletons"
+import { LoadErrorInline } from "@/components/fs/load-error-inline"
 
 const PREVIEW_COUNT = 6
 
@@ -36,28 +38,35 @@ export function LatestRequests() {
   const [latest, setLatest] = useState<StockRequestWithRelations[]>([])
   const [names, setNames] = useState<Map<string, string>>(new Map())
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(false)
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (opts?: { quiet?: boolean }) => {
+    const quiet = Boolean(opts?.quiet) || latest.length > 0
+    if (!quiet) setLoading(true)
     try {
       const sb = getSupabaseClient()
       const data = await fetchLatestOpenRequests(sb, isAdmin ? 40 : PREVIEW_COUNT)
       setLatest(data)
+      setLoadError(false)
       if (isAdmin && data.length) {
         const labels = await fetchProfileLabels(sb, data.map((r) => r.created_by))
         setNames(labels)
       }
     } catch {
-      setLatest([])
+      if (!quiet) {
+        setLatest([])
+        setLoadError(true)
+      }
     } finally {
       setLoading(false)
     }
-  }, [isAdmin])
+  }, [isAdmin, latest.length])
 
   useEffect(() => {
     void refresh()
   }, [refresh])
 
-  useRequestQueuesRefresh(refresh)
+  useRequestQueuesRefresh(() => void refresh({ quiet: true }))
 
   const displayStatuses = useRequestDisplayStatuses(latest)
 
@@ -79,8 +88,13 @@ export function LatestRequests() {
     return names.get(id) ?? `User ${id.slice(0, 8)}`
   }
 
+  const ready = !loading || latest.length > 0
+
   return (
-    <Card className="flex h-full min-h-[300px] flex-col sm:min-h-[340px]">
+    <Card
+      className="flex h-full min-h-[300px] flex-col sm:min-h-[340px]"
+      data-ready={ready && !loadError ? "true" : undefined}
+    >
       <CardHeader className="flex flex-row items-start justify-between gap-2 space-y-0 pb-3">
         <CardTitle className="text-base font-semibold text-foreground">
           {isAdmin ? "To issue" : "Latest requests"}
@@ -93,8 +107,10 @@ export function LatestRequests() {
         </Button>
       </CardHeader>
       <CardContent className="flex min-h-0 flex-1 flex-col gap-0 overflow-auto pt-0">
-        {loading ? (
-          <p className="py-6 text-center text-sm text-muted-foreground">Loading…</p>
+        {loading && latest.length === 0 ? (
+          <RequestPreviewSkeleton rows={PREVIEW_COUNT} />
+        ) : loadError && latest.length === 0 ? (
+          <LoadErrorInline className="py-6" onRetry={() => void refresh()} />
         ) : (
           <>
             {rows.map((req, i) => {

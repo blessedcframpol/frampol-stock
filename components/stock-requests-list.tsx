@@ -22,6 +22,14 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Plus, MessageSquare, Search } from "lucide-react"
+import {
+  PENDING_INVOICE_SLOT_H,
+  PendingInvoiceSkeleton,
+  TableBodySkeleton,
+  TO_ISSUE_QUEUE_SLOT_H,
+  ToIssueQueueSkeleton,
+} from "@/components/fs/content-skeletons"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Input } from "@/components/ui/input"
 import { matchesRequestNumber } from "@/lib/request-number"
 import { useAuth } from "@/lib/auth-context"
@@ -40,7 +48,7 @@ import {
   requestItemsSummary,
   type RequestDisplayStatus,
 } from "@/lib/stock-request-statuses"
-import { formatDateDDMMYYYY } from "@/lib/utils"
+import { cn, formatDateDDMMYYYY } from "@/lib/utils"
 import { formatClientLabel } from "@/lib/client-label"
 import { PageHeader } from "@/components/page-nav"
 import { ToIssueQueue } from "@/components/to-issue-queue"
@@ -66,9 +74,12 @@ function clientLabel(r: StockRequestWithRelations): string {
 export function StockRequestsList({
   requests,
   onRequestsChanged,
+  loading = false,
 }: {
   requests: StockRequestWithRelations[]
   onRequestsChanged?: () => void
+  /** Initial load with no rows yet — keep chrome, skeleton the table (PF1c). */
+  loading?: boolean
 }) {
   const { user } = useAuth()
   const role = useEffectiveRole()
@@ -159,7 +170,10 @@ export function StockRequestsList({
   }, [requests, isAdmin])
 
   return (
-    <div className="flex flex-col gap-4 md:gap-6 min-w-0">
+    <div
+      className="flex flex-col gap-4 md:gap-6 min-w-0"
+      data-ready={!loading ? "true" : undefined}
+    >
       <PageHeader
         title="Requests"
         description={
@@ -186,7 +200,7 @@ export function StockRequestsList({
         }
       />
 
-      {isRequester ? (
+      {isRequester && !loading ? (
         <RequesterNeedsYou
           requests={requests}
           displayStatuses={displayStatuses}
@@ -195,46 +209,137 @@ export function StockRequestsList({
       ) : null}
 
       {isAdmin ? (
-        <ToIssueQueue
-          requests={requests}
-          requesterName={requesterName}
-          onChanged={onRequestsChanged}
-        />
+        <div className={cn(TO_ISSUE_QUEUE_SLOT_H, "overflow-hidden")}>
+          {loading ? (
+            <ToIssueQueueSkeleton />
+          ) : (
+            <div className="h-full overflow-y-auto">
+              <ToIssueQueue
+                requests={requests}
+                requesterName={requesterName}
+                onChanged={onRequestsChanged}
+              />
+            </div>
+          )}
+        </div>
       ) : null}
 
-      {isAdmin && pendingByRequester.length > 0 ? (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">
-              Stock requests waiting for an invoice number (
-              {pendingByRequester.reduce((n, g) => n + g.rows.length, 0)})
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-3">
-            {pendingByRequester.map((g) => (
-              <div key={g.id} className="flex flex-col gap-1">
-                <p className="text-sm font-medium text-foreground">
-                  {requesterName(g.id)}{" "}
-                  <span className="font-normal text-muted-foreground">
-                    · {g.rows.length} request{g.rows.length !== 1 ? "s" : ""}
-                  </span>
-                </p>
-                <ul className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
-                  {g.rows.map((r) => (
-                    <li key={r.id}>
-                      <Link href={`/requests/${r.id}`} className="text-brand hover:underline">
-                        {r.request_number} · {clientLabel(r)} · {formatDateDDMMYYYY(r.created_at)}
-                      </Link>
-                    </li>
+      {isAdmin ? (
+        <div className={cn(PENDING_INVOICE_SLOT_H, "overflow-hidden")}>
+          {loading ? (
+            <PendingInvoiceSkeleton />
+          ) : pendingByRequester.length > 0 ? (
+            <div className="h-full overflow-y-auto">
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium">
+                    Stock requests waiting for an invoice number (
+                    {pendingByRequester.reduce((n, g) => n + g.rows.length, 0)})
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="flex flex-col gap-3">
+                  {pendingByRequester.map((g) => (
+                    <div key={g.id} className="flex flex-col gap-1">
+                      <p className="text-sm font-medium text-foreground">
+                        {requesterName(g.id)}{" "}
+                        <span className="font-normal text-muted-foreground">
+                          · {g.rows.length} request{g.rows.length !== 1 ? "s" : ""}
+                        </span>
+                      </p>
+                      <ul className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+                        {g.rows.map((r) => (
+                          <li key={r.id}>
+                            <Link href={`/requests/${r.id}`} className="text-brand hover:underline">
+                              {r.request_number} · {clientLabel(r)} · {formatDateDDMMYYYY(r.created_at)}
+                            </Link>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
                   ))}
-                </ul>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
+                </CardContent>
+              </Card>
+            </div>
+          ) : null}
+        </div>
       ) : null}
 
-      {requests.length === 0 ? (
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative w-full sm:w-[14rem]">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={numberQuery}
+            onChange={(e) => setNumberQuery(e.target.value)}
+            placeholder="e.g. REQ-26-0004"
+            className="min-h-11 rounded-lg bg-background pl-8 text-base sm:min-h-9 sm:text-sm"
+            aria-label="Search by request number"
+            disabled={loading}
+          />
+        </div>
+        <Select value={statusFilter} onValueChange={setStatusFilter} disabled={loading}>
+          <SelectTrigger className="min-h-11 w-full rounded-lg bg-background text-base sm:min-h-9 sm:w-[12rem] sm:text-sm" aria-label="Filter by status">
+            <SelectValue placeholder="Status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>All statuses</SelectItem>
+            {REQUEST_DISPLAY_STATUSES.map((s: RequestDisplayStatus) => (
+              <SelectItem key={s} value={s}>
+                {DISPLAY_STATUS_LABELS[s]}
+              </SelectItem>
+            ))}
+            <SelectItem value={ATLAS_PENDING}>Atlas link pending</SelectItem>
+          </SelectContent>
+        </Select>
+        {isAdmin ? (
+          <Select value={userFilter} onValueChange={setUserFilter} disabled={loading}>
+            <SelectTrigger className="min-h-11 w-full rounded-lg bg-background text-base sm:min-h-9 sm:w-[12rem] sm:text-sm" aria-label="Filter by requester">
+              <SelectValue placeholder="Requester" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL}>All requesters</SelectItem>
+              {requesters.map((u) => (
+                <SelectItem key={u.id} value={u.id}>
+                  {u.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : null}
+        <Select value={sort} onValueChange={(v) => setSort(v as SortKey)} disabled={loading}>
+          <SelectTrigger className="min-h-11 w-full rounded-lg bg-background text-base sm:min-h-9 sm:w-[12rem] sm:text-sm" aria-label="Sort">
+            <SelectValue placeholder="Sort" />
+          </SelectTrigger>
+          <SelectContent>
+            {(Object.keys(SORT_LABELS) as SortKey[]).map((k) => (
+              <SelectItem key={k} value={k}>
+                {SORT_LABELS[k]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <span className="text-xs text-muted-foreground tabular-nums">
+          {loading ? "…" : `${visible.length} of ${requests.length}`}
+        </span>
+      </div>
+
+      {/* Fixed slot: mobile cards + desktop table, same heights as real lists. */}
+      <div className="min-h-[1040px]">
+      {loading ? (
+        <>
+          <ul className="flex flex-col gap-2 sm:hidden" aria-hidden>
+            {Array.from({ length: 12 }, (_, i) => (
+              <li key={i} className="h-[88px] rounded-xl border border-border bg-card p-3 space-y-2">
+                <Skeleton className="h-4 w-2/3" />
+                <Skeleton className="h-3 w-1/2" />
+                <Skeleton className="h-5 w-20 rounded-full" />
+              </li>
+            ))}
+          </ul>
+          <div className="hidden sm:block">
+            <TableBodySkeleton rows={24} cols={sees ? 7 : 6} />
+          </div>
+        </>
+      ) : requests.length === 0 ? (
         <EmptyState
           message="No stock requests yet."
           action={
@@ -245,69 +350,10 @@ export function StockRequestsList({
             ) : undefined
           }
         />
+      ) : visible.length === 0 ? (
+        <EmptyState message="No requests match these filters." />
       ) : (
         <>
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="relative w-full sm:w-[14rem]">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={numberQuery}
-                onChange={(e) => setNumberQuery(e.target.value)}
-                placeholder="e.g. REQ-26-0004"
-                className="min-h-11 rounded-lg bg-background pl-8 text-base sm:min-h-9 sm:text-sm"
-                aria-label="Search by request number"
-              />
-            </div>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="min-h-11 w-full rounded-lg bg-background text-base sm:min-h-9 sm:w-[12rem] sm:text-sm" aria-label="Filter by status">
-                <SelectValue placeholder="Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL}>All statuses</SelectItem>
-                {REQUEST_DISPLAY_STATUSES.map((s: RequestDisplayStatus) => (
-                  <SelectItem key={s} value={s}>
-                    {DISPLAY_STATUS_LABELS[s]}
-                  </SelectItem>
-                ))}
-                <SelectItem value={ATLAS_PENDING}>Atlas link pending</SelectItem>
-              </SelectContent>
-            </Select>
-            {isAdmin ? (
-              <Select value={userFilter} onValueChange={setUserFilter}>
-                <SelectTrigger className="min-h-11 w-full rounded-lg bg-background text-base sm:min-h-9 sm:w-[12rem] sm:text-sm" aria-label="Filter by requester">
-                  <SelectValue placeholder="Requester" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL}>All requesters</SelectItem>
-                  {requesters.map((u) => (
-                    <SelectItem key={u.id} value={u.id}>
-                      {u.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            ) : null}
-            <Select value={sort} onValueChange={(v) => setSort(v as SortKey)}>
-              <SelectTrigger className="min-h-11 w-full rounded-lg bg-background text-base sm:min-h-9 sm:w-[12rem] sm:text-sm" aria-label="Sort">
-                <SelectValue placeholder="Sort" />
-              </SelectTrigger>
-              <SelectContent>
-                {(Object.keys(SORT_LABELS) as SortKey[]).map((k) => (
-                  <SelectItem key={k} value={k}>
-                    {SORT_LABELS[k]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <span className="text-xs text-muted-foreground tabular-nums">
-              {visible.length} of {requests.length}
-            </span>
-          </div>
-
-          {visible.length === 0 ? (
-            <EmptyState message="No requests match these filters." />
-          ) : (
-            <>
               {/* Phone: cards — no horizontal scroll */}
               <ul className="flex flex-col gap-2 sm:hidden">
                 {visible.map((r) => {
@@ -401,10 +447,9 @@ export function StockRequestsList({
                   </Table>
                 </CardContent>
               </Card>
-            </>
-          )}
         </>
       )}
+      </div>
     </div>
   )
 }
