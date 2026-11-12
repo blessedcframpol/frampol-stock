@@ -14,6 +14,9 @@ export type AppSettings = {
   auditReportRecipientIds: string[]
   problemReportRecipientMigrationSkipped: string[]
   auditReportRecipientMigrationSkipped: string[]
+  unclaimedRequestReminderIntervalMinutes: number
+  unclaimedRequestReminderMaxCount: number
+  unclaimedRequestReminderRecipientIds: string[]
   atlasLinkRequired: boolean
   timezone: string
   updatedAt: string
@@ -68,11 +71,30 @@ export async function fetchAppSettings(provided?: SettingsClient): Promise<AppSe
   const { data, error } = await client(provided)
     .from("app_settings")
     .select(
-      "default_reorder_level, low_stock_emails_enabled, low_stock_recipients, problem_report_recipient_ids, audit_report_recipient_ids, problem_report_recipient_migration_skipped, audit_report_recipient_migration_skipped, atlas_link_required, timezone, updated_at, updated_by"
+      "default_reorder_level, low_stock_emails_enabled, low_stock_recipients, problem_report_recipient_ids, audit_report_recipient_ids, problem_report_recipient_migration_skipped, audit_report_recipient_migration_skipped, unclaimed_request_reminder_interval_minutes, unclaimed_request_reminder_max_count, unclaimed_request_reminder_recipient_ids, atlas_link_required, timezone, updated_at, updated_by"
     )
     .eq("id", true)
     .single()
   if (error) throw error
+  return mapAppSettings(data)
+}
+
+function mapAppSettings(data: {
+  default_reorder_level: number
+  low_stock_emails_enabled: boolean
+  low_stock_recipients: string[]
+  problem_report_recipient_ids: string[] | null
+  audit_report_recipient_ids: string[] | null
+  problem_report_recipient_migration_skipped: string[] | null
+  audit_report_recipient_migration_skipped: string[] | null
+  unclaimed_request_reminder_interval_minutes: number
+  unclaimed_request_reminder_max_count: number
+  unclaimed_request_reminder_recipient_ids: string[] | null
+  atlas_link_required: boolean | null
+  timezone: string
+  updated_at: string
+  updated_by: string | null
+}): AppSettings {
   return {
     defaultReorderLevel: data.default_reorder_level,
     lowStockEmailsEnabled: data.low_stock_emails_enabled,
@@ -81,6 +103,9 @@ export async function fetchAppSettings(provided?: SettingsClient): Promise<AppSe
     auditReportRecipientIds: data.audit_report_recipient_ids ?? [],
     problemReportRecipientMigrationSkipped: data.problem_report_recipient_migration_skipped ?? [],
     auditReportRecipientMigrationSkipped: data.audit_report_recipient_migration_skipped ?? [],
+    unclaimedRequestReminderIntervalMinutes: data.unclaimed_request_reminder_interval_minutes ?? 15,
+    unclaimedRequestReminderMaxCount: data.unclaimed_request_reminder_max_count ?? 3,
+    unclaimedRequestReminderRecipientIds: data.unclaimed_request_reminder_recipient_ids ?? [],
     atlasLinkRequired: data.atlas_link_required ?? true,
     timezone: data.timezone,
     updatedAt: data.updated_at,
@@ -97,6 +122,9 @@ export async function updateAppSettings(
       | "lowStockRecipients"
       | "problemReportRecipientIds"
       | "auditReportRecipientIds"
+      | "unclaimedRequestReminderIntervalMinutes"
+      | "unclaimedRequestReminderMaxCount"
+      | "unclaimedRequestReminderRecipientIds"
       | "timezone"
     >
   >,
@@ -118,6 +146,15 @@ export async function updateAppSettings(
   if (updates.auditReportRecipientIds !== undefined) {
     row.audit_report_recipient_ids = updates.auditReportRecipientIds
   }
+  if (updates.unclaimedRequestReminderIntervalMinutes !== undefined) {
+    row.unclaimed_request_reminder_interval_minutes = updates.unclaimedRequestReminderIntervalMinutes
+  }
+  if (updates.unclaimedRequestReminderMaxCount !== undefined) {
+    row.unclaimed_request_reminder_max_count = updates.unclaimedRequestReminderMaxCount
+  }
+  if (updates.unclaimedRequestReminderRecipientIds !== undefined) {
+    row.unclaimed_request_reminder_recipient_ids = updates.unclaimedRequestReminderRecipientIds
+  }
   if (updates.timezone !== undefined) row.timezone = updates.timezone
 
   const { data, error } = await client(provided)
@@ -125,24 +162,24 @@ export async function updateAppSettings(
     .update(row)
     .eq("id", true)
     .select(
-      "default_reorder_level, low_stock_emails_enabled, low_stock_recipients, problem_report_recipient_ids, audit_report_recipient_ids, problem_report_recipient_migration_skipped, audit_report_recipient_migration_skipped, atlas_link_required, timezone, updated_at, updated_by"
+      "default_reorder_level, low_stock_emails_enabled, low_stock_recipients, problem_report_recipient_ids, audit_report_recipient_ids, problem_report_recipient_migration_skipped, audit_report_recipient_migration_skipped, unclaimed_request_reminder_interval_minutes, unclaimed_request_reminder_max_count, unclaimed_request_reminder_recipient_ids, atlas_link_required, timezone, updated_at, updated_by"
     )
     .single()
   if (error) throw error
   announceSettingsUpdate()
-  return {
-    defaultReorderLevel: data.default_reorder_level,
-    lowStockEmailsEnabled: data.low_stock_emails_enabled,
-    lowStockRecipients: data.low_stock_recipients,
-    problemReportRecipientIds: data.problem_report_recipient_ids ?? [],
-    auditReportRecipientIds: data.audit_report_recipient_ids ?? [],
-    problemReportRecipientMigrationSkipped: data.problem_report_recipient_migration_skipped ?? [],
-    auditReportRecipientMigrationSkipped: data.audit_report_recipient_migration_skipped ?? [],
-    atlasLinkRequired: data.atlas_link_required ?? true,
-    timezone: data.timezone,
-    updatedAt: data.updated_at,
-    updatedBy: data.updated_by,
-  }
+  return mapAppSettings(data)
+}
+
+export async function updateMyAlertSoundPrefs(
+  prefs: { enabled: boolean; soundId: string; volume: number },
+  provided?: SettingsClient,
+): Promise<void> {
+  const { error } = await client(provided).rpc("update_my_alert_sound_prefs", {
+    p_enabled: prefs.enabled,
+    p_sound_id: prefs.soundId,
+    p_volume: prefs.volume,
+  })
+  if (error) throw error
 }
 
 /** Active portal users for report-recipient pickers (admin settings). */

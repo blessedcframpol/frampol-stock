@@ -29,24 +29,23 @@ export const ROLE_LANDING: Record<AppRole, string> = {
 
 /** Sidebar / rail menu items per role (header Notifications bell is separate). */
 export const ROLE_MENU: Record<AppRole, readonly RoleNavItem[]> = {
+  // NT2: rail Notifications removed — top-bell inbox is the single surface.
+  // /notifications stays reachable (SHARED_ALLOWED / EXTRA) for deep links.
   sales: [
     { href: "/requests", label: "My requests" },
     { href: "/requests/new", label: "New request" },
     { href: "/stock", label: "Stock" },
-    { href: "/notifications", label: "Notifications" },
     { href: "/problems/new", label: "Report a problem" },
   ],
   technicians: [
     { href: "/requests", label: "My requests" },
     { href: "/requests/new", label: "New request" },
     { href: "/stock", label: "Stock" },
-    { href: "/notifications", label: "Notifications" },
     { href: "/problems/new", label: "Report a problem" },
   ],
   accounts: [
     { href: "/invoices", label: "Invoices" },
     { href: "/requests", label: "Requests" },
-    { href: "/notifications", label: "Notifications" },
     { href: "/problems/new", label: "Report a problem" },
   ],
   admin: [
@@ -59,7 +58,6 @@ export const ROLE_MENU: Record<AppRole, readonly RoleNavItem[]> = {
     { href: "/clients", label: "Clients" },
     { href: "/requests", label: "Requests", match: "/requests" },
     { href: "/reports", label: "Reports", match: "/reports" },
-    { href: "/notifications", label: "Notifications" },
     { href: "/problems/new", label: "Report a problem" },
   ],
   viewer: [
@@ -72,7 +70,6 @@ export const ROLE_MENU: Record<AppRole, readonly RoleNavItem[]> = {
     { href: "/clients", label: "Clients" },
     { href: "/requests", label: "Requests", match: "/requests" },
     { href: "/reports", label: "Reports", match: "/reports" },
-    { href: "/notifications", label: "Notifications" },
     { href: "/problems/new", label: "Report a problem" },
   ],
 }
@@ -82,6 +79,7 @@ const SHARED_ALLOWED_PREFIXES = [
   "/problems",
   "/pending-role",
   "/settings",
+  "/notifications",
   "/login",
   "/auth",
 ] as const

@@ -42,6 +42,24 @@ run("scripts/test-db-sync-grants.mjs")
 const db = new Client({ connectionString: dbUrl, ssl: { rejectUnauthorized: false } })
 await db.connect()
 try {
+  console.log("\n→ ensure parity extensions (pg_cron, pgcrypto, uuid-ossp, pg_stat_statements)")
+  try {
+    await db.query(`CREATE EXTENSION IF NOT EXISTS pg_cron WITH SCHEMA pg_catalog`)
+    await db.query(`GRANT USAGE ON SCHEMA cron TO postgres`)
+    await db.query(`GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA cron TO postgres`)
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    // Hosted projects often already have pg_cron with locked privileges.
+    if (/dependent privileges exist|already exists/i.test(msg)) {
+      console.log(`  pg_cron skipped (${msg.split("\n")[0]})`)
+    } else {
+      throw e
+    }
+  }
+  await db.query(`CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions`)
+  await db.query(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp" WITH SCHEMA extensions`)
+  await db.query(`CREATE EXTENSION IF NOT EXISTS pg_stat_statements WITH SCHEMA extensions`)
+
   console.log("\n→ revoke anon EXECUTE + seed auth.users + storage + audit_log grants")
   await db.query(`
     DO $$
@@ -120,6 +138,15 @@ try {
     await db.query(sql)
   } else {
     console.log("  NC1 trigger already present")
+  }
+
+  {
+    const sql = fs.readFileSync(
+      path.join(root, "supabase/migrations/20261111120000_nt2_inbox_live_reminders.sql"),
+      "utf8",
+    )
+    console.log("  applying/re-applying NT2 migration (idempotent)…")
+    await db.query(sql)
   }
 } finally {
   await db.end()

@@ -32,7 +32,6 @@ describe("ROLE_MENU labels", () => {
       "My requests",
       "New request",
       "Stock",
-      "Notifications",
       "Report a problem",
     ])
     expect(labels("technicians")).toEqual(labels("sales"))
@@ -42,9 +41,15 @@ describe("ROLE_MENU labels", () => {
     expect(ROLE_MENU.accounts.map((i) => i.label)).toEqual([
       "Invoices",
       "Requests",
-      "Notifications",
       "Report a problem",
     ])
+  })
+
+  it("rail has no Notifications entry (NT2 top-bell inbox)", () => {
+    for (const role of ROLES) {
+      expect(ROLE_MENU[role].some((i) => i.href === "/notifications")).toBe(false)
+      expect(roleCanAccessPath(role, "/notifications")).toBe(true)
+    }
   })
 
   it("admin and viewer include Dashboard and Inventory", () => {

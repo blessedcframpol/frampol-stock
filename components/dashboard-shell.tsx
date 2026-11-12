@@ -17,6 +17,7 @@ import {
   ChevronDown,
   Search,
   Bell,
+  TriangleAlert,
   Menu,
   Moon,
   Sun,
@@ -26,11 +27,8 @@ import {
   LogOut,
   ScrollText,
   UsersRound,
-  Volume2,
-  VolumeX,
   MessageSquareWarning,
   Boxes,
-  BellRing,
   FilePlus,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -80,8 +78,13 @@ import {
   type AppRole,
 } from "@/lib/permissions"
 import { useInboxNotifications } from "@/hooks/use-inbox-notifications"
+import { useStockRequestsRealtime } from "@/hooks/use-stock-requests-realtime"
 import { useAlertFeed } from "@/hooks/use-alert-feed"
 import { notificationHref } from "@/lib/notifications-live"
+import {
+  NOTIFICATION_CHIP_LABELS,
+  type NotificationChip,
+} from "@/lib/notification-categories"
 import { useClients } from "@/lib/clients-store"
 import { useSearchUsers } from "@/lib/supabase/search-users"
 import { runSearch } from "@/lib/search"
@@ -123,13 +126,12 @@ const NAV_ICONS: Record<string, NavIcon> = {
   "/inventory": Package,
   "/transaction-history": History,
   "/invoices": FileText,
-  "/alerts": Bell,
+  "/alerts": TriangleAlert,
   "/clients": Users,
   "/requests": MessageSquare,
   "/requests/new": FilePlus,
   "/reports": BarChart3,
   "/stock": Boxes,
-  "/notifications": BellRing,
   "/problems/new": MessageSquareWarning,
 }
 
@@ -575,9 +577,16 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
     count: inboxCount,
     loading: inboxLoading,
     markRead: markInboxRead,
-    muted: notificationsMuted,
-    setMuted: setNotificationsMuted,
+    chip: inboxChip,
+    setChip: setInboxChip,
+    chipCounts,
+    filteredItems: inboxFiltered,
+    markInboxOpened,
+    isNewSinceOpen,
+    needsSoundGesture,
+    enableSoundGesture,
   } = useInboxNotifications()
+  useStockRequestsRealtime(Boolean(user?.id))
   const alertCounts = feed?.counts
   const totalAlertCount = alertCounts?.all ?? 0
   const alertCount = mounted && !previewRole ? totalAlertCount : 0
@@ -895,7 +904,11 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
 
             <ThemeToggle />
 
-            <Popover>
+            <Popover
+              onOpenChange={(open) => {
+                if (open) markInboxOpened()
+              }}
+            >
               <PopoverTrigger asChild>
                 <Button variant="ghost" size="icon" className="relative size-10 rounded-full text-muted-foreground hover:bg-accent hover:text-foreground">
                   <Bell className="w-[18px] h-[18px]" />
@@ -907,35 +920,45 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                   <span className="sr-only">Notifications</span>
                 </Button>
               </PopoverTrigger>
-              <PopoverContent align="end" className="w-[min(100vw-2rem,400px)] p-0 overflow-hidden" sideOffset={8}>
-                <div className="flex flex-col max-h-[min(420px,80vh)] min-w-0">
+              <PopoverContent align="end" className="w-[min(100vw-2rem,420px)] p-0 overflow-hidden" sideOffset={8}>
+                <div className="flex flex-col max-h-[min(480px,85vh)] min-w-0">
                   <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-border shrink-0">
-                    <h3 className="text-sm font-semibold text-foreground">Notifications</h3>
-                    <div className="flex items-center gap-1">
-                      {inboxCount > 0 ? (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 text-xs text-muted-foreground hover:text-foreground"
-                          onClick={() => void markInboxRead(inboxUnread.map((n) => n.id))}
-                        >
-                          Mark all read
-                        </Button>
-                      ) : null}
+                    <h3 className="text-sm font-semibold text-foreground">Inbox</h3>
+                    {inboxCount > 0 ? (
                       <Button
                         type="button"
                         variant="ghost"
-                        size="icon"
-                        className="size-7 text-muted-foreground hover:text-foreground"
-                        aria-pressed={notificationsMuted}
-                        aria-label={notificationsMuted ? "Unmute notification sound" : "Mute notification sound"}
-                        title={notificationsMuted ? "Notification sound is off" : "Notification sound is on"}
-                        onClick={() => setNotificationsMuted(!notificationsMuted)}
+                        size="sm"
+                        className="h-8 text-xs text-muted-foreground hover:text-foreground"
+                        onClick={() => void markInboxRead(inboxUnread.map((n) => n.id))}
                       >
-                        {notificationsMuted ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
+                        Mark all read
                       </Button>
-                    </div>
+                    ) : null}
+                  </div>
+                  {needsSoundGesture ? (
+                    <button
+                      type="button"
+                      className="border-b border-border bg-muted/40 px-4 py-2 text-left text-xs text-foreground hover:bg-muted/70"
+                      onClick={() => void enableSoundGesture()}
+                    >
+                      Click to enable alert sound
+                    </button>
+                  ) : null}
+                  <div className="flex flex-wrap gap-1.5 border-b border-border px-3 py-2 shrink-0">
+                    {(Object.keys(NOTIFICATION_CHIP_LABELS) as NotificationChip[]).map((key) => (
+                      <Button
+                        key={key}
+                        type="button"
+                        size="sm"
+                        variant={inboxChip === key ? "secondary" : "ghost"}
+                        className="h-8 rounded-md px-2.5 text-xs"
+                        onClick={() => setInboxChip(key)}
+                      >
+                        {NOTIFICATION_CHIP_LABELS[key]}
+                        <span className="ml-1 tabular-nums text-muted-foreground">{chipCounts[key]}</span>
+                      </Button>
+                    ))}
                   </div>
                   <div className="overflow-y-auto flex-1 min-h-0 py-1">
                     {inboxLoading ? (
@@ -943,31 +966,50 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                         <Loader2 className="size-4 animate-spin" />
                         Loading…
                       </div>
-                    ) : inboxUnread.length === 0 ? (
-                      <p className="px-4 py-10 text-center text-sm text-muted-foreground">No unread notifications.</p>
+                    ) : inboxFiltered.length === 0 ? (
+                      <p className="px-4 py-10 text-center text-sm text-muted-foreground">No notifications.</p>
                     ) : (
                       <ul className="px-1">
-                        {inboxUnread.slice(0, 12).map((n) => (
-                          <li key={n.id}>
-                            <Link
-                              href={notificationHref(n)}
-                              className="flex min-h-11 flex-col gap-0.5 rounded-md px-3 py-2.5 text-sm hover:bg-muted/80"
-                              onClick={() => void markInboxRead([n.id])}
-                            >
-                              <span className="flex items-start gap-2 font-medium text-foreground">
-                                <span className="mt-1.5 size-2 shrink-0 rounded-full bg-brand" aria-hidden />
-                                {n.title}
-                              </span>
-                              {n.body ? <span className="pl-4 text-xs text-muted-foreground">{n.body}</span> : null}
-                            </Link>
-                          </li>
-                        ))}
+                        {inboxFiltered.slice(0, 30).map((n) => {
+                          const unreadDot = !n.read_at
+                          const isNew = isNewSinceOpen(n)
+                          return (
+                            <li key={n.id}>
+                              <Link
+                                href={notificationHref(n)}
+                                className="flex min-h-11 flex-col gap-0.5 rounded-md px-3 py-2.5 text-sm hover:bg-muted/80"
+                                onClick={() => {
+                                  if (!n.read_at) void markInboxRead([n.id])
+                                }}
+                              >
+                                <span className="flex items-start gap-2 text-foreground">
+                                  <span
+                                    className={cn(
+                                      "mt-1.5 size-2 shrink-0 rounded-full",
+                                      unreadDot ? "bg-brand" : "bg-transparent",
+                                    )}
+                                    aria-hidden
+                                  />
+                                  <span className={cn("min-w-0 flex-1", unreadDot && "font-semibold")}>
+                                    {n.title}
+                                    {isNew ? (
+                                      <span className="ml-2 text-[10px] font-semibold uppercase tracking-wide text-brand">
+                                        New
+                                      </span>
+                                    ) : null}
+                                  </span>
+                                </span>
+                                {n.body ? <span className="pl-4 text-xs text-muted-foreground">{n.body}</span> : null}
+                              </Link>
+                            </li>
+                          )
+                        })}
                       </ul>
                     )}
                   </div>
                   <div className="border-t border-border px-4 py-2 shrink-0">
                     <Button variant="ghost" size="sm" className="w-full justify-center text-foreground" asChild>
-                      <Link href="/notifications">View all notifications</Link>
+                      <Link href="/notifications">Open full inbox</Link>
                     </Button>
                   </div>
                 </div>

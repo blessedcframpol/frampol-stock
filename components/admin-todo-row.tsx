@@ -1,11 +1,12 @@
 "use client"
 
 import Link from "next/link"
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { ArrowUpRight } from "lucide-react"
 import { useAlertFeed } from "@/hooks/use-alert-feed"
 import { useOrgTimezone } from "@/hooks/use-org-timezone"
 import { useRequestDisplayStatuses } from "@/hooks/use-request-display-statuses"
+import { useRequestQueuesRefresh } from "@/hooks/use-request-queues-refresh"
 import { useAuth } from "@/lib/auth-context"
 import { todayBusinessDate } from "@/lib/business-date.mjs"
 import { ageInDays, formatAgeDays, formatCount } from "@/lib/format-display"
@@ -60,16 +61,21 @@ export function AdminTodoRow() {
   const [inspections, setInspections] = useState<number | null>(null)
   const [problems, setProblems] = useState<number | null>(null)
 
+  const refreshOpenRequests = useCallback(async () => {
+    try {
+      const rows = await fetchLatestOpenRequests(getSupabaseClient(), OPEN_REQUEST_LIMIT)
+      setOpenRequests(rows)
+    } catch {
+      setOpenRequests((prev) => prev ?? [])
+    }
+  }, [])
+
+  // NT2: live To-do counts when stock_requests change (debounced via queues event).
+  useRequestQueuesRefresh(() => void refreshOpenRequests())
+
   useEffect(() => {
     let cancelled = false
     const sb = getSupabaseClient()
-    void fetchLatestOpenRequests(sb, OPEN_REQUEST_LIMIT)
-      .then((rows) => {
-        if (!cancelled) setOpenRequests(rows)
-      })
-      .catch(() => {
-        if (!cancelled) setOpenRequests([])
-      })
     void loadKitCases("open")
       .then((rows) => {
         if (!cancelled) setInspections(rows.length)

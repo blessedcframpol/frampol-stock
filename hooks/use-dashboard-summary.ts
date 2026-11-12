@@ -6,7 +6,6 @@ import {
   ALERTS_UPDATED_EVENT,
   DASHBOARD_REFRESH_EVENT,
 } from "@/lib/alerts"
-import { REQUEST_QUEUES_REFRESH_EVENT } from "@/lib/notifications-live"
 import {
   fetchDashboardSummary,
   type DashboardSummary,
@@ -75,14 +74,13 @@ export function useDashboardSummary(): {
 
   useEffect(() => {
     if (!user?.id) return
+    // NT2: stock_requests Realtime must NOT refetch dashboard summary (inventory stats).
     const onRefresh = () => void refresh({ quiet: true })
     window.addEventListener(DASHBOARD_REFRESH_EVENT, onRefresh)
     window.addEventListener(ALERTS_UPDATED_EVENT, onRefresh)
-    window.addEventListener(REQUEST_QUEUES_REFRESH_EVENT, onRefresh)
     return () => {
       window.removeEventListener(DASHBOARD_REFRESH_EVENT, onRefresh)
       window.removeEventListener(ALERTS_UPDATED_EVENT, onRefresh)
-      window.removeEventListener(REQUEST_QUEUES_REFRESH_EVENT, onRefresh)
     }
   }, [user?.id, refresh])
 

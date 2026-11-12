@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { getSupabaseClient } from "@/lib/supabase/client"
 import { fetchRequestDisplayStatuses } from "@/lib/supabase/stock-requests-db"
+import { REQUEST_QUEUES_REFRESH_EVENT } from "@/lib/notifications-live"
 import {
   displayStatusOrReviewState,
   type RequestDisplayStatus,
@@ -70,13 +71,29 @@ export function clearRequestDisplayStatusCache() {
  * Display status per request id. Starts from the review_state mapping so the first
  * paint is never blank, then upgrades `submitted` rows with request_display_statuses.
  * Concurrent dashboard callers share one RPC (AdminTodo + LatestRequests).
+ *
+ * NT2: stock_requests Realtime can change display status without changing review_state
+ * (still "submitted" after a full issue). Drop cache + re-fetch on queue refresh.
  */
 export function useRequestDisplayStatuses(rows: Row[]): Record<string, RequestDisplayStatus> {
-  const key = useMemo(() => rows.map((r) => `${r.id}:${r.review_state}`).join("|"), [rows])
+  const idsKey = useMemo(() => rows.map((r) => `${r.id}:${r.review_state}`).join("|"), [rows])
+  const [epoch, setEpoch] = useState(0)
+  const key = `${idsKey}|e${epoch}`
   const [resolved, setResolved] = useState<{ key: string; statuses: Record<string, RequestDisplayStatus> }>({
     key: "",
     statuses: {},
   })
+
+  useEffect(() => {
+    const onQueues = () => {
+      for (const r of rows) statusCache.delete(r.id)
+      setEpoch((n) => n + 1)
+    }
+    window.addEventListener(REQUEST_QUEUES_REFRESH_EVENT, onQueues)
+    return () => window.removeEventListener(REQUEST_QUEUES_REFRESH_EVENT, onQueues)
+    // rows identity changes often; idsKey covers membership.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [idsKey])
 
   useEffect(() => {
     if (!key) return

@@ -28,7 +28,6 @@ import { SESSION_EXPIRED_MESSAGE } from "@/lib/unauthorized"
 import { SignedStorageLink } from "@/components/signed-storage-link"
 import { formatCount } from "@/lib/format-display"
 import { ALERTS_UPDATED_EVENT, DASHBOARD_REFRESH_EVENT } from "@/lib/alerts"
-import { REQUEST_QUEUES_REFRESH_EVENT } from "@/lib/notifications-live"
 import { TableBodySkeleton } from "@/components/fs/content-skeletons"
 import { LoadErrorInline } from "@/components/fs/load-error-inline"
 
@@ -76,14 +75,13 @@ export function TransactionsTable() {
   }, [refresh])
 
   useEffect(() => {
+    // NT2: stock_requests Realtime must not refetch recent batches / ledger-adjacent UI.
     const onRefresh = () => void refresh({ quiet: true })
     window.addEventListener(DASHBOARD_REFRESH_EVENT, onRefresh)
     window.addEventListener(ALERTS_UPDATED_EVENT, onRefresh)
-    window.addEventListener(REQUEST_QUEUES_REFRESH_EVENT, onRefresh)
     return () => {
       window.removeEventListener(DASHBOARD_REFRESH_EVENT, onRefresh)
       window.removeEventListener(ALERTS_UPDATED_EVENT, onRefresh)
-      window.removeEventListener(REQUEST_QUEUES_REFRESH_EVENT, onRefresh)
     }
   }, [refresh])
 

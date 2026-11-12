@@ -30,11 +30,21 @@ import {
   fetchProductLineSettings,
   setAtlasLinkRequired,
   updateAppSettings,
+  updateMyAlertSoundPrefs,
   updateProductLineSetting,
   type ActiveStaffProfile,
   type AppSettings,
   type ProductLineSetting,
 } from "@/lib/settings"
+import {
+  ALERT_SOUND_IDS,
+  ALERT_SOUND_LABELS,
+  alertSoundNeedsGesture,
+  playAlertSound,
+  resumeAlertAudio,
+  type AlertSoundId,
+} from "@/lib/alert-sounds"
+import { getSupabaseClient } from "@/lib/supabase/client"
 import { useAuth } from "@/lib/auth-context"
 import { canAccessSettings, canManageUsers, canViewAuditLog } from "@/lib/permissions"
 import { AuditLogPanel } from "@/components/audit-log-panel"
@@ -122,6 +132,13 @@ export function SettingsContent() {
   const [staffProfiles, setStaffProfiles] = useState<ActiveStaffProfile[]>([])
   const [pickProblemUser, setPickProblemUser] = useState("")
   const [pickAuditUser, setPickAuditUser] = useState("")
+  const [pickReminderAdmin, setPickReminderAdmin] = useState("")
+  const [reminderIntervalDraft, setReminderIntervalDraft] = useState("15")
+  const [reminderMaxDraft, setReminderMaxDraft] = useState("3")
+  const [alertEnabled, setAlertEnabled] = useState(false)
+  const [alertSoundId, setAlertSoundId] = useState<AlertSoundId>("chime")
+  const [alertVolume, setAlertVolume] = useState(0.55)
+  const [alertNeedsGesture, setAlertNeedsGesture] = useState(false)
   const [atlasToggleOpen, setAtlasToggleOpen] = useState(false)
   const [atlasToggleNext, setAtlasToggleNext] = useState(true)
   const [atlasToggleReason, setAtlasToggleReason] = useState("")
@@ -136,6 +153,8 @@ export function SettingsContent() {
       setStaffProfiles(staff)
       setSettings(nextSettings)
       setDefaultDraft(String(nextSettings.defaultReorderLevel))
+      setReminderIntervalDraft(String(nextSettings.unclaimedRequestReminderIntervalMinutes))
+      setReminderMaxDraft(String(nextSettings.unclaimedRequestReminderMaxCount))
       setProducts(nextProducts)
       setProductDrafts(
         Object.fromEntries(
@@ -170,6 +189,8 @@ export function SettingsContent() {
         setSettings(nextSettings)
         setStaffProfiles(staff)
         setDefaultDraft(String(nextSettings.defaultReorderLevel))
+        setReminderIntervalDraft(String(nextSettings.unclaimedRequestReminderIntervalMinutes))
+        setReminderMaxDraft(String(nextSettings.unclaimedRequestReminderMaxCount))
         setProducts(nextProducts)
         setProductDrafts(
           Object.fromEntries(
@@ -194,6 +215,29 @@ export function SettingsContent() {
       cancelled = true
     }
   }, [role])
+
+  useEffect(() => {
+    if (!user?.id) return
+    let cancelled = false
+    void getSupabaseClient()
+      .from("profiles")
+      .select("alert_sound_enabled, alert_sound_id, alert_sound_volume")
+      .eq("id", user.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (cancelled || !data) return
+        setAlertEnabled(data.alert_sound_enabled === true)
+        const id = data.alert_sound_id
+        if (id && (ALERT_SOUND_IDS as readonly string[]).includes(id)) {
+          setAlertSoundId(id as AlertSoundId)
+        }
+        setAlertVolume(Number(data.alert_sound_volume ?? 0.55))
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [user?.id])
 
   const inStockByProduct = useMemo(() => {
     const counts = new Map<string, number>()
@@ -270,6 +314,83 @@ export function SettingsContent() {
     const key = kind === "problem" ? "problemReportRecipientIds" : "auditReportRecipientIds"
     const next = (settings?.[key] ?? []).filter((value) => value !== userId)
     await saveAppSettings({ [key]: next }, "Recipient removed")
+  }
+
+  const adminStaff = useMemo(
+    () => staffProfiles.filter((p) => p.role === "admin"),
+    [staffProfiles],
+  )
+
+  async function addReminderRecipient(userId: string) {
+    if (!userId) return
+    const current = settings?.unclaimedRequestReminderRecipientIds ?? []
+    if (current.includes(userId)) {
+      toast.error("That admin is already in the list")
+      return
+    }
+    await saveAppSettings(
+      { unclaimedRequestReminderRecipientIds: [...current, userId] },
+      "Reminder recipient added",
+    )
+    setPickReminderAdmin("")
+  }
+
+  async function removeReminderRecipient(userId: string) {
+    const next = (settings?.unclaimedRequestReminderRecipientIds ?? []).filter((id) => id !== userId)
+    await saveAppSettings({ unclaimedRequestReminderRecipientIds: next }, "Reminder recipient removed")
+  }
+
+  async function saveReminderTiming() {
+    const interval = Number.parseInt(reminderIntervalDraft, 10)
+    const max = Number.parseInt(reminderMaxDraft, 10)
+    if (!Number.isFinite(interval) || interval < 1 || interval > 1440) {
+      toast.error("Interval must be 1–1440 minutes")
+      return
+    }
+    if (!Number.isFinite(max) || max < 1 || max > 50) {
+      toast.error("Max reminders must be 1–50")
+      return
+    }
+    await saveAppSettings(
+      {
+        unclaimedRequestReminderIntervalMinutes: interval,
+        unclaimedRequestReminderMaxCount: max,
+      },
+      "Reminder timing saved",
+    )
+  }
+
+  async function saveAlertPrefs() {
+    setSavingKey("alert-sound")
+    try {
+      await updateMyAlertSoundPrefs({
+        enabled: alertEnabled,
+        soundId: alertSoundId,
+        volume: alertVolume,
+      })
+      toast.success("Alert sound saved")
+    } catch (error) {
+      toastFromCaughtError(error, "Could not save alert sound")
+    } finally {
+      setSavingKey(null)
+    }
+  }
+
+  async function testAlertSound() {
+    if (alertSoundNeedsGesture()) {
+      const ok = await resumeAlertAudio()
+      if (!ok) {
+        setAlertNeedsGesture(true)
+        toast.message("Click the page once, then try Test sound again")
+        return
+      }
+    }
+    setAlertNeedsGesture(false)
+    const result = await playAlertSound(alertSoundId, alertVolume)
+    if (result === "needs_gesture") {
+      setAlertNeedsGesture(true)
+      toast.message("Click to enable alert sound, then try again")
+    }
   }
 
   async function confirmAtlasLinkToggle() {
@@ -385,6 +506,9 @@ export function SettingsContent() {
         >
           <TabsTrigger value="account" className={tabPill}>
             Account
+          </TabsTrigger>
+          <TabsTrigger value="notifications" className={tabPill}>
+            Notifications
           </TabsTrigger>
           <TabsTrigger value="email-alerts" className={tabPill}>
             Email alerts
@@ -519,6 +643,178 @@ export function SettingsContent() {
               </div>
             </div>
           </SettingsSection>
+        </TabsContent>
+
+        <TabsContent value="notifications" className="mt-0 rounded-2xl border border-border bg-card/30 px-4 py-2 md:px-8">
+          <SettingsSection
+            title="Alert sound"
+            description="Plays a sound when a new request needs issuing or a reminder comes in. Off until you turn it on."
+          >
+            <div className="flex flex-col gap-5">
+              {alertNeedsGesture ? (
+                <button
+                  type="button"
+                  className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-left text-sm text-foreground hover:bg-muted/70"
+                  onClick={() => void resumeAlertAudio().then((ok) => setAlertNeedsGesture(!ok))}
+                >
+                  Click to enable alert sound
+                </button>
+              ) : null}
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium text-foreground">Play alert sound</p>
+                  <p className="text-xs text-muted-foreground">Stored on your profile, not this browser only.</p>
+                </div>
+                <Switch checked={alertEnabled} onCheckedChange={setAlertEnabled} />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-sm font-medium text-muted-foreground">Sound</Label>
+                <Select value={alertSoundId} onValueChange={(v) => setAlertSoundId(v as AlertSoundId)}>
+                  <SelectTrigger className="h-11 rounded-lg">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ALERT_SOUND_IDS.map((id) => (
+                      <SelectItem key={id} value={id}>
+                        {ALERT_SOUND_LABELS[id]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label className="text-sm font-medium text-muted-foreground">
+                  Volume ({Math.round(alertVolume * 100)}%)
+                </Label>
+                <Input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={alertVolume}
+                  onChange={(e) => setAlertVolume(Number(e.target.value))}
+                  className="h-11 cursor-pointer"
+                />
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" variant="secondary" onClick={() => void testAlertSound()}>
+                  Test sound
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => void saveAlertPrefs()}
+                  disabled={savingKey === "alert-sound"}
+                >
+                  Save
+                </Button>
+              </div>
+            </div>
+          </SettingsSection>
+
+          {isAdmin ? (
+            <>
+              <SettingsSection
+                title="Unclaimed-request reminders"
+                description="Every 5 minutes on weekdays (07:30–17:30), the people below get a reminder about requests nobody has started issuing."
+              >
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium text-muted-foreground">Interval (minutes)</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={1440}
+                      className="h-11 rounded-lg"
+                      value={reminderIntervalDraft}
+                      onChange={(e) => setReminderIntervalDraft(e.target.value)}
+                      disabled={settingsLoading}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium text-muted-foreground">Max reminders</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={50}
+                      className="h-11 rounded-lg"
+                      value={reminderMaxDraft}
+                      onChange={(e) => setReminderMaxDraft(e.target.value)}
+                      disabled={settingsLoading}
+                    />
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  className="mt-4"
+                  onClick={() => void saveReminderTiming()}
+                  disabled={settingsLoading || savingKey === "app-settings"}
+                >
+                  Save timing
+                </Button>
+              </SettingsSection>
+
+              <SettingsSection
+                title="Reminder recipients"
+                description="Active admins who receive reminder pings. Leave empty to use the usual issuer list for each request type. Does not change who gets new-request notifications."
+              >
+                <div className="space-y-3">
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <Select
+                      value={pickReminderAdmin}
+                      onValueChange={setPickReminderAdmin}
+                      disabled={settingsLoading}
+                    >
+                      <SelectTrigger className="h-11 flex-1 rounded-lg">
+                        <SelectValue placeholder="Choose an active admin…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {adminStaff.map((p) => (
+                          <SelectItem key={p.id} value={p.id}>
+                            {p.displayName?.trim() || p.email}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      className="h-11 shrink-0 rounded-lg"
+                      onClick={() => void addReminderRecipient(pickReminderAdmin)}
+                      disabled={!pickReminderAdmin || savingKey === "app-settings"}
+                    >
+                      <Plus className="mr-1 size-4" />
+                      Add
+                    </Button>
+                  </div>
+                  {(settings?.unclaimedRequestReminderRecipientIds.length ?? 0) > 0 ? (
+                    <ul className="space-y-2">
+                      {settings!.unclaimedRequestReminderRecipientIds.map((id) => (
+                        <li
+                          key={id}
+                          className="flex items-center justify-between gap-2 rounded-lg border border-border/60 bg-muted/30 px-3 py-2.5 text-sm"
+                        >
+                          <span className="text-foreground">{staffLabel(id)}</span>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="text-muted-foreground hover:text-destructive"
+                            onClick={() => void removeReminderRecipient(id)}
+                            disabled={savingKey === "app-settings"}
+                          >
+                            <Trash2 className="size-4" />
+                          </Button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <EmptyState message="No override — reminders go to the usual issuer list." />
+                  )}
+                </div>
+              </SettingsSection>
+            </>
+          ) : null}
         </TabsContent>
 
         <TabsContent value="email-alerts" className="mt-0 rounded-2xl border border-border bg-card/30 px-4 py-2 md:px-8">

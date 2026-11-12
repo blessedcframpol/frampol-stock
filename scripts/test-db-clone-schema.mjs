@@ -65,9 +65,17 @@ async function applyStatements(db, label, statements) {
 async function buildPhases(prod) {
   const phases = []
 
+  // Match production-capable extensions so test-db:reset keeps parity (DB1 / NT2).
   phases.push({
     label: "extensions",
-    statements: ["CREATE EXTENSION IF NOT EXISTS pgcrypto"],
+    statements: [
+      "CREATE EXTENSION IF NOT EXISTS pg_cron WITH SCHEMA pg_catalog",
+      "GRANT USAGE ON SCHEMA cron TO postgres",
+      "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA cron TO postgres",
+      "CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions",
+      'CREATE EXTENSION IF NOT EXISTS "uuid-ossp" WITH SCHEMA extensions',
+      "CREATE EXTENSION IF NOT EXISTS pg_stat_statements WITH SCHEMA extensions",
+    ],
   })
 
   const enums = await prod.query(`
@@ -406,6 +414,8 @@ const softPhases = new Set(["functions", "functions_pass2", "views_pass1"])
 const hard = allFailures.filter((f) => {
   if (/already exists/i.test(f.msg)) return false
   if (softPhases.has(f.phase) && /does not exist/i.test(f.msg)) return false
+  // Hosted pg_cron often errors on CREATE EXTENSION with locked privileges.
+  if (f.phase === "extensions" && /dependent privileges exist/i.test(f.msg)) return false
   return true
 })
 console.log(`Hard failures (excl. multi-pass noise): ${hard.length}`)

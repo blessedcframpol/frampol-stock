@@ -13,6 +13,10 @@ export interface Database {
           audit_report_recipient_ids: string[]
           problem_report_recipient_migration_skipped: string[]
           audit_report_recipient_migration_skipped: string[]
+          unclaimed_request_reminder_interval_minutes: number
+          unclaimed_request_reminder_max_count: number
+          unclaimed_request_reminder_recipient_ids: string[]
+          unclaimed_reminders_live_from: string
           atlas_link_required: boolean
           timezone: string
           internal_client_id: string | null
@@ -28,6 +32,10 @@ export interface Database {
           audit_report_recipient_ids?: string[]
           problem_report_recipient_migration_skipped?: string[]
           audit_report_recipient_migration_skipped?: string[]
+          unclaimed_request_reminder_interval_minutes?: number
+          unclaimed_request_reminder_max_count?: number
+          unclaimed_request_reminder_recipient_ids?: string[]
+          unclaimed_reminders_live_from?: string
           atlas_link_required?: boolean
           timezone?: string
           internal_client_id?: string | null
@@ -43,6 +51,10 @@ export interface Database {
           audit_report_recipient_ids?: string[]
           problem_report_recipient_migration_skipped?: string[]
           audit_report_recipient_migration_skipped?: string[]
+          unclaimed_request_reminder_interval_minutes?: number
+          unclaimed_request_reminder_max_count?: number
+          unclaimed_request_reminder_recipient_ids?: string[]
+          unclaimed_reminders_live_from?: string
           atlas_link_required?: boolean
           timezone?: string
           internal_client_id?: string | null
@@ -50,6 +62,44 @@ export interface Database {
           updated_by?: string | null
         }
         Relationships: []
+      }
+      request_reminders: {
+        Row: {
+          request_id: string
+          sent_count: number
+          last_sent_at: string | null
+          stopped_at: string | null
+          stop_reason: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          request_id: string
+          sent_count?: number
+          last_sent_at?: string | null
+          stopped_at?: string | null
+          stop_reason?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          request_id?: string
+          sent_count?: number
+          last_sent_at?: string | null
+          stopped_at?: string | null
+          stop_reason?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "request_reminders_request_id_fkey"
+            columns: ["request_id"]
+            isOneToOne: true
+            referencedRelation: "stock_requests"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       app_event_logs: {
         Row: {
@@ -1085,6 +1135,9 @@ export interface Database {
           display_name: string | null
           role: string | null
           active: boolean
+          alert_sound_enabled: boolean
+          alert_sound_id: string
+          alert_sound_volume: number
           created_at: string
           updated_at: string
         }
@@ -1094,6 +1147,9 @@ export interface Database {
           display_name?: string | null
           role?: string | null
           active?: boolean
+          alert_sound_enabled?: boolean
+          alert_sound_id?: string
+          alert_sound_volume?: number
           created_at?: string
           updated_at?: string
         }
@@ -1103,6 +1159,9 @@ export interface Database {
           display_name?: string | null
           role?: string | null
           active?: boolean
+          alert_sound_enabled?: boolean
+          alert_sound_id?: string
+          alert_sound_volume?: number
           created_at?: string
           updated_at?: string
         }
@@ -1633,6 +1692,14 @@ export interface Database {
       set_atlas_link_required: {
         Args: { p_required: boolean; p_reason: string }
         Returns: undefined
+      }
+      update_my_alert_sound_prefs: {
+        Args: { p_enabled: boolean; p_sound_id: string; p_volume: number }
+        Returns: undefined
+      }
+      notify_unclaimed_request_reminders: {
+        Args: { p_as_of?: string }
+        Returns: number
       }
       set_request_atlas_link: {
         Args: { p_request_id: string; p_url: string }

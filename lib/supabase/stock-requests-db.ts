@@ -724,6 +724,11 @@ export async function fetchAllNotifications(sb: SB, limit = 50): Promise<AppNoti
   return data ?? []
 }
 
+/** Recent inbox rows for the top-bell (read + unread). */
+export async function fetchInboxNotifications(sb: SB, limit = 40): Promise<AppNotificationRow[]> {
+  return fetchAllNotifications(sb, limit)
+}
+
 export async function markNotificationsRead(sb: SB, ids: string[]): Promise<void> {
   if (ids.length === 0) return
   const { error } = await sb

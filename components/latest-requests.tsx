@@ -186,8 +186,8 @@ export function LatestRequests() {
               )
             })}
             {rows.length === 0 ? (
-              <p className="mt-auto pt-3 text-xs text-muted-foreground">
-                {isAdmin ? "Nothing waiting to issue" : "No other open requests"}
+              <p className="py-6 text-sm text-muted-foreground">
+                {isAdmin ? "Nothing waiting to be issued." : "No other open requests"}
               </p>
             ) : rows.length < PREVIEW_COUNT && !isAdmin ? (
               <p className="mt-auto pt-3 text-xs text-muted-foreground">No other open requests</p>
