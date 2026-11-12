@@ -120,9 +120,8 @@ export function useInboxNotifications(): {
       setAlertPrefs(DEFAULT_ALERT)
       return
     }
-    const soundId = isAlertSoundId(data.alert_sound_id ?? "")
-      ? data.alert_sound_id
-      : DEFAULT_ALERT.soundId
+    const rawSoundId = data.alert_sound_id ?? ""
+    const soundId = isAlertSoundId(rawSoundId) ? rawSoundId : DEFAULT_ALERT.soundId
     setAlertPrefs({
       enabled: data.alert_sound_enabled === true,
       soundId,

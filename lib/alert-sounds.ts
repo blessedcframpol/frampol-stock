@@ -1,5 +1,6 @@
 /**
- * NT2 Web Audio alert presets — no downloaded files.
+ * NT2/NT2b alert presets — Web Audio oscillators plus optional file sounds.
+ * File buffers load lazily on first play for that id (never on page load).
  * Plays for new-request (issuers) and reminder pings only.
  */
 
@@ -9,6 +10,7 @@ export const ALERT_SOUND_IDS = [
   "bright_ping",
   "attention",
   "alarm",
+  "josh",
 ] as const
 
 export type AlertSoundId = (typeof ALERT_SOUND_IDS)[number]
@@ -19,7 +21,16 @@ export const ALERT_SOUND_LABELS: Record<AlertSoundId, string> = {
   bright_ping: "Bright ping",
   attention: "Attention (loud)",
   alarm: "Alarm (loud)",
+  josh: "Josh's alert",
 }
+
+/** File-backed sounds (path under public/). Fetched only when played. */
+const FILE_ALERT_SOUNDS = {
+  josh: "/sounds/josh-alert.mp3",
+} as const satisfies Partial<Record<AlertSoundId, string>>
+
+type FileAlertSoundId = keyof typeof FILE_ALERT_SOUNDS
+type OscillatorSoundId = Exclude<AlertSoundId, FileAlertSoundId>
 
 export function isAlertSoundId(value: string): value is AlertSoundId {
   return (ALERT_SOUND_IDS as readonly string[]).includes(value)
@@ -27,7 +38,7 @@ export function isAlertSoundId(value: string): value is AlertSoundId {
 
 type Tone = { freq: number; start: number; dur: number; type?: OscillatorType; gain?: number }
 
-const PRESETS: Record<AlertSoundId, Tone[]> = {
+const PRESETS: Record<OscillatorSoundId, Tone[]> = {
   chime: [
     { freq: 880, start: 0, dur: 0.18 },
     { freq: 1175, start: 0.14, dur: 0.22 },
@@ -51,6 +62,8 @@ const PRESETS: Record<AlertSoundId, Tone[]> = {
 }
 
 let sharedCtx: AudioContext | null = null
+const fileBufferCache = new Map<string, AudioBuffer>()
+const fileLoadInflight = new Map<string, Promise<AudioBuffer>>()
 
 function getCtx(): AudioContext | null {
   if (typeof window === "undefined") return null
@@ -83,10 +96,9 @@ export async function resumeAlertAudio(): Promise<boolean> {
   return ctx.state === "running"
 }
 
-export async function playAlertSound(
-  soundId: AlertSoundId,
-  volume = 0.55,
-): Promise<"ok" | "needs_gesture" | "unsupported"> {
+async function ensureRunningCtx(): Promise<
+  AudioContext | "needs_gesture" | "unsupported"
+> {
   const ctx = getCtx()
   if (!ctx) return "unsupported"
   if (ctx.state === "suspended") {
@@ -97,7 +109,58 @@ export async function playAlertSound(
     }
   }
   if (ctx.state !== "running") return "needs_gesture"
+  return ctx
+}
 
+async function loadFileBuffer(ctx: AudioContext, url: string): Promise<AudioBuffer> {
+  const cached = fileBufferCache.get(url)
+  if (cached) return cached
+  let pending = fileLoadInflight.get(url)
+  if (!pending) {
+    pending = (async () => {
+      const res = await fetch(url)
+      if (!res.ok) throw new Error(`alert sound fetch failed: ${res.status}`)
+      const raw = await res.arrayBuffer()
+      const buf = await ctx.decodeAudioData(raw.slice(0))
+      fileBufferCache.set(url, buf)
+      fileLoadInflight.delete(url)
+      return buf
+    })().catch((err) => {
+      fileLoadInflight.delete(url)
+      throw err
+    })
+    fileLoadInflight.set(url, pending)
+  }
+  return pending
+}
+
+async function playFileAlertSound(
+  ctx: AudioContext,
+  url: string,
+  volume: number,
+): Promise<"ok" | "unsupported"> {
+  let buffer: AudioBuffer
+  try {
+    buffer = await loadFileBuffer(ctx, url)
+  } catch {
+    return "unsupported"
+  }
+  const master = Math.max(0, Math.min(1, volume))
+  const source = ctx.createBufferSource()
+  const gain = ctx.createGain()
+  source.buffer = buffer
+  gain.gain.value = master
+  source.connect(gain)
+  gain.connect(ctx.destination)
+  source.start(0)
+  return "ok"
+}
+
+function playOscillatorAlertSound(
+  ctx: AudioContext,
+  soundId: OscillatorSoundId,
+  volume: number,
+): "ok" {
   const tones = PRESETS[soundId] ?? PRESETS.chime
   const master = Math.max(0, Math.min(1, volume))
   const now = ctx.currentTime
@@ -122,6 +185,23 @@ export async function playAlertSound(
   }
 
   return "ok"
+}
+
+export async function playAlertSound(
+  soundId: AlertSoundId,
+  volume = 0.55,
+): Promise<"ok" | "needs_gesture" | "unsupported"> {
+  const ctxOrStatus = await ensureRunningCtx()
+  if (ctxOrStatus === "unsupported" || ctxOrStatus === "needs_gesture") {
+    return ctxOrStatus
+  }
+  const ctx = ctxOrStatus
+
+  if (soundId in FILE_ALERT_SOUNDS) {
+    return playFileAlertSound(ctx, FILE_ALERT_SOUNDS[soundId as FileAlertSoundId], volume)
+  }
+
+  return playOscillatorAlertSound(ctx, soundId as OscillatorSoundId, volume)
 }
 
 /** Notification types that should trigger the opted-in alert sound. */
