@@ -40,6 +40,7 @@ import {
   ALERT_SOUND_IDS,
   ALERT_SOUND_LABELS,
   alertSoundNeedsGesture,
+  normalizeAlertSoundId,
   playAlertSound,
   resumeAlertAudio,
   type AlertSoundId,
@@ -227,10 +228,8 @@ export function SettingsContent() {
       .then(({ data }) => {
         if (cancelled || !data) return
         setAlertEnabled(data.alert_sound_enabled === true)
-        const id = data.alert_sound_id
-        if (id && (ALERT_SOUND_IDS as readonly string[]).includes(id)) {
-          setAlertSoundId(id as AlertSoundId)
-        }
+        const normalized = normalizeAlertSoundId(data.alert_sound_id)
+        if (normalized) setAlertSoundId(normalized)
         setAlertVolume(Number(data.alert_sound_volume ?? 0.55))
       })
       .catch(() => undefined)

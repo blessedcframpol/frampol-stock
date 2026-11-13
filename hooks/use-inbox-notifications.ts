@@ -18,7 +18,7 @@ import {
 } from "@/lib/notifications-live"
 import {
   alertSoundNeedsGesture,
-  isAlertSoundId,
+  normalizeAlertSoundId,
   notificationShouldAlert,
   playAlertSound,
   resumeAlertAudio,
@@ -120,8 +120,7 @@ export function useInboxNotifications(): {
       setAlertPrefs(DEFAULT_ALERT)
       return
     }
-    const rawSoundId = data.alert_sound_id ?? ""
-    const soundId = isAlertSoundId(rawSoundId) ? rawSoundId : DEFAULT_ALERT.soundId
+    const soundId = normalizeAlertSoundId(data.alert_sound_id) ?? DEFAULT_ALERT.soundId
     setAlertPrefs({
       enabled: data.alert_sound_enabled === true,
       soundId,

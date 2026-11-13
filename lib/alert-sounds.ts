@@ -1,5 +1,5 @@
 /**
- * NT2/NT2b alert presets — Web Audio oscillators plus optional file sounds.
+ * NT2/NT2c alert presets — Web Audio oscillators plus optional file sounds.
  * File buffers load lazily on first play for that id (never on page load).
  * Plays for new-request (issuers) and reminder pings only.
  */
@@ -10,7 +10,7 @@ export const ALERT_SOUND_IDS = [
   "bright_ping",
   "attention",
   "alarm",
-  "josh",
+  "faaah",
 ] as const
 
 export type AlertSoundId = (typeof ALERT_SOUND_IDS)[number]
@@ -21,12 +21,12 @@ export const ALERT_SOUND_LABELS: Record<AlertSoundId, string> = {
   bright_ping: "Bright ping",
   attention: "Attention (loud)",
   alarm: "Alarm (loud)",
-  josh: "Josh's alert",
+  faaah: "Faaah",
 }
 
 /** File-backed sounds (path under public/). Fetched only when played. */
 const FILE_ALERT_SOUNDS = {
-  josh: "/sounds/josh-alert.mp3",
+  faaah: "/sounds/faaah.mp3",
 } as const satisfies Partial<Record<AlertSoundId, string>>
 
 type FileAlertSoundId = keyof typeof FILE_ALERT_SOUNDS
@@ -34,6 +34,13 @@ type OscillatorSoundId = Exclude<AlertSoundId, FileAlertSoundId>
 
 export function isAlertSoundId(value: string): value is AlertSoundId {
   return (ALERT_SOUND_IDS as readonly string[]).includes(value)
+}
+
+/** Map legacy NT2b stored id `josh` to `faaah`; otherwise validate. */
+export function normalizeAlertSoundId(value: string | null | undefined): AlertSoundId | null {
+  if (!value) return null
+  if (value === "josh") return "faaah"
+  return isAlertSoundId(value) ? value : null
 }
 
 type Tone = { freq: number; start: number; dur: number; type?: OscillatorType; gain?: number }
@@ -196,12 +203,13 @@ export async function playAlertSound(
     return ctxOrStatus
   }
   const ctx = ctxOrStatus
+  const resolved = normalizeAlertSoundId(soundId) ?? "chime"
 
-  if (soundId in FILE_ALERT_SOUNDS) {
-    return playFileAlertSound(ctx, FILE_ALERT_SOUNDS[soundId as FileAlertSoundId], volume)
+  if (resolved in FILE_ALERT_SOUNDS) {
+    return playFileAlertSound(ctx, FILE_ALERT_SOUNDS[resolved as FileAlertSoundId], volume)
   }
 
-  return playOscillatorAlertSound(ctx, soundId as OscillatorSoundId, volume)
+  return playOscillatorAlertSound(ctx, resolved as OscillatorSoundId, volume)
 }
 
 /** Notification types that should trigger the opted-in alert sound. */
