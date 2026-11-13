@@ -27,3 +27,4 @@ _tmp-*
 
 .env.test
 tmp/
+exports/
