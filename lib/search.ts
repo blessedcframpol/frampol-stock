@@ -28,17 +28,43 @@ export function searchInventory(items: InventoryItem[], query: string): Inventor
   )
 }
 
-export function searchClients(clients: Client[], query: string): Client[] {
+export type ContactViaMatch = { clientId: string; contactName: string }
+
+export function searchClients(
+  clients: Client[],
+  query: string,
+  options?: { extraClientIds?: readonly string[]; contactMatches?: readonly ContactViaMatch[] }
+): Client[] {
   const q = normalizeQuery(query)
   if (!q) return clients
+  const extra = new Set(
+    [
+      ...(options?.extraClientIds ?? []),
+      ...(options?.contactMatches ?? []).map((m) => m.clientId),
+    ].filter(Boolean)
+  )
   return clients.filter(
     (c) =>
+      extra.has(c.id) ||
       matchQuery(c.name, q) ||
       matchQuery(c.company, q) ||
       matchQuery(c.email, q) ||
       matchQuery(c.phone, q) ||
       matchQuery(c.id, q)
   )
+}
+
+/** clientId → contact name when the hit came only (or also) via a contact search. */
+export function contactViaByClientId(
+  matches: readonly ContactViaMatch[] | undefined
+): Map<string, string> {
+  const out = new Map<string, string>()
+  for (const m of matches ?? []) {
+    if (m.clientId && m.contactName && !out.has(m.clientId)) {
+      out.set(m.clientId, m.contactName)
+    }
+  }
+  return out
 }
 
 /** Client comboboxes in stock movement / quick scan (empty query → full list). */
@@ -103,7 +129,8 @@ export function searchProducts(items: InventoryItem[], query: string): SearchPro
 export function runSearch(
   data: { inventory: InventoryItem[]; clients: Client[]; users: AppUser[] },
   query: string,
-  entities: readonly SearchEntity[] = ["inventory", "clients", "users"]
+  entities: readonly SearchEntity[] = ["inventory", "clients", "users"],
+  options?: { extraClientIds?: readonly string[]; contactMatches?: readonly ContactViaMatch[] }
 ): SearchResults {
   const q = query.trim()
   const empty: SearchResults = { inventory: [], clients: [], users: [], products: [] }
@@ -111,7 +138,12 @@ export function runSearch(
   const allow = new Set(entities)
   return {
     inventory: allow.has("inventory") ? searchInventory(data.inventory, q) : [],
-    clients: allow.has("clients") ? searchClients(data.clients, q) : [],
+    clients: allow.has("clients")
+      ? searchClients(data.clients, q, {
+          extraClientIds: options?.extraClientIds,
+          contactMatches: options?.contactMatches,
+        })
+      : [],
     users: allow.has("users") ? searchUsers(data.users, q) : [],
     products: allow.has("products") ? searchProducts(data.inventory, q) : [],
   }

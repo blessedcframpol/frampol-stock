@@ -5,6 +5,7 @@ import type { Database, Json } from "./database.types"
 import type { AppSupabaseClient } from "./app-client"
 import { getSupabaseClient } from "./client"
 import { rowToClient } from "./clients-db"
+import { fetchClientContactsByIds, type ClientContact } from "./client-contacts-db"
 import type { Client } from "@/lib/data"
 import {
   displayStatusOrReviewState,
@@ -50,6 +51,7 @@ export type StockRequestLineRow = StockRequestLineDbRow & {
 export type StockRequestWithRelations = StockRequestRow & {
   stock_request_lines: StockRequestLineRow[]
   client?: Pick<Client, "id" | "name" | "company" | "email"> | null
+  contact?: Pick<ClientContact, "id" | "name" | "role" | "email" | "phone" | "active"> | null
 }
 
 const REQUEST_WITH_LINES_SELECT =
@@ -146,11 +148,26 @@ async function fetchClientsById(sb: SB, clientIds: string[]): Promise<Map<string
 
 async function withClients(sb: SB, rows: StockRequestWithLineEmbeds[]): Promise<StockRequestWithRelations[]> {
   const byId = await fetchClientsById(sb, [...new Set(rows.map((r) => r.client_id))])
-  return rows.map((r) => ({
-    ...r,
-    client: byId.get(r.client_id) ?? null,
-    stock_request_lines: normalizeLines(r.stock_request_lines ?? []),
-  }))
+  const contactIds = rows.map((r) => r.contact_id).filter((id): id is string => Boolean(id))
+  const contactsById = await fetchClientContactsByIds(sb, contactIds)
+  return rows.map((r) => {
+    const contact = r.contact_id ? contactsById.get(r.contact_id) ?? null : null
+    return {
+      ...r,
+      client: byId.get(r.client_id) ?? null,
+      contact: contact
+        ? {
+            id: contact.id,
+            name: contact.name,
+            role: contact.role,
+            email: contact.email,
+            phone: contact.phone,
+            active: contact.active,
+          }
+        : null,
+      stock_request_lines: normalizeLines(r.stock_request_lines ?? []),
+    }
+  })
 }
 
 export async function fetchStockRequests(sb: SB): Promise<StockRequestWithRelations[]> {
@@ -262,6 +279,7 @@ export type RequestInvoiceInput = {
 
 export type SubmitRequestInput = RequestInvoiceInput & {
   clientId: string
+  contactId?: string | null
   type: StockRequestType
   returnDate?: string | null
   atlasTaskUrl: string
@@ -287,6 +305,7 @@ async function linesPayload(sb: SB, lines: RequestLineInput[]): Promise<{ produc
 async function requestPayload(sb: SB, input: ResubmitRequestChanges): Promise<Record<string, Json>> {
   const out: Record<string, Json> = {}
   if (input.clientId !== undefined) out.client_id = input.clientId
+  if (input.contactId !== undefined) out.contact_id = input.contactId
   if (input.type !== undefined) out.type = input.type
   if (input.returnDate !== undefined) out.return_date = input.returnDate
   if (input.atlasTaskUrl !== undefined) out.atlas_task_url = input.atlasTaskUrl

@@ -67,6 +67,19 @@ import { toastFromCaughtError } from "@/lib/toast-reportable-error"
 import { AlertCircle, Check, ChevronsUpDown, Loader2, Plus, Trash2 } from "lucide-react"
 import { PageBreadcrumbs } from "@/components/page-breadcrumbs"
 import { ADMIN, canCreateStockRequest } from "@/lib/permissions"
+import {
+  createClientContact,
+  fetchClientContacts,
+  type ClientContact,
+} from "@/lib/supabase/client-contacts-db"
+import {
+  CLIENT_CONTACT_ROLE_LABELS,
+  CLIENT_CONTACT_ROLES,
+  clientContactFieldErrors,
+  formatClientContactLabel,
+  type ClientContactInput,
+  type ClientContactRole,
+} from "@/lib/client-contacts"
 import { availabilityByProductId, fetchStockAvailability, overRequestWarning } from "@/lib/stock-availability"
 import { useEffectiveRole } from "@/lib/dev-role-preview"
 
@@ -167,6 +180,21 @@ export function StockRequestForm({
   const [clientId, setClientId] = useState(() => seed?.client_id ?? "")
   const [clientOpen, setClientOpen] = useState(false)
   const [clientSearch, setClientSearch] = useState("")
+  const [contactId, setContactId] = useState(() => seed?.contact_id ?? "")
+  const [contactOpen, setContactOpen] = useState(false)
+  const [contacts, setContacts] = useState<ClientContact[]>([])
+  const [contactsLoading, setContactsLoading] = useState(false)
+  const [newContactOpen, setNewContactOpen] = useState(false)
+  const [newContact, setNewContact] = useState<ClientContactInput>({
+    name: "",
+    role: "buyer",
+    email: "",
+    phone: "",
+    notes: "",
+    isPrimary: false,
+  })
+  const [newContactErrors, setNewContactErrors] = useState<Record<string, string> | null>(null)
+  const [newContactBusy, setNewContactBusy] = useState(false)
   const [atlasUrl, setAtlasUrl] = useState(() => seed?.atlas_task_url ?? "")
   const [atlasTouched, setAtlasTouched] = useState(false)
   const [notes, setNotes] = useState(() => seed?.notes ?? "")
@@ -219,8 +247,38 @@ export function StockRequestForm({
   }, [clients])
 
   const selectedClient = clients.find((c) => c.id === clientId) ?? null
+  const selectedContact = contacts.find((c) => c.id === contactId) ?? null
   const clientAuto = clientIsAutomatic(invoiceChoice, notInvoicedKind)
   const needsReturnDate = requestTypeNeedsReturnDate(type)
+
+  useEffect(() => {
+    if (!clientId || clientAuto) {
+      setContacts([])
+      setContactId("")
+      return
+    }
+    let cancelled = false
+    setContactsLoading(true)
+    const sb = getSupabaseClient()
+    void fetchClientContacts(sb, clientId)
+      .then((rows) => {
+        if (cancelled) return
+        setContacts(rows)
+        setContactId((prev) => (prev && rows.some((r) => r.id === prev) ? prev : ""))
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setContacts([])
+          setContactId("")
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setContactsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [clientId, clientAuto])
 
   const atlasProblem = atlasTaskUrlProblemWhenRequired(atlasUrl, atlasLinkRequired)
   const returnProblem = returnDateProblem(type, returnDate, today)
@@ -252,6 +310,7 @@ export function StockRequestForm({
       const sb = getSupabaseClient()
       const common = {
         clientId: clientAuto ? "" : clientId,
+        contactId: clientAuto ? null : contactId || null,
         type,
         returnDate: needsReturnDate ? returnDate : null,
         atlasTaskUrl: atlasUrl.trim(),
@@ -477,6 +536,93 @@ export function StockRequestForm({
             {attempted && clientProblem ? <p className="text-sm text-destructive">{clientProblem}</p> : null}
           </div>
 
+          {!clientAuto ? (
+            <div className="flex flex-col gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <Label>Contact (buyer)</Label>
+                {clientId ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setNewContact({
+                        name: "",
+                        role: "buyer",
+                        email: "",
+                        phone: "",
+                        notes: "",
+                        isPrimary: false,
+                      })
+                      setNewContactErrors(null)
+                      setNewContactOpen(true)
+                    }}
+                    disabled={busy || !clientId}
+                  >
+                    <Plus className="size-3.5 mr-1" />
+                    Add contact
+                  </Button>
+                ) : null}
+              </div>
+              <Popover open={contactOpen} onOpenChange={setContactOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={contactOpen}
+                    className="min-h-11 w-full justify-between font-normal bg-card text-base sm:text-sm"
+                    disabled={busy || !clientId || contactsLoading}
+                  >
+                    <span className={cn("truncate", !selectedContact && "text-muted-foreground")}>
+                      {!clientId
+                        ? "Pick a client first"
+                        : contactsLoading
+                          ? "Loading contacts…"
+                          : selectedContact
+                            ? formatClientContactLabel(selectedContact)
+                            : "Optional — choose buyer contact…"}
+                    </span>
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-0 max-w-[calc(100vw-2rem)] sm:min-w-[300px] p-0" align="start">
+                  <Command>
+                    <CommandInput placeholder="Filter contacts…" />
+                    <CommandList>
+                      <CommandEmpty>No contacts for this client.</CommandEmpty>
+                      <CommandGroup>
+                        <CommandItem
+                          value="none"
+                          onSelect={() => {
+                            setContactId("")
+                            setContactOpen(false)
+                          }}
+                        >
+                          <Check className={cn("mr-2 size-4", !contactId ? "opacity-100" : "opacity-0")} />
+                          No contact
+                        </CommandItem>
+                        {contacts.map((c) => (
+                          <CommandItem
+                            key={c.id}
+                            value={formatClientContactLabel(c)}
+                            onSelect={() => {
+                              setContactId(c.id)
+                              setContactOpen(false)
+                            }}
+                          >
+                            <Check className={cn("mr-2 size-4", c.id === contactId ? "opacity-100" : "opacity-0")} />
+                            {formatClientContactLabel(c)}
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+            </div>
+          ) : null}
+
           <div className="flex flex-col gap-2">
             <Label htmlFor="rq-atlas">
               Atlas task link{!atlasLinkRequired ? " (optional while Atlas is down)" : ""}
@@ -649,6 +795,98 @@ export function StockRequestForm({
         onCancel={() => nc1.setDupOpen(false)}
         busy={nc1.busy}
       />
+
+      <Dialog open={newContactOpen} onOpenChange={setNewContactOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add contact</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-3 py-1">
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="rq-cc-name">Name</Label>
+              <Input
+                id="rq-cc-name"
+                value={newContact.name}
+                onChange={(e) => setNewContact((f) => ({ ...f, name: e.target.value }))}
+                disabled={newContactBusy}
+              />
+              {newContactErrors?.name ? <p className="text-sm text-destructive">{newContactErrors.name}</p> : null}
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="rq-cc-role">Role</Label>
+              <Select
+                value={newContact.role || "buyer"}
+                onValueChange={(v) => setNewContact((f) => ({ ...f, role: v as ClientContactRole }))}
+                disabled={newContactBusy}
+              >
+                <SelectTrigger id="rq-cc-role">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {CLIENT_CONTACT_ROLES.map((r) => (
+                    <SelectItem key={r} value={r}>
+                      {CLIENT_CONTACT_ROLE_LABELS[r]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="rq-cc-email">Email</Label>
+              <Input
+                id="rq-cc-email"
+                type="email"
+                value={newContact.email}
+                onChange={(e) => setNewContact((f) => ({ ...f, email: e.target.value }))}
+                disabled={newContactBusy}
+              />
+              {newContactErrors?.email ? <p className="text-sm text-destructive">{newContactErrors.email}</p> : null}
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="rq-cc-phone">Phone</Label>
+              <Input
+                id="rq-cc-phone"
+                value={newContact.phone}
+                onChange={(e) => setNewContact((f) => ({ ...f, phone: e.target.value }))}
+                disabled={newContactBusy}
+              />
+              {newContactErrors?.phone ? <p className="text-sm text-destructive">{newContactErrors.phone}</p> : null}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setNewContactOpen(false)} disabled={newContactBusy}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              disabled={newContactBusy || !clientId}
+              onClick={() => {
+                void (async () => {
+                  const errors = clientContactFieldErrors(newContact)
+                  setNewContactErrors(errors)
+                  if (errors || !clientId) return
+                  setNewContactBusy(true)
+                  try {
+                    const sb = getSupabaseClient()
+                    const created = await createClientContact(sb, clientId, newContact)
+                    setContacts((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)))
+                    setContactId(created.id)
+                    setNewContactOpen(false)
+                    toast.success("Contact added.")
+                  } catch (e) {
+                    toastFromCaughtError(e, "Could not add contact")
+                  } finally {
+                    setNewContactBusy(false)
+                  }
+                })()
+              }}
+            >
+              {newContactBusy ? <Loader2 className="size-4 animate-spin mr-2" /> : null}
+              Add
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

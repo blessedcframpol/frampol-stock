@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useMemo, useState } from "react"
+import { useContactSearchMatches } from "@/hooks/use-contact-search-client-ids"
 import Link from "next/link"
 import { useSearchParams, useRouter } from "next/navigation"
 import { Card, CardContent } from "@/components/ui/card"
@@ -15,7 +16,7 @@ import { useClients } from "@/lib/clients-store"
 import { useSearchUsers } from "@/lib/supabase/search-users"
 import { useEffectiveRole } from "@/lib/dev-role-preview"
 import { roleSearchEntities } from "@/lib/role-pages"
-import { runSearch, type SearchResults } from "@/lib/search"
+import { contactViaByClientId, runSearch, type SearchResults } from "@/lib/search"
 import { clientCompanyDetail } from "@/lib/client-label"
 import {
   Search,
@@ -46,14 +47,20 @@ export function SearchResultsContent() {
   const { inventory } = useInventoryStore()
   const { clients } = useClients()
   const users = useSearchUsers()
+  const contactMatches = useContactSearchMatches(
+    qFromUrl,
+    searchEntities.includes("clients") || searchEntities.length === 0
+  )
+  const viaByClient = useMemo(() => contactViaByClientId(contactMatches), [contactMatches])
 
   const results = useMemo<SearchResults>(() => {
     return runSearch(
       { inventory, clients, users },
       qFromUrl,
-      searchEntities.length > 0 ? searchEntities : ["inventory", "clients", "users"]
+      searchEntities.length > 0 ? searchEntities : ["inventory", "clients", "users"],
+      { contactMatches }
     )
-  }, [inventory, clients, users, qFromUrl, searchEntities])
+  }, [inventory, clients, users, qFromUrl, searchEntities, contactMatches])
 
   const totalCount =
     results.inventory.length +
@@ -199,6 +206,7 @@ export function SearchResultsContent() {
                     </div>
                     <ul className="divide-y divide-border">
                       {results.clients.map((client) => {
+                        const via = viaByClient.get(client.id)
                         const detail = [clientCompanyDetail(client), client.email].filter(Boolean).join(" · ")
                         return (
                         <li key={client.id}>
@@ -212,6 +220,9 @@ export function SearchResultsContent() {
                               </p>
                               {detail ? (
                                 <p className="text-sm text-muted-foreground truncate">{detail}</p>
+                              ) : null}
+                              {via ? (
+                                <p className="text-xs text-muted-foreground truncate">via contact {via}</p>
                               ) : null}
                             </div>
                             <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />

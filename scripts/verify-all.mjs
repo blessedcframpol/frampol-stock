@@ -58,6 +58,7 @@ const SUITE = [
   { id: "095", file: "scripts/verify-095-at1-atlas-outage.mjs" },
   { id: "096", file: "scripts/verify-096-nc1-client-complete.mjs" },
   { id: "097", file: "scripts/verify-097-nt2-inbox-reminders.mjs" },
+  { id: "098", file: "scripts/verify-098-ct1-client-contacts.mjs" },
   { id: "movement", file: "scripts/verify-movement-transitions.mjs" },
 ]
 

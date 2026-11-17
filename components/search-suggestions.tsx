@@ -15,6 +15,8 @@ export interface SearchSuggestionsProps {
   query: string
   /** Full search results; caller runs runSearch(inventory, clients, users, query) */
   results: SearchResults
+  /** clientId → contact name when the hit came via a contact search */
+  viaContactByClientId?: Map<string, string>
   /** Called when user chooses "See all results" */
   onSeeAll?: () => void
   /** Destination for "See all" (role-scoped; omit to hide the link). */
@@ -28,6 +30,7 @@ export interface SearchSuggestionsProps {
 export function SearchSuggestions({
   query,
   results,
+  viaContactByClientId,
   onSeeAll,
   seeAllHref,
   className,
@@ -147,28 +150,36 @@ export function SearchSuggestions({
             Clients
           </p>
           <ul className="space-y-0.5">
-            {cli.map((client) => (
+            {cli.map((client) => {
+              const via = viaContactByClientId?.get(client.id)
+              return (
               <li key={client.id}>
                 <Link
                   href={`/clients/${client.id}`}
                   className={cn(
-                    "flex items-center justify-between gap-2 rounded-md transition-colors text-left",
+                    "flex flex-col gap-0.5 rounded-md transition-colors text-left",
                     compact
                       ? "px-2 py-1.5 text-sm hover:bg-muted/70"
                       : "px-2 py-2 text-sm hover:bg-muted/70"
                   )}
                 >
-                  <span className="truncate font-medium text-foreground">
-                    {client.name}
-                  </span>
-                  {clientCompanyDetail(client) ? (
-                    <span className="text-muted-foreground text-xs truncate max-w-[140px]">
-                      {clientCompanyDetail(client)}
+                  <span className="flex items-center justify-between gap-2 min-w-0">
+                    <span className="truncate font-medium text-foreground">
+                      {client.name}
                     </span>
+                    {clientCompanyDetail(client) ? (
+                      <span className="text-muted-foreground text-xs truncate max-w-[140px]">
+                        {clientCompanyDetail(client)}
+                      </span>
+                    ) : null}
+                  </span>
+                  {via ? (
+                    <span className="text-xs text-muted-foreground truncate">via contact {via}</span>
                   ) : null}
                 </Link>
               </li>
-            ))}
+              )
+            })}
           </ul>
         </div>
       )}

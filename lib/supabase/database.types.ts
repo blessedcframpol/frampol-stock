@@ -279,6 +279,7 @@ export interface Database {
           id: string
           request_number: string
           client_id: string
+          contact_id: string | null
           created_by: string
           review_state: string
           type: string
@@ -317,6 +318,7 @@ export interface Database {
           id?: string
           request_number?: string
           client_id: string
+          contact_id?: string | null
           created_by: string
           review_state?: string
           type: string
@@ -355,6 +357,7 @@ export interface Database {
           id?: string
           request_number?: string
           client_id?: string
+          contact_id?: string | null
           created_by?: string
           review_state?: string
           type?: string
@@ -390,6 +393,13 @@ export interface Database {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "stock_requests_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "client_contacts"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "stock_requests_client_id_fkey"
             columns: ["client_id"]
@@ -929,6 +939,59 @@ export interface Database {
           duplicate_override_reason?: string | null
         }
         Relationships: []
+      }
+      client_contacts: {
+        Row: {
+          id: string
+          client_id: string
+          name: string
+          role: string
+          email: string | null
+          phone: string | null
+          is_primary: boolean
+          active: boolean
+          notes: string | null
+          created_by: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          client_id: string
+          name: string
+          role: string
+          email?: string | null
+          phone?: string | null
+          is_primary?: boolean
+          active?: boolean
+          notes?: string | null
+          created_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          client_id?: string
+          name?: string
+          role?: string
+          email?: string | null
+          phone?: string | null
+          is_primary?: boolean
+          active?: boolean
+          notes?: string | null
+          created_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "client_contacts_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       batch_reversals: {
         Row: {

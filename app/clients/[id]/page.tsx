@@ -90,6 +90,8 @@ import {
   TableBodySkeleton,
 } from "@/components/fs/content-skeletons"
 import { LoadErrorInline } from "@/components/fs/load-error-inline"
+import { ClientContactsCard } from "@/components/client-contacts-card"
+import { ADMIN, SALES, TECHNICIANS } from "@/lib/permissions"
 
 type ConsignmentRow = {
   kind: "consignment"
@@ -115,6 +117,7 @@ export default function ClientDetailPage() {
   const { role } = useAuth()
   const showFinancials = canViewFinancials(role)
   const canEdit = canEditClients(role)
+  const canAddContacts = role === ADMIN || role === SALES || role === TECHNICIANS
   const {
     clients,
     isLoading: clientsLoading,
@@ -759,48 +762,51 @@ export default function ClientDetailPage() {
             </Card>
           </TabsContent>
         </Tabs>
-        <Card className="w-full lg:sticky lg:top-4 lg:w-[320px]">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Contact</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-4 text-sm">
-            {emails.length > 0 ? (
-              <div className="flex flex-col gap-1">
-                {emails.map((email) => (
-                  <a key={email} href={`mailto:${email}`} className="inline-flex items-center gap-2 break-words hover:text-foreground text-muted-foreground">
-                    <Mail className="size-4 shrink-0" />
-                    {email}
-                  </a>
-                ))}
-              </div>
-            ) : null}
-            {phone ? (
-              <a href={`tel:${phone.replace(/\s/g, "")}`} className="inline-flex items-center gap-2 text-muted-foreground hover:text-foreground">
-                <Phone className="size-4 shrink-0" />
-                {phone}
-              </a>
-            ) : null}
-            {sites.length > 0 ? (
-              <div>
-                <p className="mb-1 text-xs font-medium text-muted-foreground">Sites</p>
-                <ul className="space-y-2 text-muted-foreground">
-                  {sites.map((site) => (
-                    <li key={`${site.name ?? ""}-${site.address}`} className="flex items-start gap-2">
-                      <MapPin className="mt-0.5 size-4 shrink-0" />
-                      <span className="break-words">
-                        {site.name ? <span className="font-medium text-foreground">{site.name}: </span> : null}
-                        {site.address}
-                      </span>
-                    </li>
+        <div className="flex w-full flex-col gap-4 lg:sticky lg:top-4 lg:w-[320px]">
+          <Card className="w-full">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Main contact details</CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-4 text-sm">
+              {emails.length > 0 ? (
+                <div className="flex flex-col gap-1">
+                  {emails.map((email) => (
+                    <a key={email} href={`mailto:${email}`} className="inline-flex items-center gap-2 break-words hover:text-foreground text-muted-foreground">
+                      <Mail className="size-4 shrink-0" />
+                      {email}
+                    </a>
                   ))}
-                </ul>
-              </div>
-            ) : null}
-            {emails.length === 0 && !phone && sites.length === 0 ? (
-              <p className="text-muted-foreground">No contact details.</p>
-            ) : null}
-          </CardContent>
-        </Card>
+                </div>
+              ) : null}
+              {phone ? (
+                <a href={`tel:${phone.replace(/\s/g, "")}`} className="inline-flex items-center gap-2 text-muted-foreground hover:text-foreground">
+                  <Phone className="size-4 shrink-0" />
+                  {phone}
+                </a>
+              ) : null}
+              {sites.length > 0 ? (
+                <div>
+                  <p className="mb-1 text-xs font-medium text-muted-foreground">Sites</p>
+                  <ul className="space-y-2 text-muted-foreground">
+                    {sites.map((site) => (
+                      <li key={`${site.name ?? ""}-${site.address}`} className="flex items-start gap-2">
+                        <MapPin className="mt-0.5 size-4 shrink-0" />
+                        <span className="break-words">
+                          {site.name ? <span className="font-medium text-foreground">{site.name}: </span> : null}
+                          {site.address}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              {emails.length === 0 && !phone && sites.length === 0 ? (
+                <p className="text-muted-foreground">No contact details.</p>
+              ) : null}
+            </CardContent>
+          </Card>
+          <ClientContactsCard clientId={id} canEdit={canEdit} canAdd={canAddContacts} />
+        </div>
         </div>
       </div>
 

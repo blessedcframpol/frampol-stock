@@ -87,7 +87,8 @@ import {
 } from "@/lib/notification-categories"
 import { useClients } from "@/lib/clients-store"
 import { useSearchUsers } from "@/lib/supabase/search-users"
-import { runSearch } from "@/lib/search"
+import { contactViaByClientId, runSearch } from "@/lib/search"
+import { useContactSearchMatches } from "@/hooks/use-contact-search-client-ids"
 import { SearchSuggestions } from "@/components/search-suggestions"
 import { PageBreadcrumbProvider, PageBreadcrumbSlot } from "@/components/page-breadcrumbs"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -548,6 +549,14 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const { clients } = useClients({
     enabled: role == null || searchEntities.includes("clients"),
   })
+  const contactMatches = useContactSearchMatches(
+    searchQuery,
+    searchQuery.trim().length > 0 && searchEntities.includes("clients")
+  )
+  const contactViaByClient = useMemo(
+    () => contactViaByClientId(contactMatches),
+    [contactMatches]
+  )
   // Ledger only when the header search needs inventory matches (not on every page).
   const ledgerForSearch =
     searchQuery.trim().length > 0 && searchEntities.includes("inventory")
@@ -620,9 +629,10 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
       runSearch(
         { inventory, clients, users },
         searchQuery,
-        searchEntities
+        searchEntities,
+        { contactMatches }
       ),
-    [inventory, clients, users, searchQuery, searchEntities]
+    [inventory, clients, users, searchQuery, searchEntities, contactMatches]
   )
 
   const searchSeeAllHref = useMemo(() => {
@@ -825,6 +835,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                 <SearchSuggestions
                   query={searchQuery}
                   results={searchSuggestions}
+                  viaContactByClientId={contactViaByClient}
                   compact
                   seeAllHref={searchSeeAllHref}
                   onSeeAll={() => setMobileSearchOpen(false)}
@@ -878,6 +889,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                   <SearchSuggestions
                     query={searchQuery}
                     results={searchSuggestions}
+                    viaContactByClientId={contactViaByClient}
                     seeAllHref={searchSeeAllHref}
                     onSeeAll={() => setSearchQuery("")}
                   />

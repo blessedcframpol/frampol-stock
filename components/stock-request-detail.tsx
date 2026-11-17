@@ -44,6 +44,7 @@ import {
 } from "@/lib/permissions"
 import { getSupabaseClient } from "@/lib/supabase/client"
 import { formatClientLabel } from "@/lib/client-label"
+import { formatBuyerHeader, formatClientContactLabel } from "@/lib/client-contacts"
 import {
   approveNotInvoiced,
   cancelRequest,
@@ -440,7 +441,8 @@ export function StockRequestDetail({ requestId }: { requestId: string }) {
               {row.atlas_link_pending ? <AtlasLinkPendingPill /> : null}
             </div>
             <p className="text-sm text-muted-foreground mt-1">
-              {row.client ? formatClientLabel(row.client) : row.client_id} · Created{" "}
+              {row.client ? formatClientLabel(row.client) : row.client_id}
+              {row.contact ? ` · ${formatBuyerHeader(row.contact)}` : ""} · Created{" "}
               {formatDateDDMMYYYY(row.created_at)}
               {bundle.requesterLabel ? ` by ${bundle.requesterLabel}` : ""}
             </p>
@@ -534,6 +536,12 @@ export function StockRequestDetail({ requestId }: { requestId: string }) {
             <p className="text-xs text-muted-foreground">Type</p>
             <p>{row.type}</p>
           </div>
+          {row.contact ? (
+            <div>
+              <p className="text-xs text-muted-foreground">Buyer</p>
+              <p>{formatClientContactLabel(row.contact)}</p>
+            </div>
+          ) : null}
           {row.return_date ? (
             <div>
               <p className="text-xs text-muted-foreground">Return date</p>
