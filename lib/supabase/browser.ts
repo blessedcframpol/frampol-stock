@@ -42,6 +42,8 @@ function createPkceBrowserClient(): SupabaseClient<Database> {
       detectSessionInUrl: false,
       storage: getBrowserAuthStorage(),
     },
+    // RT1: heartbeats off the main thread so background tabs keep Realtime alive.
+    realtime: { worker: true },
   })
 }
 

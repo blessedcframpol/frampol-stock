@@ -451,6 +451,27 @@ export interface Database {
           },
         ]
       }
+      live_stock_events: {
+        Row: {
+          id: string
+          batch_id: string
+          movement_type: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          batch_id: string
+          movement_type: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          batch_id?: string
+          movement_type?: string
+          created_at?: string
+        }
+        Relationships: []
+      }
       notifications: {
         Row: {
           id: string

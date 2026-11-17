@@ -13,6 +13,7 @@ import { useAuth } from "@/lib/auth-context"
 import {
   announceNotificationsInbox,
   announceRequestQueuesRefresh,
+  NOTIFICATIONS_INBOX_EVENT,
   notificationHref,
   showBrowserNotification,
 } from "@/lib/notifications-live"
@@ -24,6 +25,7 @@ import {
   resumeAlertAudio,
   type AlertSoundId,
 } from "@/lib/alert-sounds"
+import { REALTIME_CATCHUP_EVENT } from "@/lib/realtime-live"
 import {
   matchesNotificationChip,
   type NotificationChip,
@@ -157,14 +159,34 @@ export function useInboxNotifications(): {
     const onVisible = () => {
       if (document.visibilityState === "visible") void refetch()
     }
+    const onCatchup = () => void refetch()
     document.addEventListener("visibilitychange", onVisible)
     window.addEventListener("focus", onVisible)
+    window.addEventListener(REALTIME_CATCHUP_EVENT, onCatchup)
+    window.addEventListener(NOTIFICATIONS_INBOX_EVENT, onCatchup)
     return () => {
       window.clearInterval(id)
       document.removeEventListener("visibilitychange", onVisible)
       window.removeEventListener("focus", onVisible)
+      window.removeEventListener(REALTIME_CATCHUP_EVENT, onCatchup)
+      window.removeEventListener(NOTIFICATIONS_INBOX_EVENT, onCatchup)
     }
   }, [refetch])
+
+  // RT1: unlock Web Audio on the first click or keypress anywhere.
+  useEffect(() => {
+    const unlock = () => {
+      void resumeAlertAudio().then((ok) => {
+        if (ok) setNeedsSoundGesture(false)
+      })
+    }
+    window.addEventListener("pointerdown", unlock, { once: true, capture: true })
+    window.addEventListener("keydown", unlock, { once: true, capture: true })
+    return () => {
+      window.removeEventListener("pointerdown", unlock, true)
+      window.removeEventListener("keydown", unlock, true)
+    }
+  }, [])
 
   useEffect(() => {
     const sb = getSb()

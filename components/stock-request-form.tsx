@@ -81,6 +81,7 @@ import {
   type ClientContactRole,
 } from "@/lib/client-contacts"
 import { availabilityByProductId, fetchStockAvailability, overRequestWarning } from "@/lib/stock-availability"
+import { LIVE_STOCK_BATCH_EVENT, REALTIME_CATCHUP_EVENT } from "@/lib/realtime-live"
 import { useEffectiveRole } from "@/lib/dev-role-preview"
 
 type LineDraft = {
@@ -170,6 +171,29 @@ export function StockRequestForm({
       })
     return () => {
       cancelled = true
+    }
+  }, [canCreate])
+
+  // RT1: refresh availability in place — never reset lines/selection.
+  useEffect(() => {
+    if (!canCreate) return
+    let cancelled = false
+    const refreshAvailability = () => {
+      void fetchStockAvailability()
+        .then((rows) => {
+          if (cancelled) return
+          setAvailability(availabilityByProductId(rows))
+        })
+        .catch(() => {
+          // Keep last known counts on quiet refresh failure.
+        })
+    }
+    window.addEventListener(REALTIME_CATCHUP_EVENT, refreshAvailability)
+    window.addEventListener(LIVE_STOCK_BATCH_EVENT, refreshAvailability)
+    return () => {
+      cancelled = true
+      window.removeEventListener(REALTIME_CATCHUP_EVENT, refreshAvailability)
+      window.removeEventListener(LIVE_STOCK_BATCH_EVENT, refreshAvailability)
     }
   }, [canCreate])
 

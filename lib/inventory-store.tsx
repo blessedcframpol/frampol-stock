@@ -33,6 +33,16 @@ import type { Database } from "./supabase/database.types"
 import { businessDateToIso, DEFAULT_ORG_TIMEZONE } from "./business-date.mjs"
 import { fetchAppSettings } from "./settings"
 import { fetchInvoiceStates, withInvoiceStates } from "./supabase/invoices-db"
+import {
+  LIVE_STOCK_BATCH_EVENT,
+  LIVE_STOCK_CATCHUP_MAX_GAP_MS,
+  REALTIME_CATCHUP_EVENT,
+  clearLiveStockEventWatermark,
+  getLastLiveStockEventAt,
+  noteLiveStockEventsApplied,
+  seedLiveStockEventWatermark,
+  type LiveStockBatchDetail,
+} from "./realtime-live"
 
 function generateId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
@@ -202,6 +212,8 @@ interface InventoryStoreValue {
   /** Load if idle / stale; shares one in-flight request. */
   ensureLoaded: () => Promise<void>
   refetchLedger: (opts?: { isStale?: () => boolean }) => Promise<void>
+  /** RT1: merge inventory + transactions for the given batch ids only (no full reload). */
+  mergeBatchesIntoLedger: (batchIds: string[]) => Promise<void>
   updateItem: (id: string, updates: Partial<InventoryItem>, reason: string) => Promise<void>
   softDeleteItem: (id: string) => Promise<{ ok: boolean; error?: string }>
   restoreItem: (id: string) => Promise<{ ok: boolean; error?: string }>
@@ -296,6 +308,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
     lastFetchedAt.current = 0
     wantedRef.current = false
     ledgerInflight = null
+    clearLiveStockEventWatermark()
   }
 
   const runFetch = useCallback(
@@ -320,6 +333,25 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
         setTransactions(payload.transactions)
         setHasLoaded(true)
         lastFetchedAt.current = Date.now()
+        // Watermark: newest live_stock_events row, else "now" so catch-up is incremental.
+        if (supabase) {
+          void supabase
+            .from("live_stock_events")
+            .select("created_at")
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle()
+            .then(({ data }) => {
+              seedLiveStockEventWatermark(
+                data && typeof data.created_at === "string" ? data.created_at : null,
+              )
+            })
+            .catch(() => {
+              seedLiveStockEventWatermark(null)
+            })
+        } else {
+          seedLiveStockEventWatermark(null)
+        }
       } catch (error) {
         console.error("refetchLedger:", error)
       } finally {
@@ -342,15 +374,141 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
     [runFetch]
   )
 
+  const mergeBatchesIntoLedger = useCallback(
+    async (batchIds: string[], maxCreatedAt?: string | null) => {
+      if (!supabase || !hasLoaded) return
+      const ids = [...new Set(batchIds.map((id) => id.trim()).filter(Boolean))]
+      if (ids.length === 0) {
+        if (maxCreatedAt) noteLiveStockEventsApplied(maxCreatedAt)
+        return
+      }
+      try {
+        // batch_id is preferred; trigger falls back to transaction id when batch_id is null.
+        const [byBatch, byIdRows] = await Promise.all([
+          fetchAllPages((from, to) =>
+            supabase
+              .from("transactions")
+              .select("*")
+              .in("batch_id", ids)
+              .order("id", { ascending: true })
+              .range(from, to),
+          ),
+          fetchAllPages((from, to) =>
+            supabase
+              .from("transactions")
+              .select("*")
+              .in("id", ids)
+              .order("id", { ascending: true })
+              .range(from, to),
+          ),
+        ])
+        const byTxnId = new Map<string, (typeof byBatch)[number]>()
+        for (const row of [...byBatch, ...byIdRows]) byTxnId.set(row.id, row)
+        const rows = Array.from(byTxnId.values())
+        const serials = [
+          ...new Set(
+            rows
+              .map((row) => (typeof row.serial_number === "string" ? row.serial_number.trim() : ""))
+              .filter(Boolean),
+          ),
+        ]
+        let mergedItems: InventoryItem[] = []
+        if (serials.length > 0) {
+          const invRows = await fetchAllPages((from, to) =>
+            supabase
+              .from("inventory_items")
+              .select(INVENTORY_ITEM_SELECT)
+              .in("serial_number", serials)
+              .is("deleted_at", null)
+              .order("id", { ascending: true })
+              .range(from, to),
+          )
+          mergedItems = invRows.map(rowToInventoryItem)
+        }
+        const invoiceStates = await fetchInvoiceStates(supabase)
+        const mergedTxns = withInvoiceStates(rows.map(rowToTransaction), invoiceStates)
+
+        setTransactions((prev) => {
+          const byId = new Map(prev.map((t) => [t.id, t]))
+          for (const t of mergedTxns) byId.set(t.id, t)
+          return Array.from(byId.values()).sort((a, b) => {
+            const byDate = b.date.localeCompare(a.date)
+            return byDate !== 0 ? byDate : b.id.localeCompare(a.id)
+          })
+        })
+        if (mergedItems.length > 0) {
+          setInventory((prev) => {
+            const byId = new Map(prev.map((item) => [item.id, item]))
+            const bySerial = new Map(prev.map((item) => [item.serialNumber, item.id]))
+            for (const item of mergedItems) {
+              const priorId = bySerial.get(item.serialNumber)
+              if (priorId && priorId !== item.id) byId.delete(priorId)
+              byId.set(item.id, item)
+              bySerial.set(item.serialNumber, item.id)
+            }
+            return Array.from(byId.values())
+          })
+        }
+        lastFetchedAt.current = Date.now()
+        if (maxCreatedAt) noteLiveStockEventsApplied(maxCreatedAt)
+      } catch (error) {
+        console.error("mergeBatchesIntoLedger:", error)
+      }
+    },
+    [supabase, hasLoaded],
+  )
+
+  /**
+   * RT1 catch-up: merge batches from live_stock_events newer than the watermark.
+   * Full reload only with no watermark or a gap > 23 h (prune window).
+   */
+  const catchUpLedgerFromEvents = useCallback(async () => {
+    if (!supabase || !hasLoaded || !wantedRef.current) return
+    const lastSeen = getLastLiveStockEventAt()
+    const gapMs = lastSeen ? Date.now() - Date.parse(lastSeen) : Number.POSITIVE_INFINITY
+    if (!lastSeen || !Number.isFinite(gapMs) || gapMs > LIVE_STOCK_CATCHUP_MAX_GAP_MS) {
+      await runFetch(true)
+      return
+    }
+    try {
+      const { data, error } = await supabase
+        .from("live_stock_events")
+        .select("batch_id, created_at")
+        .gt("created_at", lastSeen)
+        .order("created_at", { ascending: true })
+      if (error) throw error
+      const rows = data ?? []
+      if (rows.length === 0) return
+      const batchIds = [
+        ...new Set(
+          rows
+            .map((row) => (typeof row.batch_id === "string" ? row.batch_id.trim() : ""))
+            .filter(Boolean),
+        ),
+      ]
+      let maxCreatedAt: string | null = null
+      for (const row of rows) {
+        if (typeof row.created_at !== "string") continue
+        if (!maxCreatedAt || Date.parse(row.created_at) > Date.parse(maxCreatedAt)) {
+          maxCreatedAt = row.created_at
+        }
+      }
+      await mergeBatchesIntoLedger(batchIds, maxCreatedAt)
+    } catch (error) {
+      console.error("catchUpLedgerFromEvents:", error)
+      await runFetch(true)
+    }
+  }, [supabase, hasLoaded, runFetch, mergeBatchesIntoLedger])
+
   // Background refresh: at most every 5 minutes, on focus / visibility — only
-  // after a consumer has asked for the ledger (wantedRef).
+  // after a consumer has asked for the ledger (wantedRef). Prefer incremental.
   useEffect(() => {
     if (!user?.id) return
     const maybeRefresh = () => {
       if (!wantedRef.current) return
       if (document.visibilityState !== "visible") return
       if (Date.now() - lastFetchedAt.current < STALE_MS) return
-      void runFetch(true)
+      void catchUpLedgerFromEvents()
     }
     window.addEventListener("focus", maybeRefresh)
     document.addEventListener("visibilitychange", maybeRefresh)
@@ -360,7 +518,27 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
       document.removeEventListener("visibilitychange", maybeRefresh)
       window.clearInterval(id)
     }
-  }, [user?.id, runFetch])
+  }, [user?.id, catchUpLedgerFromEvents])
+
+  // RT1 catch-up on visibility / online / reconnect + live batch merges.
+  useEffect(() => {
+    if (!user?.id) return
+    const onCatchup = () => {
+      if (!hasLoaded || !wantedRef.current) return
+      void catchUpLedgerFromEvents()
+    }
+    const onLiveBatch = (event: Event) => {
+      const detail = (event as CustomEvent<LiveStockBatchDetail>).detail
+      if (!detail?.batchIds?.length) return
+      void mergeBatchesIntoLedger(detail.batchIds, detail.maxCreatedAt)
+    }
+    window.addEventListener(REALTIME_CATCHUP_EVENT, onCatchup)
+    window.addEventListener(LIVE_STOCK_BATCH_EVENT, onLiveBatch)
+    return () => {
+      window.removeEventListener(REALTIME_CATCHUP_EVENT, onCatchup)
+      window.removeEventListener(LIVE_STOCK_BATCH_EVENT, onLiveBatch)
+    }
+  }, [user?.id, hasLoaded, catchUpLedgerFromEvents, mergeBatchesIntoLedger])
 
   const applyMovement = useCallback(
     async (
@@ -1000,6 +1178,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
       getAlerts,
       ensureLoaded,
       refetchLedger,
+      mergeBatchesIntoLedger,
     }),
     [
       inventory,
@@ -1020,6 +1199,7 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
       getAlerts,
       ensureLoaded,
       refetchLedger,
+      mergeBatchesIntoLedger,
     ]
   )
 

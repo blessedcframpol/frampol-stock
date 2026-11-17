@@ -79,6 +79,8 @@ import {
 } from "@/lib/permissions"
 import { useInboxNotifications } from "@/hooks/use-inbox-notifications"
 import { useStockRequestsRealtime } from "@/hooks/use-stock-requests-realtime"
+import { useRealtimeLifecycle } from "@/hooks/use-realtime-lifecycle"
+import { useLiveStockEvents } from "@/hooks/use-live-stock-events"
 import { useAlertFeed } from "@/hooks/use-alert-feed"
 import { notificationHref } from "@/lib/notifications-live"
 import {
@@ -594,8 +596,12 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
     isNewSinceOpen,
     needsSoundGesture,
     enableSoundGesture,
+    alertPrefs,
   } = useInboxNotifications()
   useStockRequestsRealtime(Boolean(user?.id))
+  const { status: realtimeStatus } = useRealtimeLifecycle(Boolean(user?.id))
+  useLiveStockEvents(Boolean(user?.id))
+  const showSoundPausedBanner = Boolean(alertPrefs.enabled && needsSoundGesture)
   const alertCounts = feed?.counts
   const totalAlertCount = alertCounts?.all ?? 0
   const alertCount = mounted && !previewRole ? totalAlertCount : 0
@@ -899,6 +905,18 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           </div>
 
           <p className="hidden shrink-0 text-sm text-muted-foreground xl:block">{headerToday}</p>
+          {user?.id ? (
+            <span
+              className={cn(
+                "hidden shrink-0 text-xs sm:inline",
+                realtimeStatus === "live" ? "text-muted-foreground" : "text-warning",
+              )}
+              title={realtimeStatus === "live" ? "Realtime connected" : "Realtime reconnecting"}
+              data-testid="realtime-status"
+            >
+              {realtimeStatus === "live" ? "Live" : "Reconnecting…"}
+            </span>
+          ) : null}
 
           <div className="flex shrink-0 items-center gap-2">
             {showGlobalSearch ? (
@@ -948,7 +966,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                       </Button>
                     ) : null}
                   </div>
-                  {needsSoundGesture ? (
+                  {needsSoundGesture && !showSoundPausedBanner ? (
                     <button
                       type="button"
                       className="border-b border-border bg-muted/40 px-4 py-2 text-left text-xs text-foreground hover:bg-muted/70"
@@ -1076,6 +1094,17 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
         </header>
 
         <PageBreadcrumbSlot />
+
+        {showSoundPausedBanner ? (
+          <button
+            type="button"
+            className="shrink-0 border-b border-border bg-muted/50 px-4 py-2 text-left text-xs text-foreground hover:bg-muted/80"
+            onClick={() => void enableSoundGesture()}
+            data-testid="alert-sound-paused-banner"
+          >
+            Alert sound is paused — click anywhere to turn it back on.
+          </button>
+        ) : null}
 
         <main id="main-content" tabIndex={-1} className="relative min-w-0 flex-1 overflow-x-hidden overflow-y-auto bg-background p-3 outline-none sm:p-4 md:p-6">
           {children}
