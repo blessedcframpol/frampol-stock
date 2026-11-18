@@ -126,6 +126,16 @@ export async function GET(request: Request) {
     const recordedByIds = [...new Set(transactions.map((t) => t.createdBy).filter(Boolean))] as string[]
     const recordedBy = recordedByIds.map((id) => labels.get(id)).filter(Boolean).join(", ")
 
+    const { data: issueBatch } = await supabase
+      .from("stock_issue_batches")
+      .select("collected_by_name")
+      .eq("batch_id", batchId)
+      .maybeSingle()
+    const collectedByName =
+      typeof issueBatch?.collected_by_name === "string" && issueBatch.collected_by_name.trim()
+        ? issueBatch.collected_by_name.trim()
+        : null
+
     const { data: reversalRow } = await supabase
       .from("batch_reversals")
       .select("kind")
@@ -149,6 +159,7 @@ export async function GET(request: Request) {
       request,
       recordedBy,
       recordedById: recordedByIds[0] ?? null,
+      collectedByName,
       lines,
       timeline,
       isReversed: Boolean(reversalRow),

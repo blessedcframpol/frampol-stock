@@ -42,6 +42,7 @@ export type MovementBatchDrawerPayload = {
   request?: BatchRequestContext | null
   recordedBy?: string
   recordedById?: string | null
+  collectedByName?: string | null
   isReversed?: boolean
   reversalKind?: "reversal" | "void"
   lines: MovementBatchDrawerLine[]

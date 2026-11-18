@@ -59,12 +59,20 @@ export function describeRequestEvent(event: RequestEventLike): RequestEventView 
       const n = count(p.count)
       const serials = Array.isArray(p.serials) ? p.serials.filter((s): s is string => typeof s === "string") : []
       const outstanding = count(p.outstanding_after)
+      const collectedBy = text(p.collected_by_name)
       const parts = [
         serials.length ? serials.join(", ") : null,
         outstanding != null ? (outstanding === 0 ? "Fully issued" : `${outstanding} still outstanding`) : null,
       ].filter(Boolean)
       return {
-        title: n != null ? `${plural(n, "unit")} issued` : "Units issued",
+        title:
+          n != null
+            ? collectedBy
+              ? `${plural(n, "unit")} issued — collected by ${collectedBy}`
+              : `${plural(n, "unit")} issued`
+            : collectedBy
+              ? `Units issued — collected by ${collectedBy}`
+              : "Units issued",
         detail: parts.join(" · ") || null,
       }
     }

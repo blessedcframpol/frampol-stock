@@ -117,6 +117,11 @@ export function canFulfillStockRequests(role: AppRole | null | undefined): boole
   return role === ADMIN || role === ACCOUNTS
 }
 
+/** Create client_contacts (CT1 insert roles). Used for “Save as collector” on issue. */
+export function canCreateClientContacts(role: AppRole | null | undefined): boolean {
+  return role === ADMIN || role === SALES || role === TECHNICIANS
+}
+
 export function canInvoiceStockRequests(role: AppRole | null | undefined): boolean {
   return role === ADMIN || role === ACCOUNTS
 }

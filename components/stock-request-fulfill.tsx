@@ -34,8 +34,10 @@ import { RequestStatusPill } from "@/components/request-status-pill"
 import { PageHeader } from "@/components/page-nav"
 import { PageBreadcrumbs } from "@/components/page-breadcrumbs"
 import { useAuth } from "@/lib/auth-context"
-import { ADMIN, canFulfillStockRequests } from "@/lib/permissions"
+import { ADMIN, canCreateClientContacts, canFulfillStockRequests } from "@/lib/permissions"
 import { getSupabaseClient } from "@/lib/supabase/client"
+import { fetchClientContacts, type ClientContact } from "@/lib/supabase/client-contacts-db"
+import { CLIENT_CONTACT_ROLE_LABELS } from "@/lib/client-contacts"
 import { formatClientLabel } from "@/lib/client-label"
 import { formatDateDDMMYYYY } from "@/lib/utils"
 import { useNotificationsMuted } from "@/hooks/use-inbox-notifications"
@@ -154,6 +156,7 @@ export function StockRequestFulfill({
 }: StockRequestFulfillProps) {
   const { role } = useAuth()
   const allowed = canFulfillStockRequests(role)
+  const canSaveCollector = canCreateClientContacts(role)
   const { muted, setMuted } = useNotificationsMuted()
 
   const [data, setData] = useState<Loaded>(fixture ?? EMPTY)
@@ -190,6 +193,12 @@ export function StockRequestFulfill({
   const [cancelOpen, setCancelOpen] = useState(false)
   const [cancelReason, setCancelReason] = useState("")
   const [confirmPartial, setConfirmPartial] = useState(false)
+  const [collectorContacts, setCollectorContacts] = useState<ClientContact[]>([])
+  const [collectedByContactId, setCollectedByContactId] = useState("")
+  const [collectedByName, setCollectedByName] = useState("")
+  const [collectedByPhone, setCollectedByPhone] = useState("")
+  const [saveCollector, setSaveCollector] = useState(false)
+  const [collectedByError, setCollectedByError] = useState<string | null>(null)
 
   const inputRef = useRef<HTMLInputElement>(null)
   const processingRef = useRef(false)
@@ -323,6 +332,57 @@ export function StockRequestFulfill({
 
   const { request, issuedByLine, requesterLabel } = data
   const lines = useMemo(() => request?.stock_request_lines ?? [], [request])
+
+  useEffect(() => {
+    const clientId = request?.client_id
+    if (!clientId) {
+      setCollectorContacts([])
+      setCollectedByContactId("")
+      setCollectedByName("")
+      setSaveCollector(false)
+      return
+    }
+    let cancelled = false
+    void fetchClientContacts(getSupabaseClient(), clientId)
+      .then((rows) => {
+        if (cancelled) return
+        const sorted = [...rows].sort((a, b) => {
+          const ac = a.role === "collector" ? 0 : 1
+          const bc = b.role === "collector" ? 0 : 1
+          if (ac !== bc) return ac - bc
+          return a.name.localeCompare(b.name)
+        })
+        setCollectorContacts(sorted)
+      })
+      .catch(() => {
+        if (!cancelled) setCollectorContacts([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [request?.client_id])
+
+  const collectedByPayload = useMemo(() => {
+    const contactId = collectedByContactId.trim() || null
+    const nameFromContact = contactId
+      ? collectorContacts.find((c) => c.id === contactId)?.name ?? null
+      : null
+    const typed = collectedByName.trim().slice(0, 120) || null
+    const save = !contactId && Boolean(typed) && saveCollector && canSaveCollector
+    return {
+      contactId,
+      name: nameFromContact || typed,
+      saveCollector: save,
+      phone: save ? collectedByPhone.trim() || null : null,
+    }
+  }, [
+    collectedByContactId,
+    collectedByName,
+    collectedByPhone,
+    collectorContacts,
+    saveCollector,
+    canSaveCollector,
+  ])
 
   // Process queue with a ref-backed loop so rapid scans stay ordered.
   const queueRef = useRef<string[]>([])
@@ -464,12 +524,14 @@ export function StockRequestFulfill({
     setConfirmPartial(false)
     setBusy(true)
     setIssueResult(null)
+    setCollectedByError(null)
     bumpIssueLockActivity()
     try {
       const res = await issueUnits(
         getSupabaseClient(),
         request.id,
-        filled.map((s) => ({ serial: s.serial, lineId: s.lineId, cloudKey: s.cloudKey }))
+        filled.map((s) => ({ serial: s.serial, lineId: s.lineId, cloudKey: s.cloudKey })),
+        collectedByPayload,
       )
       setIssueResult(res)
       if (res.ok) {
@@ -488,6 +550,10 @@ export function StockRequestFulfill({
         setSlots([])
         setMode("serial")
         setCloudKeyPrompt(null)
+        setCollectedByContactId("")
+        setCollectedByName("")
+        setCollectedByPhone("")
+        setSaveCollector(false)
         void refresh()
       } else {
         setSlots((prev) =>
@@ -507,6 +573,12 @@ export function StockRequestFulfill({
         if (!muted) playIssueScanError()
       }
     } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      if (
+        /phone|collector|save this collector|cannot save a new collector/i.test(msg)
+      ) {
+        setCollectedByError(msg)
+      }
       toastFromCaughtError(e, "Could not issue units")
     } finally {
       setBusy(false)
@@ -921,6 +993,92 @@ export function StockRequestFulfill({
                 </p>
               ) : null}
 
+              <div className="space-y-2 border-t border-border pt-4">
+                <Label htmlFor="collected-by">Collected by</Label>
+                <Select
+                  value={collectedByContactId || "__typed__"}
+                  onValueChange={(v) => {
+                    if (v === "__typed__") {
+                      setCollectedByContactId("")
+                      return
+                    }
+                    setCollectedByContactId(v)
+                    setSaveCollector(false)
+                    const match = collectorContacts.find((c) => c.id === v)
+                    if (match) setCollectedByName(match.name)
+                  }}
+                  disabled={busy || previewOnly}
+                >
+                  <SelectTrigger id="collected-by" className="bg-card max-w-md">
+                    <SelectValue placeholder="Pick a contact or type a name" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__typed__">Type a name…</SelectItem>
+                    {collectorContacts.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.name}
+                        {c.role ? ` (${CLIENT_CONTACT_ROLE_LABELS[c.role] ?? c.role})` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {!collectedByContactId ? (
+                  <Input
+                    value={collectedByName}
+                    onChange={(e) => setCollectedByName(e.target.value.slice(0, 120))}
+                    placeholder="Name of person collecting"
+                    className="bg-card max-w-md"
+                    disabled={busy || previewOnly}
+                    aria-label="Collected by name"
+                  />
+                ) : null}
+                {canSaveCollector && !collectedByContactId && collectedByName.trim() ? (
+                  <div className="space-y-2">
+                    <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <input
+                        type="checkbox"
+                        className="size-4 rounded border-border"
+                        checked={saveCollector}
+                        onChange={(e) => {
+                          setSaveCollector(e.target.checked)
+                          setCollectedByError(null)
+                        }}
+                        disabled={busy || previewOnly}
+                      />
+                      Save as contact (Collector)
+                    </label>
+                    {saveCollector ? (
+                      <div className="space-y-1 max-w-md">
+                        <Label htmlFor="collected-by-phone">Phone</Label>
+                        <Input
+                          id="collected-by-phone"
+                          value={collectedByPhone}
+                          onChange={(e) => {
+                            setCollectedByPhone(e.target.value)
+                            setCollectedByError(null)
+                          }}
+                          placeholder="e.g. 077 123 4567"
+                          className="bg-card"
+                          disabled={busy || previewOnly}
+                          aria-label="Collector phone"
+                        />
+                        <p className="text-xs text-muted-foreground">Required to save this person as a contact.</p>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+                {collectedByError ? (
+                  <p className="text-sm text-destructive" role="alert">
+                    {collectedByError}
+                  </p>
+                ) : null}
+                {!collectedByContactId && !collectedByName.trim() ? (
+                  <p className="text-xs text-muted-foreground">
+                    Who is collecting? You can leave this blank.
+                  </p>
+                ) : null}
+              </div>
+
               <div className="flex flex-wrap gap-2 border-t border-border pt-4">
                 {previewOnly ? (
                   <Button disabled className="gap-1">
@@ -971,6 +1129,20 @@ export function StockRequestFulfill({
             <DialogTitle>Issue partial?</DialogTitle>
             <DialogDescription>{btn.confirmMessage}</DialogDescription>
           </DialogHeader>
+          <div className="space-y-2 py-1">
+            <Label>Collected by</Label>
+            <p className="text-sm text-foreground">
+              {collectedByPayload.name?.trim() || (
+                <span className="text-muted-foreground">Not set — you can leave this blank</span>
+              )}
+            </p>
+            {canSaveCollector && collectedByPayload.saveCollector ? (
+              <p className="text-xs text-muted-foreground">
+                Will save as a Collector contact
+                {collectedByPayload.phone ? ` (${collectedByPayload.phone})` : " — add a phone first"}.
+              </p>
+            ) : null}
+          </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setConfirmPartial(false)}>
               Keep scanning

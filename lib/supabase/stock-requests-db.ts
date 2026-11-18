@@ -431,15 +431,36 @@ export async function previewIssueScan(
   }
 }
 
+export type IssueUnitsCollectedBy = {
+  contactId?: string | null
+  name?: string | null
+  saveCollector?: boolean
+  phone?: string | null
+}
+
 /** All-or-nothing: any failing serial writes nothing and is listed in `failures`. */
-export async function issueUnits(sb: SB, requestId: string, scans: IssueUnitScan[]): Promise<IssueUnitsResult> {
+export async function issueUnits(
+  sb: SB,
+  requestId: string,
+  scans: IssueUnitScan[],
+  collectedBy?: IssueUnitsCollectedBy,
+): Promise<IssueUnitsResult> {
   const p_scans = scans.map((s) => {
     const scan: Record<string, string> = { serial: s.serial }
     if (s.lineId) scan.line_id = s.lineId
     if (s.cloudKey) scan.cloud_key = s.cloudKey
     return scan
   })
-  const { data, error } = await sb.rpc("issue_units", { p_request_id: requestId, p_scans: p_scans })
+  const name = collectedBy?.name?.trim() || null
+  const phone = collectedBy?.phone?.trim() || null
+  const { data, error } = await sb.rpc("issue_units", {
+    p_request_id: requestId,
+    p_scans: p_scans,
+    p_collected_by_contact_id: collectedBy?.contactId?.trim() || null,
+    p_collected_by_name: name ? name.slice(0, 120) : null,
+    p_save_collector: collectedBy?.saveCollector === true,
+    p_collected_by_phone: phone,
+  })
   if (error) throw error
   const raw = (data ?? {}) as Partial<IssueUnitsResult>
   return {

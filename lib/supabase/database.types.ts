@@ -961,6 +961,48 @@ export interface Database {
         }
         Relationships: []
       }
+      stock_issue_batches: {
+        Row: {
+          batch_id: string
+          request_id: string
+          collected_by_contact_id: string | null
+          collected_by_name: string | null
+          created_at: string
+          created_by: string | null
+        }
+        Insert: {
+          batch_id: string
+          request_id: string
+          collected_by_contact_id?: string | null
+          collected_by_name?: string | null
+          created_at?: string
+          created_by?: string | null
+        }
+        Update: {
+          batch_id?: string
+          request_id?: string
+          collected_by_contact_id?: string | null
+          collected_by_name?: string | null
+          created_at?: string
+          created_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stock_issue_batches_request_id_fkey"
+            columns: ["request_id"]
+            isOneToOne: false
+            referencedRelation: "stock_requests"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_issue_batches_collected_by_contact_id_fkey"
+            columns: ["collected_by_contact_id"]
+            isOneToOne: false
+            referencedRelation: "client_contacts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       client_contacts: {
         Row: {
           id: string
@@ -1884,7 +1926,14 @@ export interface Database {
         Returns: Json
       }
       issue_units: {
-        Args: { p_request_id: string; p_scans: Json }
+        Args: {
+          p_request_id: string
+          p_scans: Json
+          p_collected_by_contact_id?: string | null
+          p_collected_by_name?: string | null
+          p_save_collector?: boolean
+          p_collected_by_phone?: string | null
+        }
         Returns: Json
       }
       close_outstanding: {

@@ -31,6 +31,23 @@ describe("describeRequestEvent", () => {
     expect(full.detail).toBe("SN1, SN2 · Fully issued")
   })
 
+  it("includes collected by on units_issued", () => {
+    expect(
+      describeRequestEvent({
+        event_type: "units_issued",
+        payload: {
+          count: 3,
+          serials: ["SN1"],
+          outstanding_after: 0,
+          collected_by_name: "Alex Collector",
+        },
+      }),
+    ).toEqual({
+      title: "3 units issued — collected by Alex Collector",
+      detail: "SN1 · Fully issued",
+    })
+  })
+
   it("describes invoice changes", () => {
     expect(
       describeRequestEvent({ event_type: "invoice_set", payload: { new_status: "invoiced", new_invoice_number: "INV-9" } })

@@ -487,6 +487,12 @@ export function MovementBatchDrawer({
                     }
                   />
                 </div>
+                {merged.collectedByName ? (
+                  <div className="min-w-0 space-y-1">
+                    <p className="text-xs font-medium text-muted-foreground">Collected by</p>
+                    <p className="text-sm text-foreground">{merged.collectedByName}</p>
+                  </div>
+                ) : null}
               </div>
             </div>
 
