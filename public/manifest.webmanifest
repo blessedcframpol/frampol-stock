@@ -1,0 +1,17 @@
+{
+  "name": "Fram Stock",
+  "short_name": "Fram Stock",
+  "description": "Inventory and stock requests for Frampol",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1a1a1a",
+  "theme_color": "#383838",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

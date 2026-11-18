@@ -15,6 +15,11 @@ const jetbrainsMono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-jet
 export const metadata: Metadata = {
   title: 'Fram-Stock - Inventory Management',
   description: 'Modern inventory management dashboard for tracking Starlink kits, computers, and networking equipment.',
+  manifest: '/manifest.webmanifest',
+  appleWebApp: {
+    capable: true,
+    title: 'Fram Stock',
+  },
 }
 
 export const viewport: Viewport = {

@@ -81,6 +81,7 @@ import { useInboxNotifications } from "@/hooks/use-inbox-notifications"
 import { useStockRequestsRealtime } from "@/hooks/use-stock-requests-realtime"
 import { useRealtimeLifecycle } from "@/hooks/use-realtime-lifecycle"
 import { useLiveStockEvents } from "@/hooks/use-live-stock-events"
+import { useRegisterPushServiceWorker } from "@/hooks/use-register-push-sw"
 import { useAlertFeed } from "@/hooks/use-alert-feed"
 import { notificationHref } from "@/lib/notifications-live"
 import {
@@ -601,6 +602,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   useStockRequestsRealtime(Boolean(user?.id))
   const { status: realtimeStatus } = useRealtimeLifecycle(Boolean(user?.id))
   useLiveStockEvents(Boolean(user?.id))
+  useRegisterPushServiceWorker(Boolean(user?.id))
   const showSoundPausedBanner = Boolean(alertPrefs.enabled && needsSoundGesture)
   const alertCounts = feed?.counts
   const totalAlertCount = alertCounts?.all ?? 0

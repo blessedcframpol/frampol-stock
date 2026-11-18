@@ -1222,6 +1222,10 @@ export interface Database {
           alert_sound_enabled: boolean
           alert_sound_id: string
           alert_sound_volume: number
+          desktop_push_enabled: boolean
+          desktop_push_new_requests: boolean
+          desktop_push_reminders: boolean
+          desktop_push_my_request_updated: boolean
           created_at: string
           updated_at: string
         }
@@ -1234,6 +1238,10 @@ export interface Database {
           alert_sound_enabled?: boolean
           alert_sound_id?: string
           alert_sound_volume?: number
+          desktop_push_enabled?: boolean
+          desktop_push_new_requests?: boolean
+          desktop_push_reminders?: boolean
+          desktop_push_my_request_updated?: boolean
           created_at?: string
           updated_at?: string
         }
@@ -1246,8 +1254,45 @@ export interface Database {
           alert_sound_enabled?: boolean
           alert_sound_id?: string
           alert_sound_volume?: number
+          desktop_push_enabled?: boolean
+          desktop_push_new_requests?: boolean
+          desktop_push_reminders?: boolean
+          desktop_push_my_request_updated?: boolean
           created_at?: string
           updated_at?: string
+        }
+        Relationships: []
+      }
+      push_subscriptions: {
+        Row: {
+          id: string
+          user_id: string
+          endpoint: string
+          p256dh: string
+          auth: string
+          user_agent: string | null
+          created_at: string
+          last_success_at: string | null
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          endpoint: string
+          p256dh: string
+          auth: string
+          user_agent?: string | null
+          created_at?: string
+          last_success_at?: string | null
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          endpoint?: string
+          p256dh?: string
+          auth?: string
+          user_agent?: string | null
+          created_at?: string
+          last_success_at?: string | null
         }
         Relationships: []
       }
@@ -1779,6 +1824,15 @@ export interface Database {
       }
       update_my_alert_sound_prefs: {
         Args: { p_enabled: boolean; p_sound_id: string; p_volume: number }
+        Returns: undefined
+      }
+      update_my_desktop_push_prefs: {
+        Args: {
+          p_enabled: boolean
+          p_new_requests: boolean
+          p_reminders: boolean
+          p_my_request_updated: boolean
+        }
         Returns: undefined
       }
       notify_unclaimed_request_reminders: {

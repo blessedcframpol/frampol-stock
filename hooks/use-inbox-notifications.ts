@@ -303,7 +303,18 @@ export function useInboxNotifications(): {
 
     for (const row of added.slice(0, 3)) {
       toast.message(row.title, { description: row.body ?? undefined })
-      showBrowserNotification(row.title, row.body ?? undefined, notificationHref(row))
+      // NT3: when Web Push is active, OS pop-ups come from the service worker
+      // (and are skipped while a Fram Stock tab is focused). Avoid a second
+      // page-level Notification for the same item.
+      void (async () => {
+        try {
+          const { hasActivePushSubscription } = await import("@/lib/push-subscribe")
+          if (await hasActivePushSubscription()) return
+        } catch {
+          /* fall through */
+        }
+        showBrowserNotification(row.title, row.body ?? undefined, notificationHref(row))
+      })()
     }
     announceNotificationsInbox()
     announceRequestQueuesRefresh()

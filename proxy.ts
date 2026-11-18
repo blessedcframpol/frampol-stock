@@ -4,7 +4,13 @@ import { NextResponse, type NextRequest } from "next/server"
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 
-const publicPaths = ["/login", "/auth/callback"]
+const publicPaths = [
+  "/login",
+  "/auth/callback",
+  "/api/push/send",
+  "/sw.js",
+  "/manifest.webmanifest",
+]
 const isPublicPath = (pathname: string) =>
   publicPaths.some((p) => pathname === p || pathname.startsWith(p + "/"))
 

@@ -31,6 +31,7 @@ import {
   setAtlasLinkRequired,
   updateAppSettings,
   updateMyAlertSoundPrefs,
+  updateMyDesktopPushPrefs,
   updateProductLineSetting,
   type ActiveStaffProfile,
   type AppSettings,
@@ -66,6 +67,11 @@ import { toast } from "sonner"
 import Link from "next/link"
 import { toastFromCaughtError } from "@/lib/toast-reportable-error"
 import { useLowStockProducts } from "@/hooks/use-low-stock-products"
+import {
+  hasActivePushSubscription,
+  subscribeDesktopPush,
+  unsubscribeDesktopPush,
+} from "@/lib/push-subscribe"
 
 const tabPill = cn(
   "rounded-full border border-border/70 bg-muted/50 px-5 py-2.5 text-sm font-medium text-muted-foreground shadow-none transition-all",
@@ -140,6 +146,14 @@ export function SettingsContent() {
   const [alertSoundId, setAlertSoundId] = useState<AlertSoundId>("chime")
   const [alertVolume, setAlertVolume] = useState(0.55)
   const [alertNeedsGesture, setAlertNeedsGesture] = useState(false)
+  const [pushEnabled, setPushEnabled] = useState(false)
+  const [pushNewRequests, setPushNewRequests] = useState(true)
+  const [pushReminders, setPushReminders] = useState(true)
+  const [pushMyUpdated, setPushMyUpdated] = useState(true)
+  const [pushSubscribed, setPushSubscribed] = useState(false)
+  const [browserPushPerm, setBrowserPushPerm] = useState<NotificationPermission | "unsupported">(
+    "default",
+  )
   const [atlasToggleOpen, setAtlasToggleOpen] = useState(false)
   const [atlasToggleNext, setAtlasToggleNext] = useState(true)
   const [atlasToggleReason, setAtlasToggleReason] = useState("")
@@ -222,7 +236,9 @@ export function SettingsContent() {
     let cancelled = false
     void getSupabaseClient()
       .from("profiles")
-      .select("alert_sound_enabled, alert_sound_id, alert_sound_volume")
+      .select(
+        "alert_sound_enabled, alert_sound_id, alert_sound_volume, desktop_push_enabled, desktop_push_new_requests, desktop_push_reminders, desktop_push_my_request_updated",
+      )
       .eq("id", user.id)
       .maybeSingle()
       .then(({ data }) => {
@@ -231,8 +247,20 @@ export function SettingsContent() {
         const normalized = normalizeAlertSoundId(data.alert_sound_id)
         if (normalized) setAlertSoundId(normalized)
         setAlertVolume(Number(data.alert_sound_volume ?? 0.55))
+        setPushEnabled(data.desktop_push_enabled === true)
+        setPushNewRequests(data.desktop_push_new_requests !== false)
+        setPushReminders(data.desktop_push_reminders !== false)
+        setPushMyUpdated(data.desktop_push_my_request_updated !== false)
       })
       .catch(() => undefined)
+    void hasActivePushSubscription().then((ok) => {
+      if (!cancelled) setPushSubscribed(ok)
+    })
+    if (typeof window !== "undefined" && "Notification" in window) {
+      setBrowserPushPerm(Notification.permission)
+    } else {
+      setBrowserPushPerm("unsupported")
+    }
     return () => {
       cancelled = true
     }
@@ -370,6 +398,74 @@ export function SettingsContent() {
       toast.success("Alert sound saved")
     } catch (error) {
       toastFromCaughtError(error, "Could not save alert sound")
+    } finally {
+      setSavingKey(null)
+    }
+  }
+
+  async function saveDesktopPushPrefs() {
+    setSavingKey("desktop-push")
+    try {
+      await updateMyDesktopPushPrefs({
+        enabled: pushEnabled,
+        newRequests: pushNewRequests,
+        reminders: pushReminders,
+        myRequestUpdated: pushMyUpdated,
+      })
+      toast.success("Desktop pop-up settings saved")
+    } catch (error) {
+      toastFromCaughtError(error, "Could not save desktop pop-ups")
+    } finally {
+      setSavingKey(null)
+    }
+  }
+
+  async function allowDesktopPush() {
+    setSavingKey("desktop-push-allow")
+    try {
+      const result = await subscribeDesktopPush()
+      if (!result.ok) {
+        toast.error(result.error)
+        if (typeof window !== "undefined" && "Notification" in window) {
+          setBrowserPushPerm(Notification.permission)
+        }
+        return
+      }
+      setPushSubscribed(true)
+      setPushEnabled(true)
+      await updateMyDesktopPushPrefs({
+        enabled: true,
+        newRequests: pushNewRequests,
+        reminders: pushReminders,
+        myRequestUpdated: pushMyUpdated,
+      })
+      if (typeof window !== "undefined" && "Notification" in window) {
+        setBrowserPushPerm(Notification.permission)
+      }
+      toast.success("Desktop pop-ups allowed for this browser")
+    } catch (error) {
+      toastFromCaughtError(error, "Could not allow desktop pop-ups")
+    } finally {
+      setSavingKey(null)
+    }
+  }
+
+  async function sendDesktopPushTest() {
+    setSavingKey("desktop-push-test")
+    try {
+      const res = await fetch("/api/push/test", { method: "POST", credentials: "include" })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok || body.ok === false) {
+        toast.error(typeof body.error === "string" ? body.error : "Test send failed")
+        return
+      }
+      toast.success(
+        body.send?.sent > 0
+          ? "Test sent — put this tab in the background to see the OS pop-up"
+          : "Test notification created (no active subscription on this browser)",
+      )
+    } catch (error) {
+      toastFromCaughtError(error, "Test send failed")
     } finally {
       setSavingKey(null)
     }
@@ -703,6 +799,83 @@ export function SettingsContent() {
                   type="button"
                   onClick={() => void saveAlertPrefs()}
                   disabled={savingKey === "alert-sound"}
+                >
+                  Save
+                </Button>
+              </div>
+            </div>
+          </SettingsSection>
+
+          <SettingsSection
+            title="Desktop pop-ups"
+            description="OS notifications when you are away from Fram Stock. Uses the system sound (not the in-app alert sound)."
+          >
+            <div className="flex flex-col gap-5">
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Works in Chrome and Edge on Windows, and Chrome on Android, with the browser installed.
+                On iPhone, only after you add Fram Stock to the Home Screen and open it from that icon.
+                Pop-ups use the system sound, not Faaah.
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => void allowDesktopPush()}
+                  disabled={savingKey === "desktop-push-allow" || browserPushPerm === "unsupported"}
+                >
+                  Allow
+                </Button>
+                <span className="text-xs text-muted-foreground">
+                  {browserPushPerm === "unsupported"
+                    ? "Not supported in this browser"
+                    : browserPushPerm === "granted" && pushSubscribed
+                      ? "Allowed in this browser"
+                      : browserPushPerm === "denied"
+                        ? "Blocked in browser settings"
+                        : "Not allowed yet"}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium text-foreground">Desktop pop-ups</p>
+                  <p className="text-xs text-muted-foreground">Master switch on your profile.</p>
+                </div>
+                <Switch
+                  checked={pushEnabled}
+                  onCheckedChange={(checked) => {
+                    setPushEnabled(checked)
+                    if (!checked) void unsubscribeDesktopPush().then(() => setPushSubscribed(false))
+                  }}
+                />
+              </div>
+              <div className="flex flex-col gap-3 rounded-xl border border-border/60 bg-muted/20 p-4">
+                <p className="text-xs font-medium text-muted-foreground">Which types</p>
+                <label className="flex items-center justify-between gap-3 text-sm">
+                  <span>New requests</span>
+                  <Switch checked={pushNewRequests} onCheckedChange={setPushNewRequests} />
+                </label>
+                <label className="flex items-center justify-between gap-3 text-sm">
+                  <span>Reminders</span>
+                  <Switch checked={pushReminders} onCheckedChange={setPushReminders} />
+                </label>
+                <label className="flex items-center justify-between gap-3 text-sm">
+                  <span>My request updated</span>
+                  <Switch checked={pushMyUpdated} onCheckedChange={setPushMyUpdated} />
+                </label>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => void sendDesktopPushTest()}
+                  disabled={savingKey === "desktop-push-test" || !pushEnabled}
+                >
+                  Send test
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => void saveDesktopPushPrefs()}
+                  disabled={savingKey === "desktop-push"}
                 >
                   Save
                 </Button>

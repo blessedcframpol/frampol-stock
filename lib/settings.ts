@@ -182,6 +182,24 @@ export async function updateMyAlertSoundPrefs(
   if (error) throw error
 }
 
+export async function updateMyDesktopPushPrefs(
+  prefs: {
+    enabled: boolean
+    newRequests: boolean
+    reminders: boolean
+    myRequestUpdated: boolean
+  },
+  provided?: SettingsClient,
+): Promise<void> {
+  const { error } = await client(provided).rpc("update_my_desktop_push_prefs", {
+    p_enabled: prefs.enabled,
+    p_new_requests: prefs.newRequests,
+    p_reminders: prefs.reminders,
+    p_my_request_updated: prefs.myRequestUpdated,
+  })
+  if (error) throw error
+}
+
 /** Active portal users for report-recipient pickers (admin settings). */
 export async function setAtlasLinkRequired(
   required: boolean,
