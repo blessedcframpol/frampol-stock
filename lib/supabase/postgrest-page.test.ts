@@ -50,13 +50,14 @@ describe("findUnpagedLargeTableReads", () => {
     ])
   })
 
-  it("accepts fetchAllPages, single-row reads, and head counts", () => {
+  it("accepts fetchAllPages, single-row reads, head counts, and .limit()", () => {
     const source = `
       const rows = await fetchAllPages((from, to) =>
         supabase.from("clients").select("*").order("id").range(from, to)
       )
       const one = await supabase.from("inventory_items").select("*").eq("id", id).maybeSingle()
       const { count } = await supabase.from("transactions").select("id", { count: "exact", head: true })
+      const hits = await supabase.from("inventory_items").select("id").ilike("serial_number", "%x%").limit(20)
     `
     expect(findUnpagedLargeTableReads(source, "app/example.ts")).toEqual([])
   })

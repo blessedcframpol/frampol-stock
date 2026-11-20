@@ -66,6 +66,8 @@ export function findUnpagedLargeTableReads(source: string, filePath: string): st
     if (writeAt !== -1 && writeAt < selectAt) continue
     if (/\.(maybeSingle|single)\(/.test(statement)) continue
     if (/\bhead\s*:\s*true\b/.test(statement)) continue
+    // Bounded list reads (e.g. header search .limit(20)) are not full-table scans.
+    if (/\.limit\s*\(/.test(statement)) continue
     const before = source.slice(Math.max(0, start - 400), start)
     const marker = before.lastIndexOf("fetchAllPages")
     if (marker >= 0 && !before.slice(marker).includes(";")) continue

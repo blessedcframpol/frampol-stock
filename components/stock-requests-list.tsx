@@ -228,7 +228,7 @@ export function StockRequestsList({
         <div className={cn(PENDING_INVOICE_SLOT_H, "overflow-hidden")}>
           {loading ? (
             <PendingInvoiceSkeleton />
-          ) : pendingByRequester.length > 0 ? (
+          ) : (
             <div className="h-full overflow-y-auto">
               <Card>
                 <CardHeader className="pb-2">
@@ -238,29 +238,33 @@ export function StockRequestsList({
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="flex flex-col gap-3">
-                  {pendingByRequester.map((g) => (
-                    <div key={g.id} className="flex flex-col gap-1">
-                      <p className="text-sm font-medium text-foreground">
-                        {requesterName(g.id)}{" "}
-                        <span className="font-normal text-muted-foreground">
-                          · {g.rows.length} request{g.rows.length !== 1 ? "s" : ""}
-                        </span>
-                      </p>
-                      <ul className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
-                        {g.rows.map((r) => (
-                          <li key={r.id}>
-                            <Link href={`/requests/${r.id}`} className="text-brand hover:underline">
-                              {r.request_number} · {clientLabel(r)} · {formatDateDDMMYYYY(r.created_at)}
-                            </Link>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  ))}
+                  {pendingByRequester.length === 0 ? (
+                    <EmptyState message="No requests are waiting for an invoice number." />
+                  ) : (
+                    pendingByRequester.map((g) => (
+                      <div key={g.id} className="flex flex-col gap-1">
+                        <p className="text-sm font-medium text-foreground">
+                          {requesterName(g.id)}{" "}
+                          <span className="font-normal text-muted-foreground">
+                            · {g.rows.length} request{g.rows.length !== 1 ? "s" : ""}
+                          </span>
+                        </p>
+                        <ul className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+                          {g.rows.map((r) => (
+                            <li key={r.id}>
+                              <Link href={`/requests/${r.id}`} className="text-brand hover:underline">
+                                {r.request_number} · {clientLabel(r)} · {formatDateDDMMYYYY(r.created_at)}
+                              </Link>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ))
+                  )}
                 </CardContent>
               </Card>
             </div>
-          ) : null}
+          )}
         </div>
       ) : null}
 
@@ -378,6 +382,9 @@ export function StockRequestsList({
                           <span>{formatDateDDMMYYYY(r.created_at)}</span>
                           <span>
                             {lineCount} line{lineCount === 1 ? "" : "s"}
+                          </span>
+                          <span className="font-medium text-foreground/80">
+                            Invoice: {requestInvoiceColumnLabel(r)}
                           </span>
                         </div>
                       </Link>

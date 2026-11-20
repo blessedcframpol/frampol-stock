@@ -75,9 +75,8 @@ import { formatDateDDMMYYYY } from "@/lib/utils"
 import { toast } from "sonner"
 import { toastFromCaughtError } from "@/lib/toast-reportable-error"
 import {
-  isAuthFailure,
   loadErrorFromCaught,
-  notifySessionExpired,
+  notifyClassifiedFailure,
   signedOutLoadError,
 } from "@/lib/unauthorized"
 import { pageTitleClass } from "@/components/page-nav"
@@ -204,8 +203,9 @@ export function StockRequestDetail({ requestId }: { requestId: string }) {
       setBundle(next)
     } catch (e) {
       if (isCancelled()) return
-      if (isAuthFailure(e)) notifySessionExpired()
-      else toastFromCaughtError(e, "Could not load request")
+      notifyClassifiedFailure(e, "Could not load this request.", {
+        onRetry: () => void applyBundle({ isCancelled: () => false }),
+      })
       setLoadError(loadErrorFromCaught(e, "Could not load this request."))
       setBundle(EMPTY_BUNDLE)
     } finally {

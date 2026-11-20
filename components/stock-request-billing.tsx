@@ -32,9 +32,8 @@ import { displayStatusOrReviewState, type RequestDisplayStatus } from "@/lib/sto
 import { toast } from "sonner"
 import { toastFromCaughtError } from "@/lib/toast-reportable-error"
 import {
-  isAuthFailure,
   loadErrorFromCaught,
-  notifySessionExpired,
+  notifyClassifiedFailure,
   signedOutLoadError,
 } from "@/lib/unauthorized"
 import { ExternalLink, Loader2 } from "lucide-react"
@@ -104,8 +103,9 @@ export function StockRequestBilling({ requestId }: { requestId: string }) {
         setData(next)
       } catch (e) {
         if (isCancelled()) return
-        if (isAuthFailure(e)) notifySessionExpired()
-        else toastFromCaughtError(e, "Could not load request")
+        notifyClassifiedFailure(e, "Could not load this request.", {
+          onRetry: () => void refresh(() => false),
+        })
         setLoadError(loadErrorFromCaught(e, "Could not load this request."))
         setData(EMPTY)
       } finally {

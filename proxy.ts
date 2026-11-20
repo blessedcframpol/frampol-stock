@@ -1,18 +1,9 @@
 import { createServerClient } from "@supabase/ssr"
 import { NextResponse, type NextRequest } from "next/server"
+import { decideAuthGate } from "@/lib/auth-gate"
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-
-const publicPaths = [
-  "/login",
-  "/auth/callback",
-  "/api/push/send",
-  "/sw.js",
-  "/manifest.webmanifest",
-]
-const isPublicPath = (pathname: string) =>
-  publicPaths.some((p) => pathname === p || pathname.startsWith(p + "/"))
 
 export async function proxy(request: NextRequest) {
   if (!supabaseUrl || !supabaseAnonKey) {
@@ -21,22 +12,28 @@ export async function proxy(request: NextRequest) {
 
   // OAuth PKCE: verifier cookies must reach the Route Handler untouched. Running the
   // Supabase client here (e.g. getUser) can rewrite auth cookies before exchangeCodeForSession.
-  const p = request.nextUrl.pathname
-  if (p === "/auth/callback" || p.startsWith("/auth/callback/")) {
+  const pathname = request.nextUrl.pathname
+  if (pathname === "/auth/callback" || pathname.startsWith("/auth/callback/")) {
     return NextResponse.next({ request: { headers: request.headers } })
   }
 
-  const response = NextResponse.next({ request: { headers: request.headers } })
+  let response = NextResponse.next({ request: { headers: request.headers } })
 
   const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
     cookies: {
       getAll() {
         return request.cookies.getAll()
       },
+      // SSR contract: setAll must update request + response so chunk deletes
+      // (HTTP 431 history) are visible to later getAll in the same request.
       setAll(cookiesToSet: { name: string; value: string; options?: Parameters<typeof response.cookies.set>[2] }[]) {
-        cookiesToSet.forEach(({ name, value, options }) =>
+        cookiesToSet.forEach(({ name, value }) => {
+          request.cookies.set(name, value)
+        })
+        response = NextResponse.next({ request: { headers: request.headers } })
+        cookiesToSet.forEach(({ name, value, options }) => {
           response.cookies.set(name, value, options)
-        )
+        })
       },
     },
   })
@@ -46,19 +43,18 @@ export async function proxy(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser()
 
-  if (!isPublicPath(request.nextUrl.pathname)) {
-    if (!user) {
-      if (request.nextUrl.pathname.startsWith("/api/")) {
-        return NextResponse.json(
-          { error: "Unauthorized", requestId: crypto.randomUUID() },
-          { status: 401 }
-        )
-      }
-      const url = request.nextUrl.clone()
-      url.pathname = "/login"
-      url.searchParams.set("redirectTo", request.nextUrl.pathname)
-      return NextResponse.redirect(url)
-    }
+  const decision = decideAuthGate(pathname, Boolean(user))
+  if (decision.kind === "api_unauthorized") {
+    return NextResponse.json(
+      { error: "Unauthorized", requestId: crypto.randomUUID() },
+      { status: 401 },
+    )
+  }
+  if (decision.kind === "redirect_login") {
+    const url = request.nextUrl.clone()
+    url.pathname = "/login"
+    url.searchParams.set("redirectTo", decision.redirectTo)
+    return NextResponse.redirect(url)
   }
 
   return response

@@ -2,7 +2,6 @@
 
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
-import { useInventoryStore } from "@/lib/inventory-store"
 import { useTheme } from "next-themes"
 import {
   LayoutDashboard,
@@ -88,10 +87,7 @@ import {
   NOTIFICATION_CHIP_LABELS,
   type NotificationChip,
 } from "@/lib/notification-categories"
-import { useClients } from "@/lib/clients-store"
-import { useSearchUsers } from "@/lib/supabase/search-users"
-import { contactViaByClientId, runSearch } from "@/lib/search"
-import { useContactSearchMatches } from "@/hooks/use-contact-search-client-ids"
+import { useHeaderSearch } from "@/hooks/use-header-search"
 import { SearchSuggestions } from "@/components/search-suggestions"
 import { PageBreadcrumbProvider, PageBreadcrumbSlot } from "@/components/page-breadcrumbs"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -540,30 +536,15 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const role = useEffectiveRole()
   const { previewRole } = useDevRolePreview()
   const { feed } = useAlertFeed()
-  const users = useSearchUsers()
   const mounted = useIsClient()
   const searchEntities = useMemo(() => roleSearchEntities(role), [role])
   const searchPlaceholder = roleSearchPlaceholder(role)
   const showGlobalSearch = searchEntities.length > 0
-  // Start the shared directory as soon as we know the user is signed in, even
-  // before role/searchEntities resolve — waiting on role delayed the first
-  // clients request ~250–350ms vs main's ungated useClients(). Roles that never
-  // search clients still skip once role is known (enabled becomes false).
-  const { clients } = useClients({
-    enabled: role == null || searchEntities.includes("clients"),
-  })
-  const contactMatches = useContactSearchMatches(
-    searchQuery,
-    searchQuery.trim().length > 0 && searchEntities.includes("clients")
-  )
-  const contactViaByClient = useMemo(
-    () => contactViaByClientId(contactMatches),
-    [contactMatches]
-  )
-  // Ledger only when the header search needs inventory matches (not on every page).
-  const ledgerForSearch =
-    searchQuery.trim().length > 0 && searchEntities.includes("inventory")
-  const { inventory } = useInventoryStore({ enabled: ledgerForSearch })
+  // SF1: query the DB (debounced, min 2 chars, limit 20) — no full ledger load.
+  const {
+    results: headerSearchResults,
+    loading: headerSearchLoading,
+  } = useHeaderSearch(searchQuery, searchEntities, showGlobalSearch)
 
   const blockReason: "inactive" | "no-role" | null =
     user && profile && !profile.active
@@ -631,17 +612,6 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const displayName = profile?.display_name || user?.email?.split("@")[0] || "User"
   const initials = initialsFromDisplayName(displayName)
   const roleLabel = role ? (isValidRole(role) ? ROLE_LABELS[role] : role) : ""
-
-  const searchSuggestions = useMemo(
-    () =>
-      runSearch(
-        { inventory, clients, users },
-        searchQuery,
-        searchEntities,
-        { contactMatches }
-      ),
-    [inventory, clients, users, searchQuery, searchEntities, contactMatches]
-  )
 
   const searchSeeAllHref = useMemo(() => {
     const q = searchQuery.trim()
@@ -842,8 +812,8 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
               <div className="mt-4 flex-1 min-h-0 overflow-auto border-t border-border pt-4">
                 <SearchSuggestions
                   query={searchQuery}
-                  results={searchSuggestions}
-                  viaContactByClientId={contactViaByClient}
+                  results={headerSearchResults}
+                  loading={headerSearchLoading}
                   compact
                   seeAllHref={searchSeeAllHref}
                   onSeeAll={() => setMobileSearchOpen(false)}
@@ -896,8 +866,8 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                 >
                   <SearchSuggestions
                     query={searchQuery}
-                    results={searchSuggestions}
-                    viaContactByClientId={contactViaByClient}
+                    results={headerSearchResults}
+                    loading={headerSearchLoading}
                     seeAllHref={searchSeeAllHref}
                     onSeeAll={() => setSearchQuery("")}
                   />

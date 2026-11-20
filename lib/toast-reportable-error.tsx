@@ -8,7 +8,7 @@ import {
   type ParsedApiError,
 } from "@/lib/parse-api-error"
 import { reportAppEvent } from "@/lib/report-app-event"
-import { handleUnauthorized } from "@/lib/unauthorized"
+import { handleApiTransportStatus } from "@/lib/unauthorized"
 
 const REPORTABLE_TOAST_MS = 14_000
 
@@ -35,7 +35,7 @@ export function toastReportableApiError(parsed: ParsedApiError) {
 }
 
 export function toastFromApiErrorBody(body: unknown, fallback: string, status?: number) {
-  if (status != null && handleUnauthorized(status)) return
+  if (status != null && handleApiTransportStatus(status)) return
   const parsed = parseApiErrorBody(body)
   if (parsed) toastReportableApiError(parsed)
   else {

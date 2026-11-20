@@ -11,11 +11,9 @@ import { getSupabaseClient } from "@/lib/supabase/client"
 import { fetchStockRequestById, type StockRequestWithRelations } from "@/lib/supabase/stock-requests-db"
 import { Loader2 } from "lucide-react"
 import { PageBreadcrumbs } from "@/components/page-breadcrumbs"
-import { toastFromCaughtError } from "@/lib/toast-reportable-error"
 import {
-  isAuthFailure,
   loadErrorFromCaught,
-  notifySessionExpired,
+  notifyClassifiedFailure,
   signedOutLoadError,
 } from "@/lib/unauthorized"
 
@@ -56,8 +54,7 @@ export default function EditStockRequestPage() {
         setRow(r)
       } catch (e) {
         if (!cancelled) {
-          if (isAuthFailure(e)) notifySessionExpired()
-          else toastFromCaughtError(e, "Could not load request")
+          notifyClassifiedFailure(e, "Could not load this request.")
           setLoadError(loadErrorFromCaught(e, "Could not load this request."))
           setRow(null)
         }

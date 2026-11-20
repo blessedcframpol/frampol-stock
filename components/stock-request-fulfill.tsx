@@ -90,9 +90,8 @@ import {
 import { toast } from "sonner"
 import { toastFromCaughtError } from "@/lib/toast-reportable-error"
 import {
-  isAuthFailure,
   loadErrorFromCaught,
-  notifySessionExpired,
+  notifyClassifiedFailure,
   signedOutLoadError,
 } from "@/lib/unauthorized"
 import { AlertCircle, Copy, ExternalLink, Loader2, ScanLine, Truck, Volume2, VolumeX, X } from "lucide-react"
@@ -263,8 +262,9 @@ export function StockRequestFulfill({
         }
       } catch (e) {
         if (isCancelled()) return
-        if (isAuthFailure(e)) notifySessionExpired()
-        else toastFromCaughtError(e, "Could not load request")
+        notifyClassifiedFailure(e, "Could not load this request.", {
+          onRetry: () => void refresh({ isCancelled: () => false }),
+        })
         setLoadError(loadErrorFromCaught(e, "Could not load this request."))
         setData(EMPTY)
       } finally {

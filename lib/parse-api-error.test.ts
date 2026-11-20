@@ -22,13 +22,13 @@ describe("humanizeStockDbError", () => {
     ).toBe("You do not have permission to change inventory.")
   })
 
-  it("maps 23514 on transactions_date_iso_utc to the sale-date copy", () => {
+  it("maps 23514 on transactions_date_iso_utc to the range copy", () => {
     expect(
       humanizeStockDbError({
         code: "23514",
         message: 'new row for relation "transactions" violates check constraint "transactions_date_iso_utc"',
       })
-    ).toBe("Sale date must be a valid calendar date (YYYY-MM-DD) between 2020 and 2100.")
+    ).toBe("Transaction date is outside the allowed range. Check the sale date and try again.")
   })
 
   it("maps message mentioning transactions_date_iso_utc without code", () => {
@@ -36,7 +36,7 @@ describe("humanizeStockDbError", () => {
       humanizeStockDbError({
         message: "transactions_date_iso_utc check failed",
       })
-    ).toBe("Sale date must be a valid calendar date (YYYY-MM-DD) between 2020 and 2100.")
+    ).toBe("Transaction date is outside the allowed range. Check the sale date and try again.")
   })
 
   it("maps Invalid stock request transition P0001", () => {

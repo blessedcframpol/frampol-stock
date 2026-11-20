@@ -71,8 +71,11 @@ export function humanizeStockDbError(error: DbErrorLike): string | null {
   if (/ensure_product_line:\s*product .* already exists under vendor/i.test(message)) {
     return "That product name already exists in the catalog. Choose it from the list instead of adding it as new."
   }
-  if (error?.code === "23514" || /transactions_date_iso_utc/i.test(message)) {
-    return "Sale date must be a valid calendar date (YYYY-MM-DD) between 2020 and 2100."
+  if (
+    (error?.code === "23514" && /transactions_date_iso_utc/i.test(message)) ||
+    /transactions_date_iso_utc/i.test(message)
+  ) {
+    return "Transaction date is outside the allowed range. Check the sale date and try again."
   }
 
   return humanizeStockWriteRlsError(error)

@@ -19,6 +19,7 @@ import {
   type StockRequestWithRelations,
 } from "@/lib/supabase/stock-requests-db"
 import { requestItemsSummary } from "@/lib/stock-request-statuses"
+import { EmptyState } from "@/components/fs/empty-state"
 
 const OPEN_REQUEST_LIMIT = 200
 
@@ -99,7 +100,7 @@ export function AccountsHome({ onShowNotInvoiced }: { onShowNotInvoiced?: () => 
           {open === null ? (
             <p className="text-sm text-muted-foreground">Loading…</p>
           ) : pendingByRequester.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No requests are waiting for an invoice number.</p>
+            <EmptyState message="No requests are waiting for an invoice number." />
           ) : (
             pendingByRequester.map((g) => (
               <div key={g.id} className="flex flex-col gap-1">
@@ -139,7 +140,7 @@ export function AccountsHome({ onShowNotInvoiced }: { onShowNotInvoiced?: () => 
             {open === null ? (
               <p className="text-sm text-muted-foreground">Loading…</p>
             ) : fortinetToIssue.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No Fortinet requests are waiting to be issued.</p>
+              <EmptyState message="No Fortinet requests are waiting to be issued." />
             ) : (
               <ul className="flex flex-col gap-2 text-sm">
                 {fortinetToIssue.map((r) => (
