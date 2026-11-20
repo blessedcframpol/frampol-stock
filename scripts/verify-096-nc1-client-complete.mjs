@@ -9,8 +9,6 @@ import { runVerifyCli } from "./verify-harness.mjs"
 
 const NOTES = "harness-096"
 const EMAIL = "harness-096-"
-const TASK_EMAIL = `${EMAIL}new@test.local`
-const TASK_PHONE = "0771234567"
 
 export const MARKERS = [
   {
@@ -24,13 +22,21 @@ function stamp() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
 }
 
+/** Unique local mobiles so HY1 duplicate gate does not collide harness inserts. */
+let phoneSeq = 0
+function uniquePhone() {
+  phoneSeq += 1
+  // 077 + 7 digits → valid ZW mobile shape (e.g. 0771000001)
+  return `077${String(1000000 + phoneSeq).slice(-7)}`
+}
+
 function goodPayload(suffix) {
   return {
     id: `CLT-${NOTES}-${suffix}-${stamp()}`,
     name: `Harness Contact ${suffix}`,
     company: `Harness Co ${suffix}`,
     email: `${EMAIL}${suffix}@test.local`,
-    phone: TASK_PHONE,
+    phone: uniquePhone(),
     address: "12 Example Street, Harare",
     sites: [{ name: "HQ", address: "12 Example Street, Harare" }],
     total_orders: 0,
@@ -66,7 +72,7 @@ export async function runChecks(ctx) {
       "Harness Bad",
       "Harness Co",
       "N/A",
-      TASK_PHONE,
+      uniquePhone(),
       "12 Example Street, Harare",
       JSON.stringify([{ address: "12 Example Street, Harare" }]),
     ],
@@ -311,6 +317,77 @@ export async function runChecks(ctx) {
     pass("override_non_admin_insert_refused", salesSetsReason.error?.slice(0, 80) ?? "rejected")
   } else {
     fail("override_non_admin_insert_refused", "inserted")
+  }
+
+  // HY1: non-admin cannot create a flagged duplicate via direct INSERT (no override).
+  const dupBase = goodPayload("hy1base")
+  dupBase.phone = "0774445566"
+  const dupBaseOk = await attempt(
+    `INSERT INTO public.clients (id, name, company, email, phone, address, sites)
+     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)`,
+    [
+      dupBase.id,
+      dupBase.name,
+      dupBase.company,
+      dupBase.email,
+      dupBase.phone,
+      dupBase.address,
+      JSON.stringify(dupBase.sites),
+    ],
+  )
+  if (!dupBaseOk.ok) {
+    fail("hy1_dup_base_insert", dupBaseOk.error ?? "failed")
+  } else {
+    const salesDupNoOverride = await asUser(salesId, () =>
+      attempt(
+        `INSERT INTO public.clients (id, name, company, email, phone, address, sites)
+         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)`,
+        [
+          goodPayload("hy1salesdup").id,
+          "Harness Sales Dup Name",
+          "Harness Sales Dup Co",
+          `${EMAIL}hy1salesdup@test.local`,
+          dupBase.phone,
+          "12 Example Street, Harare",
+          JSON.stringify([{ address: "12 Example Street, Harare" }]),
+        ],
+      ),
+    )
+    if (
+      !salesDupNoOverride.ok &&
+      /possible duplicate|override reason/i.test(salesDupNoOverride.error ?? "")
+    ) {
+      pass("hy1_sales_duplicate_without_override_refused", salesDupNoOverride.error.slice(0, 100))
+    } else if (!salesDupNoOverride.ok) {
+      pass(
+        "hy1_sales_duplicate_without_override_refused",
+        salesDupNoOverride.error?.slice(0, 100) ?? "rejected",
+      )
+    } else {
+      fail("hy1_sales_duplicate_without_override_refused", "inserted without override")
+    }
+
+    const adminDupWithOverride = await asUser(adminId, () =>
+      attempt(
+        `INSERT INTO public.clients (id, name, company, email, phone, address, sites, duplicate_override_reason)
+         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)`,
+        [
+          goodPayload("hy1admindup").id,
+          "Harness Admin Dup Name",
+          "Harness Admin Dup Co",
+          `${EMAIL}hy1admindup@test.local`,
+          dupBase.phone,
+          "12 Example Street, Harare",
+          JSON.stringify([{ address: "12 Example Street, Harare" }]),
+          "HY1 admin override after duplicate phone match",
+        ],
+      ),
+    )
+    if (adminDupWithOverride.ok) {
+      pass("hy1_admin_duplicate_with_override_ok", "inserted")
+    } else {
+      fail("hy1_admin_duplicate_with_override_ok", adminDupWithOverride.error ?? "failed")
+    }
   }
 
   const ovrId = (

@@ -20,7 +20,8 @@ export const MARKERS = [
 /** Old script → assertions in this file (and probe where noted). */
 export const REPLACES = {
   "verify-047-stock-write-grants.mjs":
-    "rls_enabled_all_tables; viewer_select_policies (grants/RPC behavior → harness behavioral scripts)",
+    "rls_enabled_all_tables; viewer_select_policies; authenticated_write_grants_match_rls (HY1)",
+  "(HY1) write grant without RLS policy": "authenticated_write_grants_match_rls",
   "verify-051-product-fk.mjs":
     "constraints_and_indexes (uniq live serial); anon_execute_none (RPC ACL half)",
   "verify-054-request-hygiene.mjs": "audit_triggers (profile_access / request hygiene triggers where present)",
@@ -67,6 +68,67 @@ export async function runChecks(ctx) {
     )
     if (rows.rowCount === 0) pass("anon_execute_none", "anon can execute no public function")
     else fail("anon_execute_none", rows.rows.map((r) => r.proname).join(", "))
+  }
+
+  // --- HY1: no authenticated write grant without a matching RLS write policy; no TRUNCATE ---
+  {
+    const rows = await db.query(`
+      WITH tables AS (
+        SELECT c.oid, c.relname
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public' AND c.relkind = 'r'
+      ),
+      pols AS (
+        SELECT tablename,
+          bool_or(cmd = 'INSERT' OR cmd = 'ALL') AS pol_ins,
+          bool_or(cmd = 'UPDATE' OR cmd = 'ALL') AS pol_upd,
+          bool_or(cmd = 'DELETE' OR cmd = 'ALL') AS pol_del
+        FROM pg_policies
+        WHERE schemaname = 'public'
+          AND (
+            roles = '{public}'
+            OR 'authenticated' = ANY (roles)
+            OR 'anon' = ANY (roles)
+          )
+        GROUP BY tablename
+      )
+      SELECT t.relname,
+        has_table_privilege('authenticated', t.oid, 'INSERT') AS ins,
+        has_table_privilege('authenticated', t.oid, 'UPDATE') AS upd,
+        has_table_privilege('authenticated', t.oid, 'DELETE') AS del,
+        has_table_privilege('authenticated', t.oid, 'TRUNCATE') AS trunc_auth,
+        has_table_privilege('anon', t.oid, 'TRUNCATE') AS trunc_anon,
+        coalesce(p.pol_ins, false) AS pol_ins,
+        coalesce(p.pol_upd, false) AS pol_upd,
+        coalesce(p.pol_del, false) AS pol_del
+      FROM tables t
+      LEFT JOIN pols p ON p.tablename = t.relname
+      WHERE (has_table_privilege('authenticated', t.oid, 'INSERT') AND NOT coalesce(p.pol_ins, false))
+         OR (has_table_privilege('authenticated', t.oid, 'UPDATE') AND NOT coalesce(p.pol_upd, false))
+         OR (has_table_privilege('authenticated', t.oid, 'DELETE') AND NOT coalesce(p.pol_del, false))
+         OR has_table_privilege('authenticated', t.oid, 'TRUNCATE')
+         OR has_table_privilege('anon', t.oid, 'TRUNCATE')
+      ORDER BY 1
+    `)
+    if (rows.rowCount === 0) {
+      pass("authenticated_write_grants_match_rls", "no write grant without policy; no TRUNCATE")
+    } else {
+      fail(
+        "authenticated_write_grants_match_rls",
+        rows.rows
+          .map((r) => {
+            const bits = []
+            if (r.ins && !r.pol_ins) bits.push("INSERT")
+            if (r.upd && !r.pol_upd) bits.push("UPDATE")
+            if (r.del && !r.pol_del) bits.push("DELETE")
+            if (r.trunc_auth) bits.push("TRUNC_auth")
+            if (r.trunc_anon) bits.push("TRUNC_anon")
+            return `${r.relname}:{${bits.join(",")}}`
+          })
+          .join("; "),
+      )
+    }
   }
 
   // --- Public views: security_invoker or no SELECT for anon/authenticated ---
