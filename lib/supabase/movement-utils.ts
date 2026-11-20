@@ -680,3 +680,176 @@ export function computeMovementResult(
   )
   return { success, notFound, rejected, updatedItems, newTransactions }
 }
+
+
+// --- RA1 reverse/restore plan UI helpers ---
+
+export type ReversePlanItemState = {
+  status: string | null
+  location: string | null
+  client: string | null
+  assignedTo: string | null
+  stockPool: string | null
+}
+
+export type ReversePlanBlockedBy = {
+  batchId: string
+  serial: string
+  type: string
+  date: string
+}
+
+/** Movement types that can appear on a reverse plan (excludes Reversal). */
+export const REVERSE_PLAN_MOVEMENT_TYPES = [
+  "Inbound",
+  "Sale",
+  "POC Out",
+  "POC Return",
+  "Rental Return",
+  "Sale Return",
+  "Transfer",
+  "Dispose",
+  "Rentals",
+  "Decommissioned",
+  "Inspection Pass",
+  "Inspection Fail",
+  "Remediation Loaner Issue",
+] as const
+
+const OUTBOUND_MISTAKE_HINT =
+  "Use this if the movement was a mistake. If the client returned the kit, record a return instead."
+
+/** Static hints by movement type. Inbound create/restore variants are resolved in reverseMovementHint. */
+export const REVERSE_MOVEMENT_HINTS: Record<string, string> = {
+  Inbound:
+    "Reversing this Inbound removes the kit from stock. Use only if it was recorded by mistake.",
+  Sale: OUTBOUND_MISTAKE_HINT,
+  "POC Out": OUTBOUND_MISTAKE_HINT,
+  Rentals: OUTBOUND_MISTAKE_HINT,
+  "Sale Return":
+    "Reversing a Sale Return sends the kit back to Sold at the client. If the kit is physically here, use Inbound from RMA Hold instead.",
+  "POC Return":
+    "Reversing a POC Return sends the kit back to POC at the client. If the kit is physically here, leave the return and use a stock movement instead.",
+  "Rental Return":
+    "Reversing a Rental Return sends the kit back to Rented at the client. If the kit is physically here, leave the return and use a stock movement instead.",
+  Transfer: "Use this if the transfer was recorded to the wrong warehouse or by mistake.",
+  Dispose: "Reversing Dispose puts the kit back into stock at its previous status. Use only if disposal was recorded by mistake.",
+  Decommissioned:
+    "Reversing Decommissioned returns the kit to its outbound status (Sold, POC, or Rented).",
+  "Inspection Pass": "Reversing Inspection Pass puts the kit back to Pending Inspection.",
+  "Inspection Fail": "Reversing Inspection Fail puts the kit back to Pending Inspection.",
+  "Remediation Loaner Issue": OUTBOUND_MISTAKE_HINT,
+}
+
+const RETURN_HINT_TYPES = new Set(["Sale Return", "POC Return", "Rental Return"])
+
+export type ReverseHintContext = {
+  /** Inbound create (soft-delete) vs inbound from Maintenance/RMA Hold. */
+  softDelete?: boolean
+  /** Status reverse will restore (Inbound from hold → previous status). */
+  restoreStatus?: string | null
+}
+
+export type ReverseHintCallout = {
+  text: string
+  tone: "amber" | "info"
+}
+
+/** Amber for return undos; info/blue for other known types. Null only for unknown types. */
+export function reverseMovementHint(
+  movementType: string | null | undefined,
+  ctx?: ReverseHintContext,
+): ReverseHintCallout | null {
+  if (!movementType) return null
+  if (movementType === "Inbound") {
+    if (ctx?.softDelete) {
+      return {
+        tone: "info",
+        text: REVERSE_MOVEMENT_HINTS.Inbound,
+      }
+    }
+    const previous = ctx?.restoreStatus?.trim()
+    return {
+      tone: "info",
+      text: previous
+        ? `This puts the kit back to ${previous}.`
+        : "This puts the kit back to its previous status.",
+    }
+  }
+  const text = REVERSE_MOVEMENT_HINTS[movementType]
+  if (!text) return null
+  return {
+    text,
+    tone: RETURN_HINT_TYPES.has(movementType) ? "amber" : "info",
+  }
+}
+
+export const REVERSE_REASON_PLACEHOLDERS: Record<string, string> = {
+  "Sale Return": "e.g. Return was recorded on the wrong serial",
+  "POC Return": "e.g. Return was recorded on the wrong serial",
+  "Rental Return": "e.g. Return was recorded on the wrong serial",
+  Sale: "e.g. Client cancelled order — sale recorded in error.",
+  "POC Out": "e.g. POC was issued to the wrong client.",
+  Rentals: "e.g. Rental was recorded in error.",
+  Inbound: "e.g. Receipt was scanned twice or recorded by mistake.",
+  Transfer: "e.g. Transfer went to the wrong warehouse.",
+  Dispose: "e.g. Dispose was recorded on the wrong serial.",
+  Decommissioned: "e.g. Decommission was recorded by mistake.",
+  "Inspection Pass": "e.g. Wrong inspection outcome recorded.",
+  "Inspection Fail": "e.g. Wrong inspection outcome recorded.",
+  "Remediation Loaner Issue": "e.g. Loaner was issued in error.",
+}
+
+const NEUTRAL_REASON_PLACEHOLDER = "Why is this movement being undone?"
+
+export function reverseReasonPlaceholder(movementType: string | null | undefined): string {
+  if (!movementType) return NEUTRAL_REASON_PLACEHOLDER
+  return REVERSE_REASON_PLACEHOLDERS[movementType] ?? NEUTRAL_REASON_PLACEHOLDER
+}
+
+export const REVERSE_SERIAL_PREVIEW_LIMIT = 5
+
+/** Non-empty status / location / client joined with · (no em dashes for blanks). */
+export function formatPlanItemState(state: ReversePlanItemState | null | undefined): string {
+  if (!state) return ""
+  return [state.status, state.location, state.client]
+    .map((v) => (typeof v === "string" ? v.trim() : ""))
+    .filter(Boolean)
+    .join(" · ")
+}
+
+/** "Now: … → After: …" or "After: removed from stock" for soft-delete. */
+export function formatNowAfterLine(options: {
+  current: ReversePlanItemState | null | undefined
+  after: ReversePlanItemState | null | undefined
+  softDelete?: boolean
+}): string {
+  const nowParts = formatPlanItemState(options.current)
+  const now = nowParts ? `Now: ${nowParts}` : "Now:"
+  if (options.softDelete || options.after == null) {
+    return `${now} → After: removed from stock`
+  }
+  const afterParts = formatPlanItemState(options.after)
+  return afterParts ? `${now} → After: ${afterParts}` : `${now} → After:`
+}
+
+export type ReverseAgeBanner = {
+  level: "amber" | "red"
+  text: string
+}
+
+/** Age banner: >7 amber, ≥30 red. Never a hard block. */
+export function reverseAgeBanner(batchAgeDays: number | null | undefined): ReverseAgeBanner | null {
+  if (batchAgeDays == null || !Number.isFinite(batchAgeDays) || batchAgeDays <= 7) return null
+  const base = `This batch is ${batchAgeDays} days old. Reverse undoes that movement; it doesn't fix a stuck status.`
+  if (batchAgeDays >= 30) {
+    return { level: "red", text: `${base} Check the item's history first.` }
+  }
+  return { level: "amber", text: base }
+}
+
+export function reverseBlockedMessage(blocked: ReversePlanBlockedBy | null | undefined): string | null {
+  if (!blocked?.batchId) return null
+  const label = blocked.type?.trim() || "batch"
+  return `Reverse ${label} (${blocked.batchId}) first`
+}

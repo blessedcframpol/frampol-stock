@@ -440,12 +440,66 @@ async function readItem(serial) {
     await bumpRestoreClock(batchId)
   }
 
+  async function assertReversePlan(label, batchId, serial, opts = {}) {
+    await setUser(db, adminId)
+    const planRes = await db.query(`SELECT public.reverse_restore_plan($1) AS plan`, [batchId])
+    const plan = planRes.rows[0]?.plan
+    const row = plan?.rows?.[0]
+    const after = row?.after
+    const current = row?.current
+    const okShape =
+      plan &&
+      typeof plan.batchAgeDays === "number" &&
+      plan.movementType &&
+      Array.isArray(plan.rows) &&
+      row?.serial === serial &&
+      current &&
+      typeof current.status === "string" &&
+      (opts.expectSoftDelete
+        ? row.softDelete === true && row.after == null
+        : after && typeof after.status === "string")
+    if (!okShape) {
+      fail(`${label}_plan_shape`, JSON.stringify(plan))
+      return null
+    }
+    if (opts.expectBlocked) {
+      if (!plan.blockedBy?.batchId) {
+        fail(`${label}_plan_blocked`, JSON.stringify(plan.blockedBy))
+        return null
+      }
+      pass(`${label}_plan_blocked`, plan.blockedBy.batchId)
+    } else if (plan.blockedBy) {
+      fail(`${label}_plan_unblocked`, JSON.stringify(plan.blockedBy))
+      return null
+    } else {
+      pass(`${label}_plan_meta`, `${plan.movementType} age=${plan.batchAgeDays}`)
+    }
+    return plan
+  }
+
   async function roundTrip(name, serial, moved) {
     const recordedOk = await expectRecorded(`${name}_recorded`, moved.txnId, moved.before, moved.after, false)
     if (!recordedOk) return
+    const plan = await assertReversePlan(name, moved.batchId, serial)
     await reverse(moved.batchId)
     const reversed = await expectItem(`${name}_reverse`, serial, moved.before)
     if (!reversed) return
+    if (plan && !plan.rows[0]?.softDelete) {
+      const item = await db.query(
+        `SELECT status, location, client, assigned_to, stock_pool
+         FROM public.inventory_items WHERE serial_number = $1 AND deleted_at IS NULL`,
+        [serial],
+      )
+      const after = plan.rows[0].after
+      const got = item.rows[0]
+      const match =
+        got &&
+        got.status === after.status &&
+        (after.location == null || got.location === after.location) &&
+        (after.client == null ? !got.client : got.client === after.client)
+      if (match) pass(`${name}_plan_after_matches`, after.status)
+      else fail(`${name}_plan_after_matches`, JSON.stringify({ after, got }))
+    }
     const kept = await db.query(
       `SELECT
          (SELECT count(*)::int FROM public.transactions WHERE id = $1) AS original,
@@ -539,6 +593,7 @@ async function readItem(serial) {
   try {
     const created = await createInbound(`${PREFIX}-create`)
     await expectRecorded("create_recorded", created.txnId, stock, created.after, true)
+    await assertReversePlan("create", created.batchId, `${PREFIX}-create`, { expectSoftDelete: true })
     const forbidden = await ctx.asUser(technicianId, async () =>
       raises(db, `SELECT public.reverse_quick_scan_batch($1, $2, NULL, '[]'::jsonb, '[]'::jsonb)`, [created.batchId, REASON], "forbidden")
     )

@@ -346,24 +346,21 @@ Reconcile **physical** serials scanned on the floor against the system for **In 
 
 ### Purpose
 
-Audit **bulk operations** (batch_id) and individual lines; support **correction** via undo or admin batch reversal.
+Audit **bulk operations** (`batch_id`) and individual lines; support **admin correction** via batch reverse / restore (exact history kept).
 
 ### Batch view
 
-- Groups transactions sharing **`batch_id`** (generated per submit in `applyMovement` when not provided).
-- Clicking a row opens a **batch detail** dialog with a summary built from **all lines** in the batch: client (with a link to the client record when every line shares the same `client_id`), **invoice** numbers for roles that can view financials, **delivery note** link, transfer **from/to** locations when uniform across the batch, **assignee**, **disposal** reason and authoriser for Dispose batches, and **notes** (distinct values combined when they differ). Below that, search serials within the batch and **copy all serials** to clipboard for spreadsheets.
+- Groups transactions sharing **`batch_id`**.
+- Clicking a row opens the **movement batch drawer**: client, invoice (when allowed), delivery note, request context, **Collected by** (CT2, labelled as part of a reversed issue when the batch is reversed), serials, and timeline.
+- Currently reversed batches show a **Reversed** badge with date and reason at the top of the drawer.
 
-### Per-transaction undo
+### Admin: reverse / restore a batch
 
-- **`undoTransaction`** in store: looks up transaction type, applies **inverse patch** to inventory (`getRevertUpdatesForTransaction`), deletes transaction row. **Dispose** blocked.
-- Limitation: inverse is **best-effort** from the transaction row (e.g. Sale Return undo restores Sold using Sale Return txn’s client fields, not necessarily the original Sale).
-
-### Admin: reverse entire batch
-
-- Only **`canReverseQuickScanBatches`** (admin).
-- Only movement types listed in **`quick-scan-reversal-inventory.ts`** (e.g. Sale, POC Out, Rentals, Dispose, Transfer — not every type).
-- Requires **reason** (minimum length) and **return location** for stock coming back.
-- Writes **`batch_reversals`** audit row and calls API to delete matching transactions and revert inventory in one coordinated step.
+- **Who:** admin only (`canReverseQuickScanBatches` / `requireAdmin` / RPC `get_my_role() = admin`). Not creator-or-admin.
+- **Where:** Transaction History row menu or drawer footer → Reverse / Restore.
+- **Preview:** `GET /api/quick-scan/reverse|restore` → `reverse_restore_plan` / `restore_batch_plan`. Dialog shows per serial **Now → After** from the plan (including “removed from stock” for create-Inbound soft-delete), type-specific hints, age banner (>7 amber, ≥30 red; never a hard block), and a **blocked** state when a later active batch exists (Confirm disabled; link to that batch).
+- **Execute:** one RPC (`reverse_quick_scan_batch` / `restore_batch`). Reason ≥15 characters. Keeps original rows; inserts `Reversal` ledger rows; writes `batch_reversals` / `batch_restores`. Later active batches are a **hard block** in the RPC (no override). Inventory UPDATE audit carries `app.audit_reason`.
+- **When not to reverse:** if a return put the kit in RMA Hold / Pending Inspection and the kit is physically here, use **Inbound** (or the normal return→stock path) — do **not** reverse the return (that sends it back to Sold / POC / Rented at the client).
 
 ---
 

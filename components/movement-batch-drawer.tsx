@@ -441,6 +441,17 @@ export function MovementBatchDrawer({
               {statePill ? <StatusPill value={statePill} /> : null}
             </div>
           ) : null}
+          {merged?.isReversed && merged.reversalKind !== "void" ? (
+            <div className="rounded-md border border-warning/40 bg-warning-soft px-3 py-2 text-sm text-warning">
+              <p className="font-medium">Reversed</p>
+              <p className="text-xs opacity-90">
+                {merged.reversedAt
+                  ? formatRecordedAt(merged.reversedAt, merged.date, timeZone)
+                  : "Date unknown"}
+                {merged.reversalReason ? ` — ${merged.reversalReason}` : null}
+              </p>
+            </div>
+          ) : null}
         </SheetHeader>
 
         {loading && !merged ? (
@@ -489,7 +500,9 @@ export function MovementBatchDrawer({
                 </div>
                 {merged.collectedByName ? (
                   <div className="min-w-0 space-y-1">
-                    <p className="text-xs font-medium text-muted-foreground">Collected by</p>
+                    <p className="text-xs font-medium text-muted-foreground">
+                      {merged.isReversed ? "Collected by (reversed issue)" : "Collected by"}
+                    </p>
                     <p className="text-sm text-foreground">{merged.collectedByName}</p>
                   </div>
                 ) : null}

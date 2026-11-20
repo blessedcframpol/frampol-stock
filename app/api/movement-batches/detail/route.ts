@@ -138,10 +138,11 @@ export async function GET(request: Request) {
 
     const { data: reversalRow } = await supabase
       .from("batch_reversals")
-      .select("kind")
+      .select("kind, reversed_at, reversal_reason")
       .eq("batch_id", batchId)
       .maybeSingle()
 
+    const isReversed = Boolean(reversalRow)
     return NextResponse.json({
       batchId,
       batchKey: getTransactionOrderGroupKey(first),
@@ -162,8 +163,13 @@ export async function GET(request: Request) {
       collectedByName,
       lines,
       timeline,
-      isReversed: Boolean(reversalRow),
+      isReversed,
       reversalKind: reversalRow?.kind === "void" ? "void" : reversalRow ? "reversal" : undefined,
+      reversedAt: typeof reversalRow?.reversed_at === "string" ? reversalRow.reversed_at : undefined,
+      reversalReason:
+        typeof reversalRow?.reversal_reason === "string" && reversalRow.reversal_reason.trim()
+          ? reversalRow.reversal_reason.trim()
+          : undefined,
     })
   } catch (error) {
     return apiErrorResponse(500, "Failed to load batch details", {

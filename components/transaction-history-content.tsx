@@ -78,7 +78,20 @@ const HISTORY_MOVEMENT_ORDER = [
 ]
 import { SignedStorageLink } from "@/components/signed-storage-link"
 import { formatCount } from "@/lib/format-display"
-import { reversalResultLine, type RestorePlanRow, type ReversePlanRow } from "@/lib/quick-scan-reversal-inventory"
+import {
+  parseReversePlan,
+  parseRestorePlan,
+  type ReversePlanPayload,
+  type RestorePlanPayload,
+} from "@/lib/quick-scan-reversal-inventory"
+import {
+  formatNowAfterLine,
+  reverseAgeBanner,
+  reverseBlockedMessage,
+  reverseMovementHint,
+  reverseReasonPlaceholder,
+  REVERSE_SERIAL_PREVIEW_LIMIT,
+} from "@/lib/supabase/movement-utils"
 
 const MIN_REASON_LENGTH = 15
 
@@ -119,11 +132,13 @@ export function TransactionHistoryContent() {
   const [reverseTarget, setReverseTarget] = useState<TransactionBatchSummary | null>(null)
   const [reverseReason, setReverseReason] = useState("")
   const [confirmStatus, setConfirmStatus] = useState<Record<string, string>>({})
-  const [reversePlan, setReversePlan] = useState<ReversePlanRow[] | null>(null)
+  const [reversePlan, setReversePlan] = useState<ReversePlanPayload | null>(null)
   const [enteredFields, setEnteredFields] = useState<Record<string, { location: string; returnDate: string }>>({})
   const [restoreTarget, setRestoreTarget] = useState<TransactionBatchSummary | null>(null)
   const [restoreReason, setRestoreReason] = useState("")
-  const [restorePlan, setRestorePlan] = useState<{ kind: string; rows: RestorePlanRow[] } | null>(null)
+  const [restorePlan, setRestorePlan] = useState<RestorePlanPayload | null>(null)
+  const [reverseShowAllSerials, setReverseShowAllSerials] = useState(false)
+  const [restoreShowAllSerials, setRestoreShowAllSerials] = useState(false)
   const planRequest = useRef(0)
 
   useEffect(() => {
@@ -229,13 +244,13 @@ export function TransactionHistoryContent() {
         body: JSON.stringify({
           batchId: reverseTarget.reverseBatchId,
           reason,
-          confirmed: (reversePlan ?? [])
+          confirmed: (reversePlan?.rows ?? [])
             .filter((row) => row.needs.includes("status"))
             .map((row) => ({
               transactionId: row.transactionId,
               status: confirmStatus[row.transactionId] || row.status || "",
             })),
-          entered: (reversePlan ?? [])
+          entered: (reversePlan?.rows ?? [])
             .filter((row) => row.needs.includes("location") || row.needs.includes("return_date"))
             .map((row) => ({
               transactionId: row.transactionId,
@@ -275,6 +290,7 @@ export function TransactionHistoryContent() {
     setReversePlan(null)
     setEnteredFields({})
     setConfirmStatus({})
+    setReverseShowAllSerials(false)
   }
 
   async function openReverse(entry: TransactionBatchSummary) {
@@ -285,6 +301,7 @@ export function TransactionHistoryContent() {
     setReversePlan(null)
     setEnteredFields({})
     setConfirmStatus({})
+    setReverseShowAllSerials(false)
     try {
       const res = await fetch(`/api/quick-scan/reverse?batchId=${encodeURIComponent(entry.reverseBatchId)}`)
       const data = await res.json().catch(() => ({}))
@@ -294,12 +311,12 @@ export function TransactionHistoryContent() {
         closeReverse()
         return
       }
-      const rows = Array.isArray(data.rows) ? (data.rows as ReversePlanRow[]) : []
-      setReversePlan(rows)
-      setConfirmStatus(Object.fromEntries(rows.map((row) => [row.transactionId, row.status ?? ""])))
+      const plan = parseReversePlan(data)
+      setReversePlan(plan)
+      setConfirmStatus(Object.fromEntries(plan.rows.map((row) => [row.transactionId, row.status ?? ""])))
       setEnteredFields(
         Object.fromEntries(
-          rows.map((row) => [
+          plan.rows.map((row) => [
             row.transactionId,
             {
               location: row.location && isInternalLocation(row.location) ? row.location : "",
@@ -320,6 +337,7 @@ export function TransactionHistoryContent() {
     setRestoreTarget(null)
     setRestoreReason("")
     setRestorePlan(null)
+    setRestoreShowAllSerials(false)
   }
 
   async function openRestore(entry: TransactionBatchSummary) {
@@ -328,6 +346,7 @@ export function TransactionHistoryContent() {
     setRestoreTarget(entry)
     setRestoreReason("")
     setRestorePlan(null)
+    setRestoreShowAllSerials(false)
     try {
       const res = await fetch(`/api/quick-scan/restore?batchId=${encodeURIComponent(entry.reverseBatchId)}`)
       const data = await res.json().catch(() => ({}))
@@ -337,10 +356,7 @@ export function TransactionHistoryContent() {
         closeRestore()
         return
       }
-      setRestorePlan({
-        kind: typeof data.kind === "string" ? data.kind : "",
-        rows: Array.isArray(data.rows) ? data.rows : [],
-      })
+      setRestorePlan(parseRestorePlan(data))
     } catch (error) {
       if (request !== planRequest.current) return
       toastFromCaughtError(error, "Could not preview this restore")
@@ -377,7 +393,7 @@ export function TransactionHistoryContent() {
     }
   }
 
-  const reverseMissing = (reversePlan ?? []).some((row) => {
+  const reverseMissing = (reversePlan?.rows ?? []).some((row) => {
     const entered = enteredFields[row.transactionId]
     if (row.needs.includes("location") && !entered?.location) return true
     if (row.needs.includes("return_date") && !entered?.returnDate) return true
@@ -745,91 +761,168 @@ export function TransactionHistoryContent() {
             <DialogTitle>Reverse batch</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            A receipt that created the item is moved to trash. Fields that cannot be reconstructed are entered here
-            and stored on the reversal as entered at reversal.
+            Fields that cannot be reconstructed are entered here and stored on the reversal as entered at reversal.
           </p>
           {reversePlan === null ? (
             <p className="text-sm text-muted-foreground">Loading the kit this reversal will write…</p>
           ) : (
-            reversePlan.map((row) => {
-              const movementType = reverseTarget?.movementType ?? ""
-              const options =
-                movementType in REVERSAL_PREDECESSORS
-                  ? REVERSAL_PREDECESSORS[movementType as keyof typeof REVERSAL_PREDECESSORS]
-                  : row.status
-                    ? [row.status]
-                    : []
-              const entered = enteredFields[row.transactionId] ?? { location: "", returnDate: "" }
-              return (
-                <div key={row.transactionId} className="space-y-2">
-                  <p className="text-sm">
-                    {reversalResultLine(row, {
-                      status: confirmStatus[row.transactionId],
-                      location: entered.location,
-                      returnDate: entered.returnDate,
-                    })}
+            <>
+              {(() => {
+                const age = reverseAgeBanner(reversePlan.batchAgeDays)
+                if (!age) return null
+                return (
+                  <p
+                    className={
+                      age.level === "red"
+                        ? "rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+                        : "rounded-md border border-warning/40 bg-warning-soft px-3 py-2 text-sm text-warning"
+                    }
+                    role="status"
+                  >
+                    {age.text}
                   </p>
-                  <KitSerial serial={row.serial} />
-                  {row.needs.includes("status") ? (
-                    <div className="space-y-1">
-                      <Label>Status for {row.serial}</Label>
-                      <select
-                        className="h-10 w-full rounded-md border border-input bg-card px-3 text-sm text-foreground"
-                        value={confirmStatus[row.transactionId] || row.status || ""}
-                        onChange={(event) =>
-                          setConfirmStatus((prev) => ({ ...prev, [row.transactionId]: event.target.value }))
-                        }
+                )
+              })()}
+              {(() => {
+                const first = reversePlan.rows[0]
+                const hint = reverseMovementHint(reversePlan.movementType, {
+                  softDelete: first?.softDelete === true,
+                  restoreStatus: first?.after?.status ?? first?.status,
+                })
+                if (!hint) return null
+                return (
+                  <p
+                    className={
+                      hint.tone === "amber"
+                        ? "rounded-md border border-warning/40 bg-warning-soft px-3 py-2 text-sm text-warning"
+                        : "rounded-md border border-info/40 bg-info-soft px-3 py-2 text-sm text-info"
+                    }
+                    role="note"
+                  >
+                    {hint.text}
+                  </p>
+                )
+              })()}
+              {reversePlan.blockedBy ? (
+                <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">
+                  {reverseBlockedMessage(reversePlan.blockedBy)}.{" "}
+                  <button
+                    type="button"
+                    className="underline font-medium"
+                    onClick={() => {
+                      const id = reversePlan.blockedBy!.batchId
+                      closeReverse()
+                      focusBatch(id)
+                    }}
+                  >
+                    Open {reversePlan.blockedBy.batchId}
+                  </button>
+                </p>
+              ) : null}
+              {(() => {
+                const movementType = reversePlan.movementType ?? reverseTarget?.movementType ?? ""
+                const visible = reverseShowAllSerials
+                  ? reversePlan.rows
+                  : reversePlan.rows.slice(0, REVERSE_SERIAL_PREVIEW_LIMIT)
+                const hidden = reversePlan.rows.length - visible.length
+                return (
+                  <div className="space-y-3">
+                    {visible.map((row) => {
+                      const options =
+                        movementType in REVERSAL_PREDECESSORS
+                          ? REVERSAL_PREDECESSORS[movementType as keyof typeof REVERSAL_PREDECESSORS]
+                          : row.status
+                            ? [row.status]
+                            : []
+                      const entered = enteredFields[row.transactionId] ?? { location: "", returnDate: "" }
+                      return (
+                        <div key={row.transactionId} className="space-y-2">
+                          <p className="text-xs font-semibold tracking-wide text-muted-foreground">
+                            <KitSerial serial={row.serial} />
+                          </p>
+                          <p className="text-sm">
+                            {formatNowAfterLine({
+                              current: row.current,
+                              after: row.after,
+                              softDelete: row.softDelete,
+                            })}
+                          </p>
+                          {row.needs.includes("status") ? (
+                            <div className="space-y-1">
+                              <Label>Status for {row.serial}</Label>
+                              <select
+                                className="h-10 w-full rounded-md border border-input bg-card px-3 text-sm text-foreground"
+                                value={confirmStatus[row.transactionId] || row.status || ""}
+                                onChange={(event) =>
+                                  setConfirmStatus((prev) => ({
+                                    ...prev,
+                                    [row.transactionId]: event.target.value,
+                                  }))
+                                }
+                              >
+                                {options.map((status) => (
+                                  <option key={status} value={status}>
+                                    {status}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          ) : null}
+                          {row.needs.includes("location") ? (
+                            <div className="space-y-1">
+                              <Label>Warehouse for {row.serial}</Label>
+                              <select
+                                className="h-10 w-full rounded-md border border-input bg-card px-3 text-sm text-foreground"
+                                value={entered.location}
+                                onChange={(event) =>
+                                  setEnteredFields((prev) => ({
+                                    ...prev,
+                                    [row.transactionId]: { ...entered, location: event.target.value },
+                                  }))
+                                }
+                              >
+                                <option value="">Choose a warehouse</option>
+                                {INTERNAL_LOCATIONS.map((location) => (
+                                  <option key={location} value={location}>
+                                    {location}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          ) : null}
+                          {row.needs.includes("return_date") ? (
+                            <div className="space-y-1">
+                              <Label>Return date for {row.serial}</Label>
+                              <input
+                                type="date"
+                                required
+                                className="h-10 w-full rounded-md border border-input bg-card px-3 text-sm text-foreground"
+                                value={entered.returnDate}
+                                onChange={(event) =>
+                                  setEnteredFields((prev) => ({
+                                    ...prev,
+                                    [row.transactionId]: { ...entered, returnDate: event.target.value },
+                                  }))
+                                }
+                              />
+                            </div>
+                          ) : null}
+                        </div>
+                      )
+                    })}
+                    {hidden > 0 ? (
+                      <button
+                        type="button"
+                        className="text-sm font-medium text-brand underline-offset-4 hover:underline"
+                        onClick={() => setReverseShowAllSerials(true)}
                       >
-                        {options.map((status) => (
-                          <option key={status} value={status}>
-                            {status}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  ) : null}
-                  {row.needs.includes("location") ? (
-                    <div className="space-y-1">
-                      <Label>Warehouse for {row.serial}</Label>
-                      <select
-                        className="h-10 w-full rounded-md border border-input bg-card px-3 text-sm text-foreground"
-                        value={entered.location}
-                        onChange={(event) =>
-                          setEnteredFields((prev) => ({
-                            ...prev,
-                            [row.transactionId]: { ...entered, location: event.target.value },
-                          }))
-                        }
-                      >
-                        <option value="">Choose a warehouse</option>
-                        {INTERNAL_LOCATIONS.map((location) => (
-                          <option key={location} value={location}>
-                            {location}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  ) : null}
-                  {row.needs.includes("return_date") ? (
-                    <div className="space-y-1">
-                      <Label>Return date for {row.serial}</Label>
-                      <input
-                        type="date"
-                        required
-                        className="h-10 w-full rounded-md border border-input bg-card px-3 text-sm text-foreground"
-                        value={entered.returnDate}
-                        onChange={(event) =>
-                          setEnteredFields((prev) => ({
-                            ...prev,
-                            [row.transactionId]: { ...entered, returnDate: event.target.value },
-                          }))
-                        }
-                      />
-                    </div>
-                  ) : null}
-                </div>
-              )
-            })
+                        and {hidden} more
+                      </button>
+                    ) : null}
+                  </div>
+                )
+              })()}
+            </>
           )}
           <div className="space-y-2">
             <Label htmlFor="reverse-reason">Reason (required, min {MIN_REASON_LENGTH} characters)</Label>
@@ -837,7 +930,9 @@ export function TransactionHistoryContent() {
               id="reverse-reason"
               value={reverseReason}
               onChange={(e) => setReverseReason(e.target.value)}
-              placeholder="e.g. Client cancelled order — sale recorded in error."
+              placeholder={reverseReasonPlaceholder(
+                reversePlan?.movementType ?? reverseTarget?.movementType,
+              )}
               className="min-h-[100px] resize-y"
             />
           </div>
@@ -848,7 +943,12 @@ export function TransactionHistoryContent() {
             <Button
               variant="destructive"
               onClick={() => void submitReverse()}
-              disabled={reversingBatchKey !== null || reversePlan === null || reverseMissing}
+              disabled={
+                reversingBatchKey !== null ||
+                reversePlan === null ||
+                reverseMissing ||
+                Boolean(reversePlan?.blockedBy)
+              }
             >
               {reversingBatchKey !== null ? (
                 <>
@@ -875,19 +975,71 @@ export function TransactionHistoryContent() {
           {restorePlan === null ? (
             <p className="text-sm text-muted-foreground">Loading the kit this restore will write…</p>
           ) : restorePlan.kind === "void" ? (
-            <p className="text-sm">Kit will return to: no stock change</p>
+            <p className="text-sm">After: no stock change</p>
           ) : (
-            restorePlan.rows.map((row) => (
-              <p key={row.transactionId} className="text-sm">
-                {reversalResultLine(
-                  { softDelete: false, status: row.status, client: row.client, location: row.location, returnDate: row.returnDate },
-                  {}
-                )}
-                <span className="mt-1 block">
-                  <KitSerial serial={row.serial} />
-                </span>
-              </p>
-            ))
+            <>
+              {(() => {
+                const age = reverseAgeBanner(restorePlan.batchAgeDays)
+                if (!age) return null
+                return (
+                  <p
+                    className={
+                      age.level === "red"
+                        ? "rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+                        : "rounded-md border border-warning/40 bg-warning-soft px-3 py-2 text-sm text-warning"
+                    }
+                    role="status"
+                  >
+                    {age.text.replace("Reverse undoes", "Restore re-applies")}
+                  </p>
+                )
+              })()}
+              {restorePlan.blockedBy ? (
+                <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">
+                  {reverseBlockedMessage(restorePlan.blockedBy)}.{" "}
+                  <button
+                    type="button"
+                    className="underline font-medium"
+                    onClick={() => {
+                      const id = restorePlan.blockedBy!.batchId
+                      closeRestore()
+                      focusBatch(id)
+                    }}
+                  >
+                    Open {restorePlan.blockedBy.batchId}
+                  </button>
+                </p>
+              ) : null}
+              {(() => {
+                const visible = restoreShowAllSerials
+                  ? restorePlan.rows
+                  : restorePlan.rows.slice(0, REVERSE_SERIAL_PREVIEW_LIMIT)
+                const hidden = restorePlan.rows.length - visible.length
+                return (
+                  <div className="space-y-3">
+                    {visible.map((row) => (
+                      <div key={row.transactionId} className="space-y-1">
+                        <p className="text-xs font-semibold tracking-wide text-muted-foreground">
+                          <KitSerial serial={row.serial} />
+                        </p>
+                        <p className="text-sm">
+                          {formatNowAfterLine({ current: row.current, after: row.after })}
+                        </p>
+                      </div>
+                    ))}
+                    {hidden > 0 ? (
+                      <button
+                        type="button"
+                        className="text-sm font-medium text-brand underline-offset-4 hover:underline"
+                        onClick={() => setRestoreShowAllSerials(true)}
+                      >
+                        and {hidden} more
+                      </button>
+                    ) : null}
+                  </div>
+                )
+              })()}
+            </>
           )}
           <div className="space-y-2">
             <Label htmlFor="restore-reason">Reason (required, min {MIN_REASON_LENGTH} characters)</Label>
@@ -903,7 +1055,12 @@ export function TransactionHistoryContent() {
             <Button variant="outline" onClick={closeRestore} disabled={reversingBatchKey !== null}>
               Cancel
             </Button>
-            <Button onClick={() => void submitRestore()} disabled={reversingBatchKey !== null || restorePlan === null}>
+            <Button
+              onClick={() => void submitRestore()}
+              disabled={
+                reversingBatchKey !== null || restorePlan === null || Boolean(restorePlan?.blockedBy)
+              }
+            >
               {reversingBatchKey !== null ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin mr-2" />

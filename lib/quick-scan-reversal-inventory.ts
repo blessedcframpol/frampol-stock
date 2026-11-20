@@ -1,5 +1,6 @@
 import type { AppSupabaseClient } from "@/lib/supabase/app-client"
 import type { InternalLocation, JsonValue } from "@/lib/data"
+import type { ReversePlanBlockedBy, ReversePlanItemState } from "@/lib/supabase/movement-utils"
 import { fetchAllPages } from "@/lib/supabase/postgrest-page"
 
 export function isQuickScanStockReversibleMovement(movementType: string | null | undefined): boolean {
@@ -33,6 +34,8 @@ export type ReversePlanRow = {
   pocOutDate: string | null
   returnDate: string | null
   needs: Array<"status" | "location" | "return_date">
+  current: ReversePlanItemState | null
+  after: ReversePlanItemState | null
 }
 
 export type RestorePlanRow = {
@@ -44,12 +47,57 @@ export type RestorePlanRow = {
   location: string | null
   pocOutDate: string | null
   returnDate: string | null
+  current: ReversePlanItemState | null
+  after: ReversePlanItemState | null
+}
+
+export type ReversePlanPayload = {
+  batchId: string
+  movementType: string | null
+  batchAgeDays: number | null
+  blockedBy: ReversePlanBlockedBy | null
+  rows: ReversePlanRow[]
+}
+
+export type RestorePlanPayload = {
+  batchId: string
+  kind: string
+  movementType: string | null
+  batchAgeDays: number | null
+  blockedBy: ReversePlanBlockedBy | null
+  rows: RestorePlanRow[]
 }
 
 function textOrNull(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value : null
 }
 
+function parseItemState(value: unknown): ReversePlanItemState | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null
+  const row = value as Record<string, unknown>
+  return {
+    status: textOrNull(row.status),
+    location: textOrNull(row.location),
+    client: textOrNull(row.client),
+    assignedTo: textOrNull(row.assignedTo),
+    stockPool: textOrNull(row.stockPool),
+  }
+}
+
+function parseBlockedBy(value: unknown): ReversePlanBlockedBy | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null
+  const row = value as Record<string, unknown>
+  const batchId = typeof row.batchId === "string" ? row.batchId.trim() : ""
+  if (!batchId) return null
+  return {
+    batchId,
+    serial: typeof row.serial === "string" ? row.serial : "",
+    type: typeof row.type === "string" ? row.type : "",
+    date: typeof row.date === "string" ? row.date : "",
+  }
+}
+
+/** @deprecated Prefer formatNowAfterLine from movement-utils (RA1). */
 export function reversalResultLine(
   row: Pick<ReversePlanRow, "softDelete" | "status" | "client" | "location" | "returnDate">,
   entered?: { status?: string; location?: string; returnDate?: string }
@@ -62,42 +110,59 @@ export function reversalResultLine(
   return `Kit will return to: ${status} · ${client} · ${location} · ${returnDate}`
 }
 
-export function parseReversePlan(data: unknown): ReversePlanRow[] {
+export function parseReversePlan(data: unknown): ReversePlanPayload {
   if (!data || typeof data !== "object" || Array.isArray(data) || !("rows" in data) || !Array.isArray(data.rows)) {
     throw new Error("Reverse plan was not a list of kits")
   }
-  return data.rows.map((row) => {
-    if (!row || typeof row !== "object" || Array.isArray(row)) throw new Error("Reverse plan row is invalid")
-    const transactionId = "transactionId" in row && typeof row.transactionId === "string" ? row.transactionId : ""
-    const serial = "serial" in row && typeof row.serial === "string" ? row.serial : ""
-    if (!transactionId || !serial) throw new Error("Reverse plan row is missing its kit")
-    const rawNeeds = "needs" in row && Array.isArray(row.needs) ? row.needs : []
-    const needs = rawNeeds.filter(
-      (need: unknown): need is ReversePlanRow["needs"][number] =>
-        need === "status" || need === "location" || need === "return_date"
-    )
-    return {
-      transactionId,
-      serial,
-      hasImage: "hasImage" in row && row.hasImage === true,
-      softDelete: "softDelete" in row && row.softDelete === true,
-      status: textOrNull("status" in row ? row.status : null),
-      client: textOrNull("client" in row ? row.client : null),
-      assignedTo: textOrNull("assignedTo" in row ? row.assignedTo : null),
-      location: textOrNull("location" in row ? row.location : null),
-      pocOutDate: textOrNull("pocOutDate" in row ? row.pocOutDate : null),
-      returnDate: textOrNull("returnDate" in row ? row.returnDate : null),
-      needs,
-    }
-  })
+  const root = data as Record<string, unknown>
+  const batchAgeRaw = root.batchAgeDays
+  return {
+    batchId: typeof root.batchId === "string" ? root.batchId : "",
+    movementType: textOrNull(root.movementType),
+    batchAgeDays: typeof batchAgeRaw === "number" && Number.isFinite(batchAgeRaw) ? batchAgeRaw : null,
+    blockedBy: parseBlockedBy(root.blockedBy),
+    rows: data.rows.map((row) => {
+      if (!row || typeof row !== "object" || Array.isArray(row)) throw new Error("Reverse plan row is invalid")
+      const transactionId = "transactionId" in row && typeof row.transactionId === "string" ? row.transactionId : ""
+      const serial = "serial" in row && typeof row.serial === "string" ? row.serial : ""
+      if (!transactionId || !serial) throw new Error("Reverse plan row is missing its kit")
+      const rawNeeds = "needs" in row && Array.isArray(row.needs) ? row.needs : []
+      const needs = rawNeeds.filter(
+        (need: unknown): need is ReversePlanRow["needs"][number] =>
+          need === "status" || need === "location" || need === "return_date"
+      )
+      const softDelete = "softDelete" in row && row.softDelete === true
+      return {
+        transactionId,
+        serial,
+        hasImage: "hasImage" in row && row.hasImage === true,
+        softDelete,
+        status: textOrNull("status" in row ? row.status : null),
+        client: textOrNull("client" in row ? row.client : null),
+        assignedTo: textOrNull("assignedTo" in row ? row.assignedTo : null),
+        location: textOrNull("location" in row ? row.location : null),
+        pocOutDate: textOrNull("pocOutDate" in row ? row.pocOutDate : null),
+        returnDate: textOrNull("returnDate" in row ? row.returnDate : null),
+        needs,
+        current: parseItemState("current" in row ? row.current : null),
+        after: softDelete ? null : parseItemState("after" in row ? row.after : null),
+      }
+    }),
+  }
 }
 
-export function parseRestorePlan(data: unknown): { kind: string; rows: RestorePlanRow[] } {
+export function parseRestorePlan(data: unknown): RestorePlanPayload {
   if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("Restore plan was not an object")
-  const kind = "kind" in data && typeof data.kind === "string" ? data.kind : ""
-  const rows = "rows" in data && Array.isArray(data.rows) ? data.rows : []
+  const root = data as Record<string, unknown>
+  const kind = "kind" in root && typeof root.kind === "string" ? root.kind : ""
+  const rows = "rows" in root && Array.isArray(root.rows) ? root.rows : []
+  const batchAgeRaw = root.batchAgeDays
   return {
+    batchId: typeof root.batchId === "string" ? root.batchId : "",
     kind,
+    movementType: textOrNull(root.movementType),
+    batchAgeDays: typeof batchAgeRaw === "number" && Number.isFinite(batchAgeRaw) ? batchAgeRaw : null,
+    blockedBy: parseBlockedBy(root.blockedBy),
     rows: rows.map((row) => {
       if (!row || typeof row !== "object" || Array.isArray(row)) throw new Error("Restore plan row is invalid")
       const transactionId = "transactionId" in row && typeof row.transactionId === "string" ? row.transactionId : ""
@@ -112,6 +177,8 @@ export function parseRestorePlan(data: unknown): { kind: string; rows: RestorePl
         location: textOrNull("location" in row ? row.location : null),
         pocOutDate: textOrNull("pocOutDate" in row ? row.pocOutDate : null),
         returnDate: textOrNull("returnDate" in row ? row.returnDate : null),
+        current: parseItemState("current" in row ? row.current : null),
+        after: parseItemState("after" in row ? row.after : null),
       }
     }),
   }

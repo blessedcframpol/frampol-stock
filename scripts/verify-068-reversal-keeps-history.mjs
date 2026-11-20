@@ -426,6 +426,21 @@ export async function runChecks(ctx) {
       const serial = `${PREFIX}-order`
       const created = await createInbound(serial)
       const sale = await move(serial, "Sale", "Sold")
+      await setJwt(db, adminId)
+      {
+        const planRes = await db.query(`SELECT public.reverse_restore_plan($1) AS plan`, [created.batchId])
+        const plan = planRes.rows[0]?.plan
+        if (
+          plan?.blockedBy?.batchId === sale.batchId &&
+          typeof plan.batchAgeDays === "number" &&
+          plan.movementType === "Inbound" &&
+          plan.rows?.[0]?.current?.status
+        ) {
+          pass("plan_blocked_by_later", sale.batchId)
+        } else {
+          fail("plan_blocked_by_later", JSON.stringify(plan))
+        }
+      }
       const blocked = await ctx.raises(
         `SELECT public.reverse_quick_scan_batch($1, $2, NULL, '[]'::jsonb, '[]'::jsonb)`,
         [created.batchId, REASON],

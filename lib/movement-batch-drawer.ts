@@ -45,6 +45,9 @@ export type MovementBatchDrawerPayload = {
   collectedByName?: string | null
   isReversed?: boolean
   reversalKind?: "reversal" | "void"
+  /** When currently reversed — from batch_reversals. */
+  reversedAt?: string
+  reversalReason?: string
   lines: MovementBatchDrawerLine[]
   timeline: MovementBatchTimelineEntry[]
 }

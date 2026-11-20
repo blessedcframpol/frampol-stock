@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
         metadata: reversalMeta(batchId),
       })
     }
-    return NextResponse.json({ rows: parseReversePlan(data) })
+    return NextResponse.json(parseReversePlan(data))
   } catch (error) {
     return apiErrorResponse(500, "Could not preview this reversal", {
       cause: error,
