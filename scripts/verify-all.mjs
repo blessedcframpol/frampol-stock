@@ -64,6 +64,7 @@ const SUITE = [
   { id: "100", file: "scripts/verify-100-nt3-web-push.mjs" },
   { id: "101", file: "scripts/verify-101-ct2-collected-by.mjs" },
   { id: "102", file: "scripts/verify-102-pl1-product-lines-admin.mjs" },
+  { id: "103", file: "scripts/verify-103-vn1-vendors.mjs" },
   { id: "movement", file: "scripts/verify-movement-transitions.mjs" },
 ]
 

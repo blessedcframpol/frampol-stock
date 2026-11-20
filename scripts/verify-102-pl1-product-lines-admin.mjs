@@ -51,6 +51,17 @@ export async function runChecks(ctx) {
   const blockedId = `${PREFIX}-blocked`
   const retireId = `${PREFIX}-retire`
 
+  // VN1: product_lines.vendor FK — seed harness vendors first.
+  await db.query(
+    `INSERT INTO public.vendors (name, is_protected, protected_reason)
+     VALUES
+       ('Harness', false, NULL),
+       ('OtherVendor', false, NULL),
+       ('VendorA', false, NULL),
+       ('VendorB', false, NULL)
+     ON CONFLICT (name) DO NOTHING`,
+  )
+
   await db.query(
     `INSERT INTO public.product_lines (id, product_name, vendor, requires_serial, requires_cloud_key, is_active)
      VALUES

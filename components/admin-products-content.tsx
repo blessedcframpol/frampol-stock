@@ -12,12 +12,14 @@ import { LoadErrorInline } from "@/components/fs/load-error-inline"
 import { ListToolbar, ListToolbarSearch } from "@/components/fs/list-toolbar"
 import { StatusPill } from "@/components/fs/status-pill"
 import { tableNumericClass } from "@/components/fs/data-table"
+import { AdminVendorsPanel } from "@/components/admin-vendors-panel"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   Dialog,
   DialogContent,
@@ -50,10 +52,14 @@ import {
 import { useAuth } from "@/lib/auth-context"
 import { canManageUsers } from "@/lib/permissions"
 import {
+  addVendor,
   adminUpdateProductLine,
   deleteProduct,
   fetchAdminProductLinesOverview,
+  fetchAdminVendorsOverview,
   mergeProductLines,
+  moveProductsToVendor,
+  previewVendorProductMove,
   retireProductLine,
   unretireProductLine,
 } from "@/lib/settings"
@@ -63,6 +69,12 @@ import {
   productLineStatusLabel,
   type ProductLineAdminRow,
 } from "@/lib/product-lines-admin"
+import {
+  moveProductsConfirmMessage,
+  VENDOR_MOVE_COPY,
+  type VendorAdminRow,
+  type VendorMovePreview,
+} from "@/lib/vendors-admin"
 import { toastFromCaughtError } from "@/lib/toast-reportable-error"
 import { formatCount } from "@/lib/format-display"
 
@@ -70,18 +82,32 @@ export function AdminProductsContent() {
   const { role } = useAuth()
   const allowed = canManageUsers(role)
   const [rows, setRows] = useState<ProductLineAdminRow[]>([])
+  const [vendorRows, setVendorRows] = useState<VendorAdminRow[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [tab, setTab] = useState("products")
   const [search, setSearch] = useState("")
   const [vendor, setVendor] = useState<string>("all")
   const [status, setStatus] = useState<"all" | "active" | "retired">("all")
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
 
   const [editRow, setEditRow] = useState<ProductLineAdminRow | null>(null)
   const [editName, setEditName] = useState("")
   const [editVendor, setEditVendor] = useState("")
+  const [editVendorMode, setEditVendorMode] = useState<"pick" | "new">("pick")
+  const [editNewVendor, setEditNewVendor] = useState("")
   const [editSerial, setEditSerial] = useState(true)
   const [editCloud, setEditCloud] = useState(false)
   const [editBusy, setEditBusy] = useState(false)
+
+  const [moveOpen, setMoveOpen] = useState(false)
+  const [moveVendor, setMoveVendor] = useState("")
+  const [moveVendorMode, setMoveVendorMode] = useState<"pick" | "new">("pick")
+  const [moveNewVendor, setMoveNewVendor] = useState("")
+  const [moveReason, setMoveReason] = useState("")
+  const [movePreview, setMovePreview] = useState<VendorMovePreview | null>(null)
+  const [movePreviewBusy, setMovePreviewBusy] = useState(false)
+  const [moveBusy, setMoveBusy] = useState(false)
 
   const [retireRow, setRetireRow] = useState<ProductLineAdminRow | null>(null)
   const [retireReason, setRetireReason] = useState("")
@@ -102,11 +128,16 @@ export function AdminProductsContent() {
     setLoading(true)
     setLoadError(null)
     try {
-      const next = await fetchAdminProductLinesOverview()
+      const [next, vendorsNext] = await Promise.all([
+        fetchAdminProductLinesOverview(),
+        fetchAdminVendorsOverview(),
+      ])
       setRows(next)
+      setVendorRows(vendorsNext)
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "Could not load products")
       setRows([])
+      setVendorRows([])
     } finally {
       setLoading(false)
     }
@@ -117,10 +148,7 @@ export function AdminProductsContent() {
     void reload()
   }, [allowed, reload])
 
-  const vendors = useMemo(() => {
-    const set = new Set(rows.map((r) => r.vendor).filter(Boolean))
-    return [...set].sort((a, b) => a.localeCompare(b))
-  }, [rows])
+  const vendors = useMemo(() => vendorRows.map((v) => v.name).sort((a, b) => a.localeCompare(b)), [vendorRows])
 
   const filtered = useMemo(
     () =>
@@ -138,10 +166,34 @@ export function AdminProductsContent() {
       (r) =>
         r.id !== mergeSource.id &&
         !r.mergedIntoId &&
-        !r.retiredAt &&
         r.isActive,
     )
   }, [rows, mergeSource])
+
+  const selectedRows = useMemo(
+    () => filtered.filter((r) => selectedIds.has(r.id)),
+    [filtered, selectedIds],
+  )
+
+  function toggleSelected(id: string, on: boolean) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (on) next.add(id)
+      else next.delete(id)
+      return next
+    })
+  }
+
+  function toggleSelectAllVisible(on: boolean) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      for (const row of filtered) {
+        if (on) next.add(row.id)
+        else next.delete(row.id)
+      }
+      return next
+    })
+  }
 
   if (!allowed) {
     return (
@@ -156,6 +208,8 @@ export function AdminProductsContent() {
     setEditRow(row)
     setEditName(row.productName)
     setEditVendor(row.vendor)
+    setEditVendorMode("pick")
+    setEditNewVendor("")
     setEditSerial(row.requiresSerial)
     setEditCloud(row.requiresCloudKey)
   }
@@ -164,10 +218,19 @@ export function AdminProductsContent() {
     if (!editRow) return
     setEditBusy(true)
     try {
+      let vendorName = editVendor
+      if (editVendorMode === "new") {
+        vendorName = editNewVendor.trim()
+        if (!vendorName) {
+          toast.error("Enter a vendor name")
+          return
+        }
+        await addVendor(vendorName)
+      }
       const result = await adminUpdateProductLine({
         productId: editRow.id,
         productName: editName,
-        vendor: editVendor,
+        vendor: vendorName,
         requiresSerial: editSerial,
         requiresCloudKey: editCloud,
       })
@@ -184,6 +247,82 @@ export function AdminProductsContent() {
       toastFromCaughtError(e, "Could not update product")
     } finally {
       setEditBusy(false)
+    }
+  }
+
+  const moveTargetName =
+    moveVendorMode === "new" ? moveNewVendor.trim() : moveVendor.trim()
+
+  useEffect(() => {
+    if (!moveOpen || !moveTargetName || selectedRows.length === 0) {
+      setMovePreview(null)
+      return
+    }
+    if (moveVendorMode === "new") {
+      // New vendor is never protected; skip server preview until created.
+      setMovePreview(null)
+      return
+    }
+    let cancelled = false
+    setMovePreviewBusy(true)
+    void previewVendorProductMove({
+      targetVendor: moveTargetName,
+      productIds: selectedRows.map((r) => r.id),
+    })
+      .then((p) => {
+        if (!cancelled) setMovePreview(p)
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setMovePreview(null)
+          toastFromCaughtError(e, "Could not preview move")
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setMovePreviewBusy(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [moveOpen, moveTargetName, moveVendorMode, selectedRows])
+
+  async function confirmMove() {
+    if (selectedRows.length === 0) return
+    setMoveBusy(true)
+    try {
+      let vendorName = moveVendor
+      if (moveVendorMode === "new") {
+        vendorName = moveNewVendor.trim()
+        if (!vendorName) {
+          toast.error("Enter a vendor name")
+          return
+        }
+        await addVendor(vendorName)
+      }
+      if (!vendorName) {
+        toast.error("Choose a vendor")
+        return
+      }
+      const result = await moveProductsToVendor({
+        productIds: selectedRows.map((r) => r.id),
+        vendor: vendorName,
+        reason: moveReason.trim() || undefined,
+      })
+      toast.success(
+        `Moved ${formatCount(result.products_moved)} product(s) to ${result.vendor}`,
+      )
+      setMoveOpen(false)
+      setSelectedIds(new Set())
+      setMoveVendor("")
+      setMoveNewVendor("")
+      setMoveVendorMode("pick")
+      setMoveReason("")
+      setMovePreview(null)
+      await reload()
+    } catch (e) {
+      toastFromCaughtError(e, "Could not move products")
+    } finally {
+      setMoveBusy(false)
     }
   }
 
@@ -260,7 +399,7 @@ export function AdminProductsContent() {
         <div>
           <h1 className={pageTitleClass}>Products</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Catalogue admin — rename, flags, retire, merge. History keeps retired names.
+            Catalogue admin — products and vendors. History keeps retired names.
           </p>
         </div>
         <Button variant="outline" size="sm" asChild>
@@ -268,156 +407,206 @@ export function AdminProductsContent() {
         </Button>
       </div>
 
-      <ListToolbar
-        search={
-          <>
-            <ListToolbarSearch
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search name or vendor…"
-              aria-label="Search products"
-            />
-            <Select value={vendor} onValueChange={setVendor}>
-              <SelectTrigger className="h-9 w-full sm:w-[10rem] rounded-lg bg-background">
-                <SelectValue placeholder="Vendor" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All vendors</SelectItem>
-                {vendors.map((v) => (
-                  <SelectItem key={v} value={v}>
-                    {v}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={status} onValueChange={(v) => setStatus(v as typeof status)}>
-              <SelectTrigger className="h-9 w-full sm:w-[9rem] rounded-lg bg-background">
-                <SelectValue placeholder="Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All statuses</SelectItem>
-                <SelectItem value="active">Active</SelectItem>
-                <SelectItem value="retired">Retired</SelectItem>
-              </SelectContent>
-            </Select>
-          </>
-        }
-        count={`${filtered.length} shown`}
-      />
+      <Tabs value={tab} onValueChange={setTab} className="min-w-0">
+        <TabsList>
+          <TabsTrigger value="products">Products</TabsTrigger>
+          <TabsTrigger value="vendors">Vendors</TabsTrigger>
+        </TabsList>
 
-      {loadError ? (
-        <LoadErrorInline message={loadError} onRetry={() => void reload()} />
-      ) : loading ? (
-        <TableBodySkeleton rows={8} cols={8} />
-      ) : filtered.length === 0 ? (
-        <EmptyState message="No products match your filters." />
-      ) : (
-        <div className="min-w-0 overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <TableHead>Name</TableHead>
-                <TableHead>Vendor</TableHead>
-                <TableHead className={tableNumericClass}>In stock</TableHead>
-                <TableHead className={tableNumericClass}>Total</TableHead>
-                <TableHead className={tableNumericClass}>Requests</TableHead>
-                <TableHead>Serial</TableHead>
-                <TableHead>Cloud key</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="w-10" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filtered.map((row) => {
-                const status = productLineStatusLabel(row)
-                const retired = status.label !== "Active"
-                return (
-                  <TableRow key={row.id}>
-                    <TableCell className="font-medium">{row.productName}</TableCell>
-                    <TableCell>{row.vendor}</TableCell>
-                    <TableCell className={tableNumericClass}>{formatCount(row.inStockCount)}</TableCell>
-                    <TableCell className={tableNumericClass}>{formatCount(row.totalItems)}</TableCell>
-                    <TableCell className={tableNumericClass}>{formatCount(row.requestLinesCount)}</TableCell>
-                    <TableCell>{row.requiresSerial ? "Yes" : "No"}</TableCell>
-                    <TableCell>{row.requiresCloudKey ? "Yes" : "No"}</TableCell>
-                    <TableCell>
-                      <span className="inline-flex flex-col gap-0.5">
-                        <StatusPill value={status.label} />
-                        {status.detail ? (
-                          <span className="text-[11px] text-muted-foreground">{status.detail}</span>
-                        ) : null}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" aria-label="Product actions">
-                            <MoreHorizontal className="size-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem
-                            disabled={Boolean(row.mergedIntoId)}
-                            onClick={() => openEdit(row)}
-                          >
-                            <Pencil className="size-4 mr-2" />
-                            Edit
-                          </DropdownMenuItem>
-                          {!retired ? (
-                            <DropdownMenuItem
-                              onClick={() => {
-                                setRetireMode("retire")
-                                setRetireRow(row)
-                                setRetireReason("")
-                              }}
-                            >
-                              <Archive className="size-4 mr-2" />
-                              Retire
-                            </DropdownMenuItem>
-                          ) : !row.mergedIntoId ? (
-                            <DropdownMenuItem
-                              onClick={() => {
-                                setRetireMode("unretire")
-                                setRetireRow(row)
-                                setRetireReason("")
-                              }}
-                            >
-                              <RotateCcw className="size-4 mr-2" />
-                              Unretire
-                            </DropdownMenuItem>
-                          ) : null}
-                          <DropdownMenuItem
-                            disabled={Boolean(row.mergedIntoId)}
-                            onClick={() => {
-                              setMergeSource(row)
-                              setMergeTargetId("")
-                              setMergeReason("")
-                              setMergeCrossVendor(false)
-                            }}
-                          >
-                            <GitMerge className="size-4 mr-2" />
-                            Merge into…
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            disabled={!canHardDeleteProductLine(row)}
-                            onClick={() => {
-                              setDeleteRow(row)
-                              setDeleteReason("")
-                            }}
-                          >
-                            <Trash2 className="size-4 mr-2" />
-                            Delete
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </TableCell>
+        <TabsContent value="products" className="mt-4 flex flex-col gap-4 min-w-0">
+          <ListToolbar
+            search={
+              <>
+                <ListToolbarSearch
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search name or vendor…"
+                  aria-label="Search products"
+                />
+                <Select value={vendor} onValueChange={setVendor}>
+                  <SelectTrigger className="h-9 w-full sm:w-[10rem] rounded-lg bg-background">
+                    <SelectValue placeholder="Vendor" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All vendors</SelectItem>
+                    {vendors.map((v) => (
+                      <SelectItem key={v} value={v}>
+                        {v}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={status} onValueChange={(v) => setStatus(v as typeof status)}>
+                  <SelectTrigger className="h-9 w-full sm:w-[9rem] rounded-lg bg-background">
+                    <SelectValue placeholder="Status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All statuses</SelectItem>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="retired">Retired</SelectItem>
+                  </SelectContent>
+                </Select>
+              </>
+            }
+            primary={
+              selectedRows.length > 0 ? (
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    setMoveVendor("")
+                    setMoveNewVendor("")
+                    setMoveVendorMode("pick")
+                    setMoveOpen(true)
+                  }}
+                >
+                  Move to vendor… ({selectedRows.length})
+                </Button>
+              ) : null
+            }
+            count={`${filtered.length} shown`}
+          />
+
+          {loadError ? (
+            <LoadErrorInline message={loadError} onRetry={() => void reload()} />
+          ) : loading ? (
+            <TableBodySkeleton rows={8} cols={9} />
+          ) : filtered.length === 0 ? (
+            <EmptyState message="No products match your filters." />
+          ) : (
+            <div className="min-w-0 overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead className="w-10">
+                      <Checkbox
+                        checked={
+                          filtered.length > 0 && filtered.every((r) => selectedIds.has(r.id))
+                        }
+                        onCheckedChange={(v) => toggleSelectAllVisible(v === true)}
+                        aria-label="Select all visible products"
+                      />
+                    </TableHead>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Vendor</TableHead>
+                    <TableHead className={tableNumericClass}>In stock</TableHead>
+                    <TableHead className={tableNumericClass}>Total</TableHead>
+                    <TableHead className={tableNumericClass}>Requests</TableHead>
+                    <TableHead>Serial</TableHead>
+                    <TableHead>Cloud key</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="w-10" />
                   </TableRow>
-                )
-              })}
-            </TableBody>
-          </Table>
-        </div>
-      )}
+                </TableHeader>
+                <TableBody>
+                  {filtered.map((row) => {
+                    const status = productLineStatusLabel(row)
+                    const retired = status.label !== "Active"
+                    return (
+                      <TableRow key={row.id}>
+                        <TableCell>
+                          <Checkbox
+                            checked={selectedIds.has(row.id)}
+                            onCheckedChange={(v) => toggleSelected(row.id, v === true)}
+                            aria-label={`Select ${row.productName}`}
+                          />
+                        </TableCell>
+                        <TableCell className="font-medium">{row.productName}</TableCell>
+                        <TableCell>{row.vendor}</TableCell>
+                        <TableCell className={tableNumericClass}>{formatCount(row.inStockCount)}</TableCell>
+                        <TableCell className={tableNumericClass}>{formatCount(row.totalItems)}</TableCell>
+                        <TableCell className={tableNumericClass}>{formatCount(row.requestLinesCount)}</TableCell>
+                        <TableCell>{row.requiresSerial ? "Yes" : "No"}</TableCell>
+                        <TableCell>{row.requiresCloudKey ? "Yes" : "No"}</TableCell>
+                        <TableCell>
+                          <span className="inline-flex flex-col gap-0.5">
+                            <StatusPill value={status.label} />
+                            {status.detail ? (
+                              <span className="text-[11px] text-muted-foreground">{status.detail}</span>
+                            ) : null}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="icon" aria-label="Product actions">
+                                <MoreHorizontal className="size-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem
+                                disabled={Boolean(row.mergedIntoId)}
+                                onClick={() => openEdit(row)}
+                              >
+                                <Pencil className="size-4 mr-2" />
+                                Edit
+                              </DropdownMenuItem>
+                              {!retired ? (
+                                <DropdownMenuItem
+                                  onClick={() => {
+                                    setRetireMode("retire")
+                                    setRetireRow(row)
+                                    setRetireReason("")
+                                  }}
+                                >
+                                  <Archive className="size-4 mr-2" />
+                                  Retire
+                                </DropdownMenuItem>
+                              ) : !row.mergedIntoId ? (
+                                <DropdownMenuItem
+                                  onClick={() => {
+                                    setRetireMode("unretire")
+                                    setRetireRow(row)
+                                    setRetireReason("")
+                                  }}
+                                >
+                                  <RotateCcw className="size-4 mr-2" />
+                                  Unretire
+                                </DropdownMenuItem>
+                              ) : null}
+                              <DropdownMenuItem
+                                disabled={Boolean(row.mergedIntoId)}
+                                onClick={() => {
+                                  setMergeSource(row)
+                                  setMergeTargetId("")
+                                  setMergeReason("")
+                                  setMergeCrossVendor(false)
+                                }}
+                              >
+                                <GitMerge className="size-4 mr-2" />
+                                Merge into…
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                disabled={!canHardDeleteProductLine(row)}
+                                onClick={() => {
+                                  setDeleteRow(row)
+                                  setDeleteReason("")
+                                }}
+                              >
+                                <Trash2 className="size-4 mr-2" />
+                                Delete
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </TabsContent>
+
+        <TabsContent value="vendors" className="mt-4 min-w-0">
+          {loadError ? (
+            <LoadErrorInline message={loadError} onRetry={() => void reload()} />
+          ) : loading ? (
+            <TableBodySkeleton rows={6} cols={4} />
+          ) : (
+            <AdminVendorsPanel rows={vendorRows} onChanged={reload} />
+          )}
+        </TabsContent>
+      </Tabs>
 
       <Dialog open={Boolean(editRow)} onOpenChange={(open) => !open && setEditRow(null)}>
         <DialogContent>
@@ -431,8 +620,39 @@ export function AdminProductsContent() {
               <Input id="pl-name" value={editName} onChange={(e) => setEditName(e.target.value)} />
             </div>
             <div className="grid gap-1.5">
-              <Label htmlFor="pl-vendor">Vendor</Label>
-              <Input id="pl-vendor" value={editVendor} onChange={(e) => setEditVendor(e.target.value)} />
+              <Label>Vendor</Label>
+              <Select
+                value={editVendorMode === "new" ? "__new__" : editVendor || undefined}
+                onValueChange={(v) => {
+                  if (v === "__new__") {
+                    setEditVendorMode("new")
+                    setEditNewVendor("")
+                  } else {
+                    setEditVendorMode("pick")
+                    setEditVendor(v)
+                  }
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Choose vendor" />
+                </SelectTrigger>
+                <SelectContent>
+                  {vendors.map((v) => (
+                    <SelectItem key={v} value={v}>
+                      {v}
+                    </SelectItem>
+                  ))}
+                  <SelectItem value="__new__">New vendor…</SelectItem>
+                </SelectContent>
+              </Select>
+              {editVendorMode === "new" ? (
+                <Input
+                  className="mt-2"
+                  placeholder="New vendor name"
+                  value={editNewVendor}
+                  onChange={(e) => setEditNewVendor(e.target.value)}
+                />
+              ) : null}
             </div>
             <div className="flex items-center justify-between gap-3">
               <Label htmlFor="pl-serial">Requires serial</Label>
@@ -447,8 +667,130 @@ export function AdminProductsContent() {
             <Button variant="outline" onClick={() => setEditRow(null)} disabled={editBusy}>
               Cancel
             </Button>
-            <Button onClick={() => void saveEdit()} disabled={editBusy || !editName.trim()}>
+            <Button
+              onClick={() => void saveEdit()}
+              disabled={
+                editBusy ||
+                !editName.trim() ||
+                (editVendorMode === "new" ? !editNewVendor.trim() : !editVendor.trim())
+              }
+            >
               {editBusy ? <Loader2 className="size-4 animate-spin" /> : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={moveOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setMoveOpen(false)
+            setMoveReason("")
+            setMovePreview(null)
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Move to vendor</DialogTitle>
+            <DialogDescription>
+              {moveProductsConfirmMessage({
+                productCount: selectedRows.length,
+                kitCount: selectedRows.reduce((sum, r) => sum + r.inStockCount, 0),
+                fromVendors: [...new Set(selectedRows.map((r) => r.vendor))],
+                toVendor:
+                  moveVendorMode === "new" ? moveNewVendor.trim() || "…" : moveVendor || "…",
+              })}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3 py-2">
+            <div className="grid gap-1.5">
+              <Label>Vendor</Label>
+              <Select
+                value={moveVendorMode === "new" ? "__new__" : moveVendor || undefined}
+                onValueChange={(v) => {
+                  if (v === "__new__") {
+                    setMoveVendorMode("new")
+                    setMoveNewVendor("")
+                  } else {
+                    setMoveVendorMode("pick")
+                    setMoveVendor(v)
+                  }
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Choose vendor" />
+                </SelectTrigger>
+                <SelectContent>
+                  {vendors.map((v) => (
+                    <SelectItem key={v} value={v}>
+                      {v}
+                    </SelectItem>
+                  ))}
+                  <SelectItem value="__new__">New vendor…</SelectItem>
+                </SelectContent>
+              </Select>
+              {moveVendorMode === "new" ? (
+                <Input
+                  className="mt-2"
+                  placeholder="New vendor name"
+                  value={moveNewVendor}
+                  onChange={(e) => setMoveNewVendor(e.target.value)}
+                />
+              ) : null}
+            </div>
+            {movePreviewBusy ? (
+              <p className="text-sm text-muted-foreground">Checking consequences…</p>
+            ) : null}
+            {movePreview?.warnings.map((w) => (
+              <p key={w.code} className="text-sm text-muted-foreground">
+                {w.message}
+              </p>
+            ))}
+            {movePreview?.sourceProtected.map((p) => (
+              <p key={`src-${p.name}`} className="text-sm">
+                Locked source {p.name}: {p.protectedReason}
+              </p>
+            ))}
+            {movePreview?.targetProtected ? (
+              <p className="text-sm">
+                Locked target {movePreview.targetProtected.name}:{" "}
+                {movePreview.targetProtected.protectedReason}
+              </p>
+            ) : null}
+            {movePreview?.blocks.map((b) => (
+              <p key={b.code} className="text-sm text-destructive">
+                {b.message}
+              </p>
+            ))}
+            {movePreview?.requiresReason ? (
+              <div className="grid gap-1.5">
+                <Label htmlFor="vn-move-reason">{VENDOR_MOVE_COPY.reason_hint}</Label>
+                <Textarea
+                  id="vn-move-reason"
+                  value={moveReason}
+                  onChange={(e) => setMoveReason(e.target.value)}
+                  rows={3}
+                />
+              </div>
+            ) : null}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setMoveOpen(false)} disabled={moveBusy}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => void confirmMove()}
+              disabled={
+                moveBusy ||
+                selectedRows.length === 0 ||
+                (moveVendorMode === "new" ? !moveNewVendor.trim() : !moveVendor.trim()) ||
+                Boolean(movePreview?.blocked) ||
+                (Boolean(movePreview?.requiresReason) && moveReason.trim().length < 15)
+              }
+            >
+              {moveBusy ? <Loader2 className="size-4 animate-spin" /> : "Move"}
             </Button>
           </DialogFooter>
         </DialogContent>

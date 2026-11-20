@@ -7,6 +7,12 @@ import {
   mapAdminProductLinesOverview,
   type ProductLineAdminRow,
 } from "@/lib/product-lines-admin"
+import {
+  mapAdminVendorsOverview,
+  mapVendorMovePreview,
+  type VendorAdminRow,
+  type VendorMovePreview,
+} from "@/lib/vendors-admin"
 
 export const SETTINGS_UPDATED_EVENT = "fram-stock-settings-updated"
 
@@ -399,6 +405,95 @@ export async function mergeProductLines(
   if (error) throw error
   announceSettingsUpdate()
   return data as { inventory_moved: number; request_lines_moved: number }
+}
+
+/** VN1: vendors list with counts. */
+export async function fetchAdminVendorsOverview(
+  provided?: SettingsClient,
+): Promise<VendorAdminRow[]> {
+  const { data, error } = await client(provided).rpc("admin_vendors_overview")
+  if (error) throw error
+  return mapAdminVendorsOverview(data)
+}
+
+export async function addVendor(name: string, provided?: SettingsClient): Promise<void> {
+  const { error } = await client(provided).rpc("add_vendor", { p_name: name })
+  if (error) throw error
+  announceSettingsUpdate()
+}
+
+export async function renameVendor(
+  oldName: string,
+  newName: string,
+  provided?: SettingsClient,
+): Promise<{ products_updated: number }> {
+  const { data, error } = await client(provided).rpc("rename_vendor", {
+    p_old: oldName,
+    p_new: newName,
+  })
+  if (error) throw error
+  announceSettingsUpdate()
+  return data as { products_updated: number }
+}
+
+export async function deleteVendor(name: string, provided?: SettingsClient): Promise<void> {
+  const { error } = await client(provided).rpc("delete_vendor", { p_name: name })
+  if (error) throw error
+  announceSettingsUpdate()
+}
+
+export async function mergeVendors(
+  source: string,
+  target: string,
+  reason?: string,
+  provided?: SettingsClient,
+): Promise<{ products_moved: number }> {
+  const { data, error } = await client(provided).rpc("merge_vendors", {
+    p_source: source,
+    p_target: target,
+    p_reason: reason ?? null,
+  })
+  if (error) throw error
+  announceSettingsUpdate()
+  return data as { products_moved: number }
+}
+
+export async function moveProductsToVendor(
+  input: { productIds: string[]; vendor: string; reason?: string },
+  provided?: SettingsClient,
+): Promise<{
+  products_moved: number
+  kits_affected: number
+  from_vendors: string
+  vendor: string
+}> {
+  const { data, error } = await client(provided).rpc("move_products_to_vendor", {
+    p_product_ids: input.productIds,
+    p_vendor: input.vendor,
+    p_reason: input.reason ?? null,
+  })
+  if (error) throw error
+  announceSettingsUpdate()
+  return data as {
+    products_moved: number
+    kits_affected: number
+    from_vendors: string
+    vendor: string
+  }
+}
+
+/** VN1b: preview move/merge consequences before confirm. */
+export async function previewVendorProductMove(
+  input: { targetVendor: string; productIds?: string[]; sourceVendor?: string },
+  provided?: SettingsClient,
+): Promise<VendorMovePreview> {
+  const { data, error } = await client(provided).rpc("preview_vendor_product_move", {
+    p_target_vendor: input.targetVendor,
+    p_product_ids: input.productIds ?? null,
+    p_source_vendor: input.sourceVendor ?? null,
+  })
+  if (error) throw error
+  return mapVendorMovePreview(data)
 }
 
 export async function fetchLowStockProducts(

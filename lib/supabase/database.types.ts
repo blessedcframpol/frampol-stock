@@ -241,6 +241,30 @@ export interface Database {
         }
         Relationships: []
       }
+      vendors: {
+        Row: {
+          name: string
+          is_protected: boolean
+          protected_reason: string | null
+          created_at: string
+          created_by: string | null
+        }
+        Insert: {
+          name: string
+          is_protected?: boolean
+          protected_reason?: string | null
+          created_at?: string
+          created_by?: string | null
+        }
+        Update: {
+          name?: string
+          is_protected?: boolean
+          protected_reason?: string | null
+          created_at?: string
+          created_by?: string | null
+        }
+        Relationships: []
+      }
       product_lines: {
         Row: {
           id: string
@@ -1797,6 +1821,46 @@ export interface Database {
           p_reason: string
           p_allow_cross_vendor?: boolean
         }
+        Returns: Json
+      }
+      admin_vendors_overview: {
+        Args: Record<string, never>
+        Returns: Json
+      }
+      add_vendor: {
+        Args: { p_name: string }
+        Returns: Json
+      }
+      rename_vendor: {
+        Args: { p_old: string; p_new: string }
+        Returns: Json
+      }
+      delete_vendor: {
+        Args: { p_name: string }
+        Returns: Json
+      }
+      merge_vendors: {
+        Args: { p_source: string; p_target: string; p_reason?: string | null }
+        Returns: Json
+      }
+      move_products_to_vendor: {
+        Args: {
+          p_product_ids: string[]
+          p_vendor: string
+          p_reason?: string | null
+        }
+        Returns: Json
+      }
+      preview_vendor_product_move: {
+        Args: {
+          p_target_vendor: string
+          p_product_ids?: string[] | null
+          p_source_vendor?: string | null
+        }
+        Returns: Json
+      }
+      vendor_product_move_assessment: {
+        Args: { p_product_ids: string[]; p_target_vendor: string }
         Returns: Json
       }
       profile_last_sign_ins: {
