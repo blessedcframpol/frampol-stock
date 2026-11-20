@@ -66,6 +66,7 @@ import { parseSaleDateOverride, type InboundCreateDefaults } from "@/lib/supabas
 import { DEFAULT_ORG_TIMEZONE, todayBusinessDate } from "@/lib/business-date.mjs"
 import { fetchAppSettings } from "@/lib/settings"
 import { fetchProductCatalogue, type ProductCatalogueRow } from "@/lib/product-catalogue"
+import { filterProductCatalogueForPicker } from "@/lib/product-lines-admin"
 import { FilterChip } from "@/components/fs/filter-chip"
 import { productRequiresCloudKey, splitDelimitedValues, cloudKeysMapForSerials } from "@/lib/fortigate"
 import type { NotInvoicedKind } from "@/lib/invoices"
@@ -255,7 +256,7 @@ export function MovementForm({
   }, [])
 
   const productOptions = useMemo(() => {
-    return catalogue
+    return filterProductCatalogueForPicker(catalogue)
       .filter((row) => row.is_active)
       .map((row) => {
         const name = row.product_name.trim()

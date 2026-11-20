@@ -131,11 +131,11 @@ describe("inventory product sorting and filters", () => {
 })
 
 describe("archive and delete guards", () => {
-  it("blocks archive while kits are In Stock, POC, or Rental", () => {
+  it("blocks retire while kits are In Stock, POC, or Rental", () => {
     expect(archiveBlockMessage({ inStock: 0, poc: 0, rental: 0 })).toBeNull()
-    expect(archiveBlockMessage({ inStock: 2, poc: 0, rental: 0 })).toMatch(/2 kit\(s\) still In Stock/)
-    expect(archiveBlockMessage({ inStock: 0, poc: 1, rental: 0 })).toMatch(/1 kit\(s\) still on POC/)
-    expect(archiveBlockMessage({ inStock: 1, poc: 1, rental: 2 })).toMatch(/still on Rental/)
+    expect(archiveBlockMessage({ inStock: 2, poc: 0, rental: 0 })).toMatch(/Cannot retire.*2 kit\(s\) still In Stock/)
+    expect(archiveBlockMessage({ inStock: 0, poc: 1, rental: 0 })).toMatch(/Cannot retire.*1 kit\(s\) still on POC/)
+    expect(archiveBlockMessage({ inStock: 1, poc: 1, rental: 2 })).toMatch(/Cannot retire.*still on Rental/)
   })
 
   it("refuses delete when transactions still name the product", () => {

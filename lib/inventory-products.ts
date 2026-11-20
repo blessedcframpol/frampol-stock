@@ -52,7 +52,7 @@ export function productRowActions(role: AppRole | null | undefined): {
   move: boolean
   stockTake: boolean
   exportProduct: boolean
-  /** Archive / restore / delete — admin only. */
+  /** Retire / unretire / delete — admin only (same flag; formerly "archive"). */
   archive: boolean
 } {
   return {
@@ -81,7 +81,7 @@ export function canDeleteProduct(refs: {
   )
 }
 
-/** Client-side twin of archive_product's live-kit guard (In Stock / POC / Rental). */
+/** Client-side twin of retire_product_line's live-kit guard (In Stock / POC / Rental). */
 export function archiveBlockMessage(counts: {
   inStock: number
   poc: number
@@ -92,7 +92,7 @@ export function archiveBlockMessage(counts: {
   if (counts.poc > 0) parts.push(`${counts.poc} kit(s) still on POC`)
   if (counts.rental > 0) parts.push(`${counts.rental} kit(s) still on Rental`)
   if (parts.length === 0) return null
-  return `Cannot archive — ${parts.join(", ")}`
+  return `Cannot retire — ${parts.join(", ")}`
 }
 
 /**

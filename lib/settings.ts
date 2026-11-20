@@ -3,6 +3,10 @@ import { getSupabaseClient } from "@/lib/supabase/client"
 import type { Database } from "@/lib/supabase/database.types"
 import { getLowStockAlerts as mapLowStockAlerts } from "@/lib/low-stock-helper.mjs"
 import { fetchAllPages } from "@/lib/supabase/postgrest-page"
+import {
+  mapAdminProductLinesOverview,
+  type ProductLineAdminRow,
+} from "@/lib/product-lines-admin"
 
 export const SETTINGS_UPDATED_EVENT = "fram-stock-settings-updated"
 
@@ -307,6 +311,94 @@ export async function deleteProduct(
   })
   if (error) throw error
   announceSettingsUpdate()
+}
+
+/** PL1: admin product list with counts. */
+export async function fetchAdminProductLinesOverview(
+  provided?: SettingsClient,
+): Promise<ProductLineAdminRow[]> {
+  const { data, error } = await client(provided).rpc("admin_product_lines_overview")
+  if (error) throw error
+  return mapAdminProductLinesOverview(data)
+}
+
+export type AdminUpdateProductLineResult = {
+  id: string
+  product_name: string
+  vendor: string
+  requires_serial: boolean
+  requires_cloud_key: boolean
+  in_stock_missing_serial?: number
+  warn_missing_serial?: boolean
+}
+
+/** PL1: rename / vendor / requires_* flags. */
+export async function adminUpdateProductLine(
+  input: {
+    productId: string
+    productName: string
+    vendor: string
+    requiresSerial: boolean
+    requiresCloudKey: boolean
+  },
+  provided?: SettingsClient,
+): Promise<AdminUpdateProductLineResult> {
+  const { data, error } = await client(provided).rpc("admin_update_product_line", {
+    p_product_id: input.productId,
+    p_product_name: input.productName,
+    p_vendor: input.vendor,
+    p_requires_serial: input.requiresSerial,
+    p_requires_cloud_key: input.requiresCloudKey,
+  })
+  if (error) throw error
+  announceSettingsUpdate()
+  return data as AdminUpdateProductLineResult
+}
+
+export async function retireProductLine(
+  productId: string,
+  reason: string,
+  provided?: SettingsClient,
+): Promise<void> {
+  const { error } = await client(provided).rpc("retire_product_line", {
+    p_product_id: productId,
+    p_reason: reason,
+  })
+  if (error) throw error
+  announceSettingsUpdate()
+}
+
+export async function unretireProductLine(
+  productId: string,
+  reason: string,
+  provided?: SettingsClient,
+): Promise<void> {
+  const { error } = await client(provided).rpc("unretire_product_line", {
+    p_product_id: productId,
+    p_reason: reason,
+  })
+  if (error) throw error
+  announceSettingsUpdate()
+}
+
+export async function mergeProductLines(
+  input: {
+    sourceId: string
+    targetId: string
+    reason: string
+    allowCrossVendor?: boolean
+  },
+  provided?: SettingsClient,
+): Promise<{ inventory_moved: number; request_lines_moved: number }> {
+  const { data, error } = await client(provided).rpc("merge_product_lines", {
+    p_source_id: input.sourceId,
+    p_target_id: input.targetId,
+    p_reason: input.reason,
+    p_allow_cross_vendor: input.allowCrossVendor === true,
+  })
+  if (error) throw error
+  announceSettingsUpdate()
+  return data as { inventory_moved: number; request_lines_moved: number }
 }
 
 export async function fetchLowStockProducts(

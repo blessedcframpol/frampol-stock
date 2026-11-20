@@ -352,13 +352,13 @@ export function InventoryProductsContent() {
           return
         }
         await archiveProduct(row.productId, reason)
-        toast.success("Product archived")
+        toast.success("Product retired")
       } else if (kind === "restore") {
         await restoreProduct(row.productId, reason)
-        toast.success("Product restored")
+        toast.success("Product unretired")
       } else {
         if (!deleteAllowed) {
-          toast.error("This product has history — archive instead")
+          toast.error("This product has history — retire instead")
           return
         }
         await deleteProduct(row.productId, reason)
@@ -377,7 +377,7 @@ export function InventoryProductsContent() {
   function exportRows(list: InventoryProductRow[], filenameParts: string[]) {
     const csv: string[][] = [["Product", "Vendor", "In stock", "POC", "Rental", "Reorder at", "Status"]]
     for (const row of list) {
-      const status = !row.isActive ? "Archived" : row.isLow ? "Low" : ""
+      const status = !row.isActive ? "Retired" : row.isLow ? "Low" : ""
       csv.push([
         row.productName,
         row.vendor,
@@ -464,7 +464,7 @@ export function InventoryProductsContent() {
         }
         secondary={
           <Button type="button" variant="ghost" onClick={() => setShowInactive((current) => !current)} aria-pressed={showInactive}>
-            {showInactive ? "Hide archived" : "Show archived"}
+            {showInactive ? "Hide retired" : "Show retired"}
           </Button>
         }
       />
@@ -585,7 +585,7 @@ export function InventoryProductsContent() {
                   </TableCell>
                   <TableCell>
                     <span className="flex min-h-5 items-center gap-1">
-                      {!row.isActive ? <StatusPill value="Archived" /> : null}
+                      {!row.isActive ? <StatusPill value="Retired" /> : null}
                       {row.isActive && lowStockLoading && !countsReady ? (
                         <Skeleton className="h-5 w-12 rounded-full" aria-hidden />
                       ) : null}
@@ -632,12 +632,12 @@ export function InventoryProductsContent() {
                                 void openProductAction(row, "archive")
                               }}
                             >
-                              Archive
+                              Retire
                             </DropdownMenuItem>
                           ) : null}
                           {actions.archive && !row.isActive ? (
                             <DropdownMenuItem onSelect={() => void openProductAction(row, "restore")}>
-                              Restore
+                              Unretire
                             </DropdownMenuItem>
                           ) : null}
                           {actions.archive ? (
@@ -670,14 +670,14 @@ export function InventoryProductsContent() {
           <DialogHeader>
             <DialogTitle>
               {productAction?.kind === "archive"
-                ? "Archive product"
+                ? "Retire product"
                 : productAction?.kind === "restore"
-                  ? "Restore product"
+                  ? "Unretire product"
                   : "Delete product"}
             </DialogTitle>
             <DialogDescription>
               {productAction?.kind === "delete" && !deleteAllowed
-                ? `${productAction.row.productName} has history (kits or request lines). Archive it instead of deleting.`
+                ? `${productAction.row.productName} has history (kits or request lines). Retire it instead of deleting.`
                 : productAction
                   ? `${productAction.row.productName} · ${productAction.row.vendor}. A reason is required and audited.`
                   : null}
@@ -712,7 +712,7 @@ export function InventoryProductsContent() {
                   }),
                 )}
               >
-                Archive instead
+                Retire instead
               </Button>
             </DialogFooter>
           ) : (
@@ -735,9 +735,9 @@ export function InventoryProductsContent() {
                   {actionBusy
                     ? "Saving…"
                     : productAction?.kind === "archive"
-                      ? "Archive"
+                      ? "Retire"
                       : productAction?.kind === "restore"
-                        ? "Restore"
+                        ? "Unretire"
                         : "Delete"}
                 </Button>
               </DialogFooter>

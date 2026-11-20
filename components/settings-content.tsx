@@ -61,7 +61,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
-import { Mail, Plus, Trash2, Info, UsersRound, ArrowRight } from "lucide-react"
+import { Mail, Plus, Trash2, Info, UsersRound, ArrowRight, Boxes } from "lucide-react"
 import { PageHeader } from "@/components/page-nav"
 import { toast } from "sonner"
 import Link from "next/link"
@@ -1332,22 +1332,41 @@ export function SettingsContent() {
               title="Users"
               description="Assign roles and manage access from the dedicated User management page."
             >
-              <div className="flex flex-col gap-4 rounded-xl border border-border/60 bg-muted/20 p-5 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex gap-3 min-w-0">
-                  <UsersRound className="mt-0.5 size-5 shrink-0 text-primary" />
-                  <div className="space-y-1 text-sm min-w-0">
-                    <p className="font-medium text-foreground">User management</p>
-                    <p className="text-muted-foreground">
-                      People appear after their first Microsoft sign-in. Search, filter, and edit their access.
-                    </p>
+              <div className="flex flex-col gap-4">
+                <div className="flex flex-col gap-4 rounded-xl border border-border/60 bg-muted/20 p-5 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex gap-3 min-w-0">
+                    <UsersRound className="mt-0.5 size-5 shrink-0 text-primary" />
+                    <div className="space-y-1 text-sm min-w-0">
+                      <p className="font-medium text-foreground">User management</p>
+                      <p className="text-muted-foreground">
+                        People appear after their first Microsoft sign-in. Search, filter, and edit their access.
+                      </p>
+                    </div>
                   </div>
+                  <Button asChild className="rounded-lg shrink-0 w-fit">
+                    <Link href="/users">
+                      Open
+                      <ArrowRight className="size-4" />
+                    </Link>
+                  </Button>
                 </div>
-                <Button asChild className="rounded-lg shrink-0 w-fit">
-                  <Link href="/users">
-                    Open
-                    <ArrowRight className="size-4" />
-                  </Link>
-                </Button>
+                <div className="flex flex-col gap-4 rounded-xl border border-border/60 bg-muted/20 p-5 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex gap-3 min-w-0">
+                    <Boxes className="mt-0.5 size-5 shrink-0 text-primary" />
+                    <div className="space-y-1 text-sm min-w-0">
+                      <p className="font-medium text-foreground">Products</p>
+                      <p className="text-muted-foreground">
+                        Rename catalogue lines, set serial/cloud-key flags, retire typos, or merge duplicates.
+                      </p>
+                    </div>
+                  </div>
+                  <Button asChild className="rounded-lg shrink-0 w-fit">
+                    <Link href="/admin/products">
+                      Open
+                      <ArrowRight className="size-4" />
+                    </Link>
+                  </Button>
+                </div>
               </div>
             </SettingsSection>
           ) : (

@@ -86,6 +86,7 @@ const SHARED_ALLOWED_PREFIXES = [
 
 const ADMIN_EXTRA = [
   "/users",
+  "/admin",
   "/logs",
   "/problems",
   "/inventory",

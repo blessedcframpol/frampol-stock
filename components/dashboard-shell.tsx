@@ -68,6 +68,7 @@ import {
   canEditInventory,
   canRecordStockMovement,
   canViewUsers,
+  canManageUsers,
   canViewAppLogs,
   canManageProblemReports,
   canReportProblem,
@@ -178,6 +179,7 @@ type BottomNavEntry = {
 
 const bottomNavItems: BottomNavEntry[] = [
   { href: "/users", label: "User management", icon: UsersRound, adminOnly: true },
+  { href: "/admin/products", label: "Products", icon: Boxes, adminOnly: true },
   { href: "/problems", label: "Reported problems", icon: MessageSquareWarning, adminOnly: true },
   { href: "/logs", label: "Error logs", icon: ScrollText, adminOnly: true },
   { href: "/settings", label: "Settings", icon: Settings },
@@ -189,6 +191,7 @@ function filterBottomNavForRole(role: string | null | undefined): BottomNavEntry
     if (item.href === "/settings") return canAccessSettings(r)
     if (!item.adminOnly) return true
     if (item.href === "/users") return canViewUsers(r)
+    if (item.href === "/admin/products") return canManageUsers(r)
     if (item.href === "/problems") return canManageProblemReports(r)
     return canViewAppLogs(r)
   })

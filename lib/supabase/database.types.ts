@@ -251,6 +251,9 @@ export interface Database {
           requires_cloud_key: boolean
           reorder_level: number | null
           is_active: boolean
+          retired_at: string | null
+          retired_by: string | null
+          merged_into_id: string | null
         }
         Insert: {
           id: string
@@ -261,6 +264,9 @@ export interface Database {
           requires_cloud_key?: boolean
           reorder_level?: number | null
           is_active?: boolean
+          retired_at?: string | null
+          retired_by?: string | null
+          merged_into_id?: string | null
         }
         Update: {
           id?: string
@@ -271,6 +277,9 @@ export interface Database {
           requires_cloud_key?: boolean
           reorder_level?: number | null
           is_active?: boolean
+          retired_at?: string | null
+          retired_by?: string | null
+          merged_into_id?: string | null
         }
         Relationships: []
       }
@@ -1750,6 +1759,43 @@ export interface Database {
         Args: {
           p_product_id: string
           p_reason: string
+        }
+        Returns: Json
+      }
+      admin_product_lines_overview: {
+        Args: Record<string, never>
+        Returns: Json
+      }
+      admin_update_product_line: {
+        Args: {
+          p_product_id: string
+          p_product_name: string
+          p_vendor: string
+          p_requires_serial: boolean
+          p_requires_cloud_key: boolean
+        }
+        Returns: Json
+      }
+      retire_product_line: {
+        Args: {
+          p_product_id: string
+          p_reason: string
+        }
+        Returns: Json
+      }
+      unretire_product_line: {
+        Args: {
+          p_product_id: string
+          p_reason: string
+        }
+        Returns: Json
+      }
+      merge_product_lines: {
+        Args: {
+          p_source_id: string
+          p_target_id: string
+          p_reason: string
+          p_allow_cross_vendor?: boolean
         }
         Returns: Json
       }

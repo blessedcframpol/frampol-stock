@@ -110,7 +110,11 @@ export async function runChecks(ctx) {
       [archiveId],
     )
     const a = audit.rows[0]
-    if (a?.actor === adminId && a?.source === "archive_product" && /MV1 harness archive/.test(a?.reason ?? "")) {
+    if (
+      a?.actor === adminId &&
+      a?.source === "retire_product_line" &&
+      /MV1 harness archive/.test(a?.reason ?? "")
+    ) {
       pass("archive_audited", JSON.stringify({ actor: a.actor, source: a.source }))
     } else {
       fail("archive_audited", JSON.stringify(a))
