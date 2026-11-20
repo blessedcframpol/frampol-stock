@@ -226,7 +226,7 @@ export async function fetchActiveStaffProfiles(provided?: SettingsClient): Promi
     id: row.id,
     email: row.email,
     displayName: row.display_name,
-    role: row.role,
+    role: row.role ?? "",
   }))
 }
 

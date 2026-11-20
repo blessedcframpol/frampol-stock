@@ -335,20 +335,21 @@ export function InventoryStoreProvider({ children }: { children: React.ReactNode
         lastFetchedAt.current = Date.now()
         // Watermark: newest live_stock_events row, else "now" so catch-up is incremental.
         if (supabase) {
-          void supabase
-            .from("live_stock_events")
-            .select("created_at")
-            .order("created_at", { ascending: false })
-            .limit(1)
-            .maybeSingle()
-            .then(({ data }) => {
-              seedLiveStockEventWatermark(
-                data && typeof data.created_at === "string" ? data.created_at : null,
-              )
-            })
-            .catch(() => {
-              seedLiveStockEventWatermark(null)
-            })
+          void Promise.resolve(
+            supabase
+              .from("live_stock_events")
+              .select("created_at")
+              .order("created_at", { ascending: false })
+              .limit(1)
+              .maybeSingle()
+              .then(({ data }) => {
+                seedLiveStockEventWatermark(
+                  data && typeof data.created_at === "string" ? data.created_at : null,
+                )
+              }),
+          ).catch(() => {
+            seedLiveStockEventWatermark(null)
+          })
         } else {
           seedLiveStockEventWatermark(null)
         }

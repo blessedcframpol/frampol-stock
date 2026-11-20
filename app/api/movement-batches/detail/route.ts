@@ -98,7 +98,7 @@ export async function GET(request: Request) {
     })
 
     const requestByBatch = await loadBatchRequestContext(supabase, [batchId])
-    const request = requestByBatch.get(batchId) ?? null
+    const batchRequest = requestByBatch.get(batchId) ?? null
 
     const { data: timelineRaw, error: timelineError } = await supabase.rpc("batch_movement_history", {
       p_batch_id: batchId,
@@ -116,7 +116,7 @@ export async function GET(request: Request) {
       ...transactions.map((t) => t.createdBy),
       invoiceState?.enteredBy,
       invoiceState?.approvedBy,
-      request ? null : null,
+      batchRequest ? null : null,
     ]
     const labels = await loadProfileLabels(supabase, actorIds)
     for (const entry of timeline) {
@@ -157,7 +157,7 @@ export async function GET(request: Request) {
       invoiceBatchId: invoiceKey,
       deliveryNoteUrl: transactions.find((t) => t.deliveryNoteUrl)?.deliveryNoteUrl,
       notesSummary: [...new Set(transactions.map((t) => t.notes?.trim()).filter(Boolean))].join("\n\n---\n\n") || undefined,
-      request,
+      request: batchRequest,
       recordedBy,
       recordedById: recordedByIds[0] ?? null,
       collectedByName,

@@ -81,7 +81,7 @@ import { InvoiceRecordPanel } from "@/components/invoice-record-panel"
 import { displayedInvoice, invoiceBatchKey } from "@/lib/invoices"
 import { formatCount } from "@/lib/format-display"
 import { fetchClientTransactions, type ResolvedClientTransaction } from "@/lib/clients-orders"
-import type { ClientSite, Transaction } from "@/lib/data"
+import type { ClientSite } from "@/lib/data"
 import { StatusPill } from "@/components/fs/status-pill"
 import { RequestStatusPill } from "@/components/request-status-pill"
 import { useRequestDisplayStatuses } from "@/hooks/use-request-display-statuses"
@@ -100,12 +100,12 @@ type ConsignmentRow = {
   date: string
   invoiceNumber?: string
   count: number
-  transactions: Transaction[]
+  transactions: ResolvedClientTransaction[]
 }
 
 type SingleRow = {
   kind: "single"
-  transaction: Transaction
+  transaction: ResolvedClientTransaction
 }
 
 type ListRow = ConsignmentRow | SingleRow
@@ -136,7 +136,7 @@ export default function ClientDetailPage() {
   const [detailOpen, setDetailOpen] = useState(false)
   const [tab, setTab] = useState<string | null>(null)
   const [selectedConsignment, setSelectedConsignment] = useState<ConsignmentRow | null>(null)
-  const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null)
+  const [selectedTransaction, setSelectedTransaction] = useState<ResolvedClientTransaction | null>(null)
   const [editOpen, setEditOpen] = useState(false)
   const [editName, setEditName] = useState("")
   const [editCompany, setEditCompany] = useState("")
@@ -293,7 +293,7 @@ export default function ClientDetailPage() {
     setDetailOpen(true)
   }
 
-  const openTransaction = (txn: Transaction) => {
+  const openTransaction = (txn: ResolvedClientTransaction) => {
     setSelectedTransaction(txn)
     setSelectedConsignment(null)
     setDetailOpen(true)

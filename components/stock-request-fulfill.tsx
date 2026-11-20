@@ -263,7 +263,7 @@ export function StockRequestFulfill({
       } catch (e) {
         if (isCancelled()) return
         notifyClassifiedFailure(e, "Could not load this request.", {
-          onRetry: () => void refresh({ isCancelled: () => false }),
+          onRetry: () => void refresh(() => false),
         })
         setLoadError(loadErrorFromCaught(e, "Could not load this request."))
         setData(EMPTY)

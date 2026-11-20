@@ -106,11 +106,11 @@ function normalizeInventoryVendor(value: string | undefined | null): string {
   return t || "General"
 }
 
-function productVendorKey(name: string, vendor: string): string {
+function productVendorKey(name: string, vendor: string | undefined | null): string {
   return `${name.trim()}\u0000${normalizeInventoryVendor(vendor)}`
 }
 
-function productVendorLabel(name: string, vendor: string): string {
+function productVendorLabel(name: string, vendor: string | undefined | null): string {
   return `${name.trim()} · ${normalizeInventoryVendor(vendor)}`
 }
 

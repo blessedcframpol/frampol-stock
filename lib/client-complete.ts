@@ -98,7 +98,7 @@ export function normalizeClientPhone(input: string): string | null {
     return `+${digits}`
   }
 
-  let digits = trimmed.replace(/\D/g, "")
+  const digits = trimmed.replace(/\D/g, "")
   if (!digits) return null
   if (digits.startsWith("263")) {
     const national = digits.slice(3)

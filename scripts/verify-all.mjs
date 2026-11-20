@@ -22,8 +22,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(__dirname, "..")
 const productionMode = argvHasProductionFlag()
 
-/** Ordered suite. Schema rules → probe → harness scripts. */
+/** Ordered suite. Typecheck → schema rules → probe → harness scripts. */
 const SUITE = [
+  { id: "typecheck", file: "scripts/verify-typecheck.mjs" },
   { id: "schema-rules", file: "scripts/verify-schema-rules.mjs" },
   { id: "probe-http", file: "scripts/probe-production-http.mjs" },
   { id: "065", file: "scripts/verify-065-client-transaction-resolution.mjs" },

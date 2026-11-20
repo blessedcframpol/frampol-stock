@@ -102,7 +102,7 @@ function InvoiceDetailsBlock({
         p_batch_id: batchId,
         p_choice: "number",
         p_invoice_number: number.trim(),
-        p_reason: null,
+        p_reason: "",
       })
       if (error) throw new Error(error.message)
       toast.success("Invoice number added")
@@ -403,7 +403,7 @@ export function MovementBatchDrawer({
         p_batch_id: merged.invoiceBatchId,
         p_choice: "number",
         p_invoice_number: footerInvoiceNumber.trim(),
-        p_reason: null,
+        p_reason: "",
       })
       if (error) throw new Error(error.message)
       toast.success("Invoice number added")

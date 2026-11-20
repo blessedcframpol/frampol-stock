@@ -234,25 +234,26 @@ export function SettingsContent() {
   useEffect(() => {
     if (!user?.id) return
     let cancelled = false
-    void getSupabaseClient()
-      .from("profiles")
-      .select(
-        "alert_sound_enabled, alert_sound_id, alert_sound_volume, desktop_push_enabled, desktop_push_new_requests, desktop_push_reminders, desktop_push_my_request_updated",
-      )
-      .eq("id", user.id)
-      .maybeSingle()
-      .then(({ data }) => {
-        if (cancelled || !data) return
-        setAlertEnabled(data.alert_sound_enabled === true)
-        const normalized = normalizeAlertSoundId(data.alert_sound_id)
-        if (normalized) setAlertSoundId(normalized)
-        setAlertVolume(Number(data.alert_sound_volume ?? 0.55))
-        setPushEnabled(data.desktop_push_enabled === true)
-        setPushNewRequests(data.desktop_push_new_requests !== false)
-        setPushReminders(data.desktop_push_reminders !== false)
-        setPushMyUpdated(data.desktop_push_my_request_updated !== false)
-      })
-      .catch(() => undefined)
+    void Promise.resolve(
+      getSupabaseClient()
+        .from("profiles")
+        .select(
+          "alert_sound_enabled, alert_sound_id, alert_sound_volume, desktop_push_enabled, desktop_push_new_requests, desktop_push_reminders, desktop_push_my_request_updated",
+        )
+        .eq("id", user.id)
+        .maybeSingle()
+        .then(({ data }) => {
+          if (cancelled || !data) return
+          setAlertEnabled(data.alert_sound_enabled === true)
+          const normalized = normalizeAlertSoundId(data.alert_sound_id)
+          if (normalized) setAlertSoundId(normalized)
+          setAlertVolume(Number(data.alert_sound_volume ?? 0.55))
+          setPushEnabled(data.desktop_push_enabled === true)
+          setPushNewRequests(data.desktop_push_new_requests !== false)
+          setPushReminders(data.desktop_push_reminders !== false)
+          setPushMyUpdated(data.desktop_push_my_request_updated !== false)
+        }),
+    ).catch(() => undefined)
     void hasActivePushSubscription().then((ok) => {
       if (!cancelled) setPushSubscribed(ok)
     })
